@@ -15,6 +15,8 @@ Los dos programas de Jmg Software en una sola instalación, gratis y de código 
 
 ▶️ **[Ver el tutorial en YouTube](https://youtu.be/Je15lQCIsfw)** (3 minutos, con subtítulos en 9 idiomas)
 
+También doblado en: [Español](https://youtu.be/Je15lQCIsfw) · [English](https://youtu.be/RiSDJqCJTtI) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/ygDAXCbkrww) · [हिन्दी](https://youtu.be/kc6WEocuOkw) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
+
 ## Descarga
 
 👉 **[Última versión](https://github.com/jmgsoftwaremultimedia/JmgSuiteMultimedia/releases/latest)**
@@ -86,7 +88,7 @@ Jmg Software's two programs in a single installation, free and open source, to i
 - **Jmg VideoEncoder 1.4**: compresses and converts videos (H.264, H.265, H.266 / VVC, AV1, VP9, ProRes and DNxHR, on the processor or an NVIDIA / AMD graphics card), with their audio, subtitles, trimming by parts, picture adjustments and synchronization. MKV, MP4, MOV, AVI and WebM.
 - **Jmg AudioProcesador 5.1 (1.5)**: processes, converts and adjusts multichannel audio tracks (5.1 / 7.1): volume and normalization, presence and EQ, dynamics and bass, stereo-to-5.1 upmix and «Combine», which joins channels from several tracks to build dubs with their delay calculated by itself.
 
-▶️ **[Watch the tutorial on YouTube](https://youtu.be/Je15lQCIsfw)** (3 minutes, Spanish voice with subtitles in 9 languages)
+▶️ **[Watch the tutorial on YouTube](https://youtu.be/RiSDJqCJTtI)** (3 minutes, in English) · Other languages: [Español](https://youtu.be/Je15lQCIsfw) · [English](https://youtu.be/RiSDJqCJTtI) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/ygDAXCbkrww) · [हिन्दी](https://youtu.be/kc6WEocuOkw) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
 
 ### Download
 
