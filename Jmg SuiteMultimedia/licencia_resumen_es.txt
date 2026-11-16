@@ -1,0 +1,26 @@
+JMG SUITEMULTIMEDIA: LICENCIA (resumen en español)
+
+Jmg SuiteMultimedia (Jmg AudioProcesador y Jmg VideoEncoder) es
+software libre y gratuito, bajo la licencia GNU GPL versión 3.
+En pocas palabras:
+
+  - Puedes usarlo para lo que quieras, sin pagar nada.
+  - Puedes copiarlo y compartirlo.
+  - Puedes estudiar cómo funciona y modificarlo.
+  - Si lo redistribuyes, modificado o no, tiene que seguir siendo
+    libre, con esta misma licencia y con su código fuente.
+  - Se ofrece tal cual, sin ninguna garantía.
+
+El nombre y el logo «Jmg Software» son de su autor: las versiones
+modificadas deben usar otro nombre.
+
+También incluye FFmpeg y Aften, cada uno con su propia licencia
+libre (en la carpeta «bin»).
+
+Este resumen solo sirve para entenderla: el único texto con valor
+legal es el oficial en inglés, que va a continuación. Hay
+traducciones no oficiales en:
+https://www.gnu.org/licenses/translations.html
+
+______________________________________________________________________
+

@@ -1,0 +1,12 @@
+# Al repositorio solo sube el código y lo necesario para construir la suite (lo copia Jmg SuiteMultimedia\preparar_repo.py).
+# FFmpeg pesa más de 100 MB por archivo: va dentro de los paquetes, no en el código
+**/bin/ffmpeg.exe
+**/bin/ffprobe.exe
+**/bin/ffplay.exe
+# paquetes y restos de construir
+salida/
+build/
+dist/
+__pycache__/
+*.spec
+config.json

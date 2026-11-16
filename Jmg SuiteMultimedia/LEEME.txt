@@ -1,0 +1,66 @@
+JMG SUITEMULTIMEDIA · versión 1.0
+=================================
+
+Los dos programas de Jmg Software en una sola instalación, con un solo FFmpeg:
+
+· Jmg VideoEncoder: comprime y convierte vídeos (H.264, H.265, H.266, AV1, VP9,
+  ProRes y DNxHR, por procesador o tarjeta gráfica), con su audio, subtítulos,
+  recorte por tramos, imagen y sincronización. MKV, MP4, MOV, AVI y WebM.
+· Jmg AudioProcesador 5.1: procesa, convierte y ajusta pistas de audio multicanal
+  (5.1 / 7.1): volumen y normalización, presencia y ecualización, upmix de
+  estéreo a 5.1 y «Combinar», que une canales de varias pistas para montar
+  doblajes con su delay calculado solo.
+
+Al instalar puedes elegir los dos (recomendado) o solo uno. Se instalan en
+«Archivos de programa\Jmg Software», con FFmpeg una sola vez en la carpeta «bin».
+En el escritorio queda un solo icono, «Jmg SuiteMultimedia»: al abrirlo eliges el programa
+(con una breve descripción de cada uno). En la versión portable, abre
+«Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe». Mientras un programa trabaja (procesar,
+combinar, ripear...), el PC no entra en suspensión.
+Los botones «🎵 A AudioProcesador» y «🎬 A VideoEncoder» pasan los archivos de un
+programa al otro. Si tenías alguno instalado por separado, el instalador ofrece
+quitarlo; tus ajustes se conservan. Cada programa tiene su LEEME en su carpeta.
+Con Jmg VideoEncoder instalado, el botón derecho de Windows trae «Extraer con Jmg
+VideoEncoder» en los archivos de vídeo y, con un DVD o Blu-ray de vídeo en el lector,
+«Ripear» y «Crear imagen ISO» (en Windows 11, dentro de «Mostrar más opciones»).
+
+Licencia: GNU GPL v3 (los programas y FFmpeg). Aften (aften.sourceforge.net, el codificador
+AC3): GNU LGPL 2.1 (bin\aften_LICENSE.txt).
+Jmg Software · jmgsoftwaremultimedia@gmail.com · donativos: https://www.paypal.com/paypalme/JmgSoftware
+Cada 45 días, al abrir cualquiera de los dos programas, un mensaje de 5 segundos recuerda que
+se puede contribuir; se cierra solo y, si pulsas el enlace de contribuir, no vuelve a salir.
+
+
+JMG SUITEMULTIMEDIA · version 1.0  (English)
+============================================
+
+Jmg Software's two programs in a single installation, with a single FFmpeg:
+
+· Jmg VideoEncoder: compresses and converts videos (H.264, H.265, H.266, AV1, VP9,
+  ProRes and DNxHR, on the processor or graphics card), with their audio,
+  subtitles, trimming by parts, picture and synchronization. MKV, MP4, MOV, AVI
+  and WebM.
+· Jmg AudioProcesador 5.1: processes, converts and adjusts multichannel audio
+  tracks (5.1 / 7.1): volume and normalization, presence and EQ, stereo to 5.1
+  upmix and «Combine», which joins channels from several tracks to build dubs
+  with their delay calculated by itself.
+
+When installing you can choose both (recommended) or just one. They are installed
+in «Program Files\Jmg Software», with FFmpeg only once in the «bin» folder.
+A single icon is left on the desktop, «Jmg SuiteMultimedia»: when you open it you choose
+the program (with a short description of each). In the portable version, open
+«Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe». While a program is working (processing,
+combining, ripping...), the PC does not go to sleep.
+The «🎵 To AudioProcesador» and «🎬 To VideoEncoder» buttons send files from one
+program to the other. If you had either installed separately, the installer
+offers to remove it; your settings are kept. Each program has its own LEEME in
+its folder.
+With Jmg VideoEncoder installed, the Windows right-click offers «Extract with Jmg
+VideoEncoder» on video files and, with a video DVD or Blu-ray in the drive, «Rip» and
+«Create ISO image» (on Windows 11, under «Show more options»).
+
+License: GNU GPL v3 (the programs and FFmpeg). Aften (aften.sourceforge.net, the AC3
+encoder): GNU LGPL 2.1 (bin\aften_LICENSE.txt).
+Jmg Software · jmgsoftwaremultimedia@gmail.com · donations: https://www.paypal.com/paypalme/JmgSoftware
+Every 45 days, when either program opens, a 5-second message reminds you that you can support
+the project; it closes by itself and, if you click the support link, it does not come back.

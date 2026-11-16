@@ -1,0 +1,152 @@
+JMG AUDIOPROCESADOR 5.1 · versión 1.5
+=====================================
+
+Procesa, convierte y ajusta pistas de audio multicanal (5.1) de tus películas y
+archivos de audio, con FFmpeg. Volumen y normalización, presencia y ecualización,
+graves (Bass Management), procesado dinámico, limpieza de ruido, upmix de estéreo
+a 5.1, salidas de 1.0 a 5.1 en muchos formatos (W64 para Sound Forge) y MKV con
+vídeo. «Combinar» une canales de varias pistas o archivos (por
+ejemplo, 6 pistas mono) en una sola pista de hasta 7.1, con un delay para cada
+canal que el programa puede calcular solo comparando las pistas (y comprobar
+minuto a minuto por toda la película, y corregir por tramos los doblajes que
+van desfasados por partes), una opción para quitar el eco de las voces del
+idioma original, otra para igualar el tono (graves, medios y agudos) con la
+pista original y otra para dejar solo la voz en el central; y cada pista
+conserva su inicio respecto al vídeo al procesarla.
+
+Un botón «⚡ Auto» en cada ajuste, que mide la película y coloca
+los controles (si no te gusta cómo queda, lo retocas a mano; pulsado otra vez, lo
+quita); «Suavizado digital» para el exceso de agudos de las películas de los 80
+y 90; un editor en Visualización para bajar o subir el volumen de un trozo;
+Deshacer y Rehacer de las últimas 5 acciones; aviso cuando hay una versión nueva;
+y en Combinar, «Silenciar voces del original» y «Resetear».
+
+«▶ Revisar sincronización» (Volumen → Sincronización) enseña la
+película en una ventana de vídeo con sonido, con la pista tal como saldrá, para ver
+con tus ojos si los labios van con la voz; los deslizadores se mueven también con
+las flechas del teclado; «🎬 A VideoEncoder» pasa los archivos a Jmg VideoEncoder. Se instala con
+Jmg SuiteMultimedia: los dos programas en una sola instalación, con un solo FFmpeg.
+«Aften Dolby Digital» (por defecto) hace el AC3 con Aften, con mejor gama
+dinámica, y con «⚙ Aften...» todas sus opciones (CBR o VBR, información del flujo para el
+amplificador...), cada pista con las suyas; al minimizar, el programa queda como un icono junto
+al reloj (con «Cancelar» y «Al terminar» en su menú); y una descripción al dejar el ratón sobre
+cada botón, casilla o deslizador. Y «⚙ Opciones...» al lado del bitrate: las opciones avanzadas
+de cada formato (AC3, E-AC3, AAC, MP3, FLAC y DTS), con su frecuencia de muestreo, cada pista
+con las suyas. Aften, por defecto, con conmutación de bloques y ancho de banda fijo completo.
+AC3 con toda la variedad de bitrates (en 5.1 de 224 a 640) y E-AC3 con el bitrate escrito a mano.
+«📀 DVD/BD...» (detrás de «Limpiar»): el audio de la película principal de un DVD o un Blu-ray (el disco
+del lector, una carpeta o una imagen .iso), todas sus pistas tal cual, a un .mka que entra en la lista.
+A su lado, «💿 Crear ISO...» abre la ventana de Crear ISO de Jmg VideoEncoder.
+Solo discos sin protección anticopia (o ya descifrados, si la ley de tu país lo permite).
+Ripear directamente del disco es lento e inestable: mejor hacer antes una imagen ISO.
+En un Blu-ray, el .mka lleva el idioma de cada pista (leído de la lista de reproducción).
+
+REQUISITOS
+· Windows 10 u 11 de 64 bits. No hace falta instalar nada más: FFmpeg va incluido.
+· Linux (Debian, Ubuntu...): paquete .deb. Usa el FFmpeg del sistema (paquete
+  ffmpeg), que se instala solo con el programa.
+
+INSTALADOR O PORTABLE
+· Instalador (…_setup.exe): accesos directos, desinstalador y «Abrir con» en el
+  menú de los archivos de audio y vídeo. Ajustes y presets en
+  %APPDATA%\Jmg AudioProcesador.
+· Portable (…_portable.zip): descomprime y ejecuta «Jmg AudioProcesador.exe».
+  Los ajustes y presets se guardan en la misma carpeta.
+
+ANTES DE EMPEZAR
+· Tus archivos originales nunca se modifican.
+· ⚠ Techo limitador «Sin límite»: si subes mucho los efectos puede saturar.
+  Para ir sobre seguro, elige -1 dBFS.
+· Los originales 7.1 se procesan y salen en 5.1.
+· Escucha multicanal (pestaña Visualización): configura en Windows tu salida de
+  sonido en 5.1 o 7.1 (Sonido → tu salida → Configurar).
+· Algunos antivirus desconfían de programas nuevos sin firma digital. Si te avisa,
+  es un falso positivo: el código fuente es público.
+· Ayuda completa dentro del programa (botón Ayuda), en 9 idiomas: español, inglés, francés,
+  alemán, portugués, ruso, hindi, chino y japonés.
+
+LICENCIA
+· Jmg AudioProcesador es software libre bajo la licencia GNU GPL v3 (LICENSE.txt).
+· Usa FFmpeg (ffmpeg.org), versión N-128094-g31855b2a70-20261025, compilación de
+  BtbN, con licencia GNU GPL v3 (bin\LICENSE.txt).
+· Usa Aften (aften.sourceforge.net), codificador A/52 (AC3), con licencia GNU LGPL 2.1
+  (bin\aften_LICENSE.txt).
+· «Central solo voz» usa un modelo de rnnoise-models (bin\voz.rnnn), que según
+  sus autores no está sujeto a derechos de autor.
+· «Jmg AudioProcesador» y el logo Jmg Software son de su autor: las versiones
+  modificadas deben usar otro nombre.
+
+CONTACTO Y APOYO
+· jmgsoftwaremultimedia@gmail.com
+· Si te resulta útil, puedes apoyar el proyecto: https://www.paypal.com/paypalme/JmgSoftware
+  Cada 45 días, al abrir el programa, un mensaje de 5 segundos lo recuerda; se cierra
+  solo y, si pulsas el enlace de contribuir, no vuelve a salir.
+
+
+JMG AUDIOPROCESADOR 5.1 · version 1.5  (English)
+================================================
+
+Processes, converts and adjusts multichannel (5.1) audio tracks of your movies and
+audio files, using FFmpeg. Volume and normalization, presence and EQ, bass
+management, dynamic processing, noise cleanup, stereo to 5.1 upmix, 1.0 to 5.1
+outputs in many formats (W64 for Sound Forge), and MKV with video.
+«Combine» joins channels from several tracks or files (for example, 6 mono tracks)
+into a single track of up to 7.1, with a delay for each channel that the program
+can calculate by comparing the tracks (and check minute by minute along the
+whole movie, and fix by parts the dubs that are out of sync in parts), an
+option to remove the echo of the original-language voices and another to match
+the tone (bass, mids and treble) to the original track, or keep only the voice
+in the center; and every track keeps its start relative to the video when
+processed.
+
+An «⚡ Auto» button on each adjustment, which measures the movie and
+sets the controls (if you don't like the result, adjust it by hand; pressed
+again, it removes it); «Digital smoothing» for the excess treble of movies from
+the 80s and 90s; an editor in Visualization to lower or raise the volume of a
+section; Undo and Redo of the last 5 actions; a notice when a new version is
+out; and in Combine, «Silence voices of the original» and «Reset».
+
+«▶ Check synchronization» (Volume → Synchronization) shows the movie
+in a video window with sound, with the track as it will come out, so you can see
+with your own eyes whether the lips match the voice; the sliders also move with
+the keyboard arrows; «🎬 To VideoEncoder» sends the files to Jmg VideoEncoder. It is installed with
+Jmg SuiteMultimedia: both programs in a single installation, with a single FFmpeg.
+«Aften Dolby Digital» (default) makes the AC3 with Aften, with better dynamic
+range, and with «⚙ Aften...» all its options (CBR or VBR, bitstream information for the
+amplifier...), each track with its own; when minimized, the program stays as an icon next to
+the clock (with «Cancel» and «When done» in its menu); and a description when the mouse rests
+on any button, box or slider. And «⚙ Options...» next to the bitrate: the advanced options of
+each format (AC3, E-AC3, AAC, MP3, FLAC and DTS), with its sample rate, each track with its own.
+Aften, by default, with block switching and fixed full bandwidth.
+AC3 with the whole range of bitrates (in 5.1 from 224 to 640) and E-AC3 with the bitrate typed by hand.
+«📀 DVD/BD...» (after «Clear»): the audio of the main movie of a DVD or a Blu-ray (the disc in the
+drive, a folder or an .iso image), all its tracks as they are, to an .mka that goes into the list.
+Next to it, «💿 Create ISO...» opens Jmg VideoEncoder's Create ISO window.
+Only discs without copy protection (or already decrypted, if the law of your country allows it).
+Ripping straight from the disc is slow and unstable: better make an ISO image first.
+On a Blu-ray, the .mka carries the language of each track (read from the playlist).
+
+· Requirements: Windows 10 or 11, 64-bit. FFmpeg is included. Linux (Debian,
+  Ubuntu...): .deb package, uses the system FFmpeg (installed with it).
+· Installer: shortcuts, uninstaller and «Open with» for audio/video files. Settings
+  and presets in %APPDATA%\Jmg AudioProcesador. Portable: unzip and run
+  «Jmg AudioProcesador.exe»; settings are stored in the same folder.
+· Your original files are never modified.
+· ⚠ Limiter ceiling «No limit» may clip if you push the effects hard; -1 dBFS is
+  the safe choice.
+· 7.1 sources are processed and output as 5.1.
+· Multichannel listening (Visualization tab): set your Windows sound output to
+  5.1 or 7.1.
+· Some antivirus programs distrust new unsigned software; if yours complains, it is
+  a false positive (the source code is public).
+· Full help inside the program (Help button), in 9 languages: Spanish, English, French,
+  German, Portuguese, Russian, Hindi, Chinese and Japanese.
+· License: GNU GPL v3 (LICENSE.txt). Uses FFmpeg N-128094-g31855b2a70-20261025
+  (BtbN build), GNU GPL v3 (bin\LICENSE.txt). Uses Aften (aften.sourceforge.net),
+  A/52 (AC3) encoder, GNU LGPL 2.1 (bin\aften_LICENSE.txt). «Center voice only» uses an
+  rnnoise-models model (bin\voz.rnnn), not subject to copyright per its authors.
+  «Jmg AudioProcesador» and the Jmg Software logo belong to their author:
+  modified versions must use another name.
+· Contact: jmgsoftwaremultimedia@gmail.com · Support: https://www.paypal.com/paypalme/JmgSoftware
+  Every 45 days, when the program opens, a 5-second message reminds you; it closes by
+  itself and, if you click the support link, it does not come back.

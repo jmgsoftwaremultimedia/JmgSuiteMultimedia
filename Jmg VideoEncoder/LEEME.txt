@@ -1,0 +1,102 @@
+JMG VIDEOENCODER · versión 1.4
+==============================
+
+Comprime y convierte vídeos con FFmpeg, con la misma cara que Jmg AudioProcesador.
+Los originales nunca se tocan.
+
+· Vídeo: H.264, H.265, H.266, AV1, VP9, Apple ProRes y Avid DNxHR, por el procesador o por la
+  tarjeta gráfica (NVIDIA y AMD). Calidad constante o tamaño, dos pasadas.
+  Las películas HDR conservan su HDR (o se pasan a SDR); LUT para vídeo Log.
+· «⚡ Auto» en el vídeo y en la imagen (brillo, contraste, saturación, nitidez y
+  quitar ruido): un punto de partida que puedes retocar a mano.
+· Bandas negras: se buscan solas. Recorte por tramos: varios trozos se unen en
+  un solo vídeo.
+· Audio: cada pista con su códec y sus efectos (Gama dinámica, volumen por canal,
+  Suavizado, ecualizador, Double Bass y Presencia), y las ondas de cada canal
+  antes y después en «Visual / Ondas». El AC3 con Aften («Aften Dolby Digital», por
+  defecto), con mejor gama dinámica y todas sus opciones, cada pista con las suyas.
+· Sincronización, como en Jmg AudioProcesador: delay, «Calcular delay», «Corregir
+  por tramos», cambio de framerate (25 → 23,976 y al revés, se detecta solo) y
+  «▶ Revisar sincronización»: la película en su ventana con la pista tal como
+  saldrá. Los subtítulos también tienen framerate y delay.
+· Pistas de audio y subtítulos de otros archivos, portada, MKV, MP4 y MOV.
+· Un subtítulo se puede grabar en la imagen («Grabar en la imagen»).
+· Opciones avanzadas de cada códec de vídeo y de audio («⚙» al lado del códec): ajuste, perfil,
+  fotogramas clave, grano de película, dos pasadas de NVIDIA, perfil de ProRes y DNxHR,
+  información del flujo de AC3 y E-AC3, VBR de MP3 y Opus, compresión de FLAC...
+· DVD y Blu-ray (disco, carpeta o ISO) y «Crear ISO» de un disco o una carpeta.
+  Solo discos sin protección anticopia (o ya descifrados, si la ley de tu país lo permite).
+  Ripear directamente del disco es lento e inestable: mejor hacer antes una imagen ISO.
+  En un Blu-ray, el idioma de cada pista se lee de su lista de reproducción.
+· «Combinar vídeos»: une trozos de varios vídeos en uno.
+· «📤 Extracción» (en la Salida, en el menú del icono junto al reloj y, con el programa instalado,
+  con el botón derecho en un archivo de vídeo: «Extraer con Jmg VideoEncoder»): saca todo lo que
+  lleva el vídeo (vídeo, audios, subtítulos, portadas, adjuntos y capítulos) a su propia carpeta,
+  cada cosa en su formato original y sin recomprimir.
+· Discos: con un DVD o un Blu-ray de vídeo en el lector, «Ripear» (la película principal a la lista,
+  sin perder calidad) y «Crear imagen ISO», en el menú del icono junto al reloj y, con el programa
+  instalado, con el botón derecho en el lector.
+· AC3 con toda la variedad de bitrates (en 5.1 de 224 a 640) y E-AC3 con el bitrate escrito a mano.
+· Reproducir con los ajustes, en estéreo o multicanal (5.1 / 7.1).
+· Al minimizar, queda como un icono junto al reloj (con «Cancelar» y «Al terminar» en su
+  menú). Descripción de cada botón, casilla o deslizador al dejar el ratón encima.
+
+Se instala con Jmg SuiteMultimedia: con Jmg AudioProcesador, en una sola instalación y con un solo FFmpeg.
+
+Licencia: GNU GPL v3 (el programa y FFmpeg, que va en la carpeta «bin»). Aften
+(aften.sourceforge.net): GNU LGPL 2.1 (bin\aften_LICENSE.txt).
+Jmg Software · jmgsoftwaremultimedia@gmail.com · donativos: https://www.paypal.com/paypalme/JmgSoftware
+Cada 45 días, al abrir el programa, un mensaje de 5 segundos recuerda que se puede contribuir;
+se cierra solo y, si pulsas el enlace de contribuir, no vuelve a salir.
+
+
+JMG VIDEOENCODER · version 1.4  (English)
+=========================================
+
+Compresses and converts videos with FFmpeg, with the same look as Jmg AudioProcesador.
+The originals are never modified.
+
+· Video: H.264, H.265, H.266, AV1, VP9, Apple ProRes and Avid DNxHR, on the processor or on the
+  graphics card (NVIDIA and AMD). Constant quality or size, two passes.
+  HDR movies keep their HDR (or are converted to SDR); LUT for Log video.
+· «⚡ Auto» for the video and the picture (brightness, contrast, saturation,
+  sharpness and denoise): a starting point you can adjust by hand.
+· Black bars: found by themselves. Trimming by parts: several parts are joined
+  into one video.
+· Audio: each track with its codec and effects (dynamic range, volume per
+  channel, smoothing, EQ, Double Bass and Presence), and the waves of each channel
+  before and after in «Visual / Waves». AC3 with Aften («Aften Dolby Digital», by
+  default), with better dynamic range and all its options, each track with its own.
+· Synchronization, as in Jmg AudioProcesador: delay, «Calculate delay», «Fix by
+  parts», framerate change (25 → 23.976 and back, detected by itself) and
+  «▶ Check synchronization»: the movie in its window with the track as it will
+  come out. Subtitles also have framerate and delay.
+· Audio tracks and subtitles from other files, cover, MKV, MP4 and MOV.
+· A subtitle can be burned into the picture («Burn into the picture»).
+· Advanced options of each video and audio codec («⚙» next to the codec): tune, profile,
+  keyframes, film grain, NVIDIA two-pass, ProRes and DNxHR profile, AC3 and E-AC3 bitstream
+  information, MP3 and Opus VBR, FLAC compression...
+· DVD and Blu-ray (disc, folder or ISO) and «Create ISO» from a disc or a folder.
+  Only discs without copy protection (or already decrypted, if the law of your country allows it).
+  Ripping straight from the disc is slow and unstable: better make an ISO image first.
+  On a Blu-ray, the language of each track is read from its playlist.
+· «Combine videos»: joins parts of several videos into one.
+· «📤 Extraction» (in Output, in the menu of the icon next to the clock and, with the program
+  installed, with a right-click on a video file: «Extract with Jmg VideoEncoder»): takes everything
+  the video carries (video, audio tracks, subtitles, covers, attachments and chapters) out to its
+  own folder, each in its original format and without re-encoding.
+· Discs: with a video DVD or Blu-ray in the drive, «Rip» (the main movie into the list, without
+  quality loss) and «Create ISO image», in the menu of the icon next to the clock and, with the
+  program installed, with a right-click on the drive.
+· AC3 with the whole range of bitrates (in 5.1 from 224 to 640) and E-AC3 with the bitrate typed by hand.
+· Play with the settings, in stereo or multichannel (5.1 / 7.1).
+· When minimized, it stays as an icon next to the clock (with «Cancel» and «When done» in
+  its menu). A description of each button, box or slider when the mouse rests on it.
+
+It is installed with Jmg SuiteMultimedia: together with Jmg AudioProcesador, in a single installation with a single FFmpeg.
+
+License: GNU GPL v3 (the program and FFmpeg, which is in the «bin» folder). Aften
+(aften.sourceforge.net): GNU LGPL 2.1 (bin\aften_LICENSE.txt).
+Jmg Software · jmgsoftwaremultimedia@gmail.com · donations: https://www.paypal.com/paypalme/JmgSoftware
+Every 45 days, when the program opens, a 5-second message reminds you that you can support
+the project; it closes by itself and, if you click the support link, it does not come back.
