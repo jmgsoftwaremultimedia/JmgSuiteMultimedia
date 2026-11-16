@@ -49,6 +49,14 @@ En Windows, FFmpeg va incluido (una sola vez para los dos programas): no hace fa
 
 Los dos: interfaz en español e inglés, ayuda completa en 9 idiomas, deshacer, presets y procesado por lotes. Los botones «🎵 A AudioProcesador» y «🎬 A VideoEncoder» pasan los archivos de un programa al otro.
 
+## Capturas
+
+| | |
+|---|---|
+| ![Jmg VideoEncoder](capturas/2_videoencoder.png) | ![Jmg VideoEncoder: más opciones](capturas/4_videoencoder_opciones.png) |
+| ![Jmg VideoEncoder: audio](capturas/3_videoencoder_audio.png) | ![Jmg AudioProcesador](capturas/5_audioprocesador.png) |
+| ![Jmg AudioProcesador: visualización](capturas/7_audioprocesador_visualizacion.png) | ![Jmg AudioProcesador: combinar](capturas/8_audioprocesador_combinar.png) |
+
 ## Construirlo desde el código
 
 Cada programa es un solo archivo, `main.pyw` (Python 3 con tkinter). Para hacer los paquetes en Windows:
