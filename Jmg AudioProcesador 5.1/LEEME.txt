@@ -24,7 +24,7 @@ y en Combinar, «Silenciar voces del original» y «Resetear».
 «▶ Revisar sincronización» (Volumen → Sincronización) enseña la
 película en una ventana de vídeo con sonido, con la pista tal como saldrá, para ver
 con tus ojos si los labios van con la voz; los deslizadores se mueven también con
-las flechas del teclado; «🎬 A VideoEncoder» pasa los archivos a Jmg VideoEncoder. Se instala con
+las flechas del teclado; «🎬 VideoEncoder» pasa los archivos a Jmg VideoEncoder. Se instala con
 Jmg SuiteMultimedia: los dos programas en una sola instalación, con un solo FFmpeg.
 «Aften Dolby Digital» (por defecto) hace el AC3 con Aften, con mejor gama
 dinámica, y con «⚙ Aften...» todas sus opciones (CBR o VBR, información del flujo para el
@@ -109,7 +109,7 @@ out; and in Combine, «Silence voices of the original» and «Reset».
 «▶ Check synchronization» (Volume → Synchronization) shows the movie
 in a video window with sound, with the track as it will come out, so you can see
 with your own eyes whether the lips match the voice; the sliders also move with
-the keyboard arrows; «🎬 To VideoEncoder» sends the files to Jmg VideoEncoder. It is installed with
+the keyboard arrows; «🎬 VideoEncoder» sends the files to Jmg VideoEncoder. It is installed with
 Jmg SuiteMultimedia: both programs in a single installation, with a single FFmpeg.
 «Aften Dolby Digital» (default) makes the AC3 with Aften, with better dynamic
 range, and with «⚙ Aften...» all its options (CBR or VBR, bitstream information for the

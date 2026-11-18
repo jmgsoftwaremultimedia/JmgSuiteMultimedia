@@ -1,4 +1,4 @@
-JMG SUITEMULTIMEDIA · versión 1.0
+JMG SUITEMULTIMEDIA · versión 1.1
 =================================
 
 Los dos programas de Jmg Software en una sola instalación, con un solo FFmpeg:
@@ -17,7 +17,7 @@ En el escritorio queda un solo icono, «Jmg SuiteMultimedia»: al abrirlo eliges
 (con una breve descripción de cada uno). En la versión portable, abre
 «Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe». Mientras un programa trabaja (procesar,
 combinar, ripear...), el PC no entra en suspensión.
-Los botones «🎵 A AudioProcesador» y «🎬 A VideoEncoder» pasan los archivos de un
+Los botones «🎵 AudioProcesador» y «🎬 VideoEncoder» pasan los archivos de un
 programa al otro. Si tenías alguno instalado por separado, el instalador ofrece
 quitarlo; tus ajustes se conservan. Cada programa tiene su LEEME en su carpeta.
 Con Jmg VideoEncoder instalado, el botón derecho de Windows trae «Extraer con Jmg
@@ -31,7 +31,7 @@ Cada 45 días, al abrir cualquiera de los dos programas, un mensaje de 5 segundo
 se puede contribuir; se cierra solo y, si pulsas el enlace de contribuir, no vuelve a salir.
 
 
-JMG SUITEMULTIMEDIA · version 1.0  (English)
+JMG SUITEMULTIMEDIA · version 1.1  (English)
 ============================================
 
 Jmg Software's two programs in a single installation, with a single FFmpeg:
@@ -51,7 +51,7 @@ A single icon is left on the desktop, «Jmg SuiteMultimedia»: when you open it 
 the program (with a short description of each). In the portable version, open
 «Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe». While a program is working (processing,
 combining, ripping...), the PC does not go to sleep.
-The «🎵 To AudioProcesador» and «🎬 To VideoEncoder» buttons send files from one
+The «🎵 AudioProcesador» and «🎬 VideoEncoder» buttons send files from one
 program to the other. If you had either installed separately, the installer
 offers to remove it; your settings are kept. Each program has its own LEEME in
 its folder.

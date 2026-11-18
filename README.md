@@ -23,8 +23,8 @@ También doblado en: [Español](https://youtu.be/Je15lQCIsfw) · [English](https
 
 | Archivo | Para |
 |---|---|
-| `JmgSuiteMultimedia_1.0_setup.exe` | Windows 10 / 11 (64 bits): instalador. Puedes elegir los dos programas (recomendado) o solo uno |
-| `JmgSuiteMultimedia_1.0_portable.zip` | Windows sin instalar: descomprime y abre `Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe` |
+| `JmgSuiteMultimedia_1.1_setup.exe` | Windows 10 / 11 (64 bits): instalador. Puedes elegir los dos programas (recomendado) o solo uno |
+| `JmgSuiteMultimedia_1.1_portable.zip` | Windows sin instalar: descomprime y abre `Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe` |
 | `jmg-audioprocesador_1.5_all.deb` · `jmg-videoencoder_1.4_all.deb` | Linux (Debian, Ubuntu...): `sudo apt install ./jmg-videoencoder_1.4_all.deb` |
 
 En Windows, FFmpeg va incluido (una sola vez para los dos programas): no hace falta instalar nada más. Los programas avisan cuando sale una versión nueva.
@@ -49,7 +49,7 @@ En Windows, FFmpeg va incluido (una sola vez para los dos programas): no hace fa
 - Visualización de los canales, escucha multicanal y un editor para bajar o subir el volumen de un trozo.
 - Salida en Passthrough, AC3, EAC3, DTS, AAC, TrueHD, FLAC, WAV, RF64 y W64; de 1.0 a 5.1, upmix de estéreo a 5.1 y downmix.
 
-Los dos: interfaz en español e inglés, ayuda completa en 9 idiomas, deshacer, presets y procesado por lotes. Los botones «🎵 A AudioProcesador» y «🎬 A VideoEncoder» pasan los archivos de un programa al otro.
+Los dos: interfaz en español e inglés, ayuda completa en 9 idiomas, deshacer, presets y procesado por lotes. Los botones «🎵 AudioProcesador» y «🎬 VideoEncoder» pasan los archivos de un programa al otro.
 
 ## Capturas
 
@@ -92,7 +92,7 @@ Jmg Software's two programs in a single installation, free and open source, to i
 
 ### Download
 
-👉 **[Latest version](https://github.com/jmgsoftwaremultimedia/JmgSuiteMultimedia/releases/latest)**: `JmgSuiteMultimedia_1.0_setup.exe` (Windows installer: both programs or just one), `JmgSuiteMultimedia_1.0_portable.zip` (Windows, no install) or the `.deb` packages (Linux: `sudo apt install ./jmg-videoencoder_1.4_all.deb`). FFmpeg is included on Windows. The programs tell you when a new version is out.
+👉 **[Latest version](https://github.com/jmgsoftwaremultimedia/JmgSuiteMultimedia/releases/latest)**: `JmgSuiteMultimedia_1.1_setup.exe` (Windows installer: both programs or just one), `JmgSuiteMultimedia_1.1_portable.zip` (Windows, no install) or the `.deb` packages (Linux: `sudo apt install ./jmg-videoencoder_1.4_all.deb`). FFmpeg is included on Windows. The programs tell you when a new version is out.
 
 > Some antivirus programs distrust new unsigned software. If yours complains, it is a false positive: the source code is here.
 
