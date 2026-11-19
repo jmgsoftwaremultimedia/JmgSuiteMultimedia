@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Jmg AudioProcesador 5.1 - GUI v1.5 (ES/EN)"""
+"""Jmg AudioProcesador 5.1 - GUI v1.6 (ES/EN)"""
 import os,sys,json,threading,subprocess,re,locale,time,math,tkinter as tk
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tkinter import ttk,filedialog,messagebox,scrolledtext
@@ -237,6 +237,64 @@ def _otro_buscar(elegido=""):
         if w:c.append(w)
     return next((x for x in c if x and os.path.isfile(x)),None)
 _MARCO=40   # borde + barra de titulo de Windows (aprox.)
+# ---------- (JMG, 18-11) escuchar en estéreo con el subwoofer dentro ----------
+def _fg_mute(w,c):
+    """(JMG, 19-11) una casilla de volumen en «Mute» sigue en rojo (los repintados de tema o de estado no le quitan el color)"""
+    try:return "#ff4040" if (w.winfo_class()=="Entry" and w.get()=="Mute") else c
+    except Exception:return c
+def _pan_est(ch):
+    """la mezcla a estéreo para ESCUCHAR, con el subwoofer dentro: la de FFmpeg («aformat» / «-ac 2») lo deja fuera y su lfe_mix_level
+    no hace nada en esta versión, así que subir o bajar el subwoofer no se oía. ch = nombres de los canales en orden, o cuántos son
+    (6 = 5.1, 8 = 7.1). None si no hace falta (sin subwoofer, o disposición que no se conoce): entonces, la de FFmpeg"""
+    if isinstance(ch,int):ch={6:["FL","FR","FC","LFE","BL","BR"],8:["FL","FR","FC","LFE","BL","BR","SL","SR"]}.get(ch)
+    if not ch or len(ch)<=2 or "LFE" not in ch:return None
+    k="0.7071";L=[];R=[]
+    for i,c in enumerate(ch):
+        if c in ("FL","FLC"):L.append(f"c{i}")
+        elif c in ("FR","FRC"):R.append(f"c{i}")
+        elif c in ("BL","SL","TFL","TBL"):L.append(f"{k}*c{i}")
+        elif c in ("BR","SR","TFR","TBR"):R.append(f"{k}*c{i}")
+        else:L.append(f"{k}*c{i}");R.append(f"{k}*c{i}")   # el central, el subwoofer, el trasero central...
+    return "aformat=sample_fmts=fltp,pan=stereo|c0="+"+".join(L)+"|c1="+"+".join(R)
+def _estereo_cmd(c,ch):
+    """una orden de FFmpeg con su salida de audio a estéreo para escuchar (en vez de «-ac 2»): con el subwoofer dentro y un limitador"""
+    pe=_pan_est(ch)
+    if not pe:return list(c)+["-ac","2"]
+    f=pe+",alimiter=limit=0.97:attack=5:release=80:level=0:latency=1";c=list(c)
+    if "-filter_complex" in c:
+        ms=[k for k in range(len(c)-1) if c[k]=="-map" and str(c[k+1]).startswith("[")]
+        if not ms:return c+["-ac","2"]
+        i=c.index("-filter_complex");et=c[ms[-1]+1];nu=et[:-1]+"_est]"
+        c[i+1]=c[i+1]+f";{et}{f}{nu}";c[ms[-1]+1]=nu;return c
+    if "-af" in c:
+        i=len(c)-1-c[::-1].index("-af");c[i+1]=c[i+1]+","+f;return c
+    return c+["-af",f]
+# ---------- (JMG, 18-11) los ajustes de audio de cada pista, de un programa al otro ----------
+_TR_EF=("fl","fr","fc","lfe","bl","br","voz","amb","efc","sub","separ","eq_bass","eq_mids","eq_treble","suav","db")
+def _traspaso_ruta():
+    import tempfile;return os.path.join(tempfile.gettempdir(),"jmg_traspaso_ajustes.json")
+def _traspaso_guardar(de,datos):
+    """deja los ajustes de las pistas que se pasan al otro programa: {archivo: {índice de la pista en el archivo: ajustes}}"""
+    try:
+        p=_traspaso_ruta()
+        if datos:json.dump({"de":de,"t":time.time(),"archivos":datos},open(p,"w",encoding="utf-8"))
+        elif os.path.isfile(p):os.remove(p)
+    except Exception:pass
+def _traspaso_cargar(de,archivos):
+    """los ajustes que el otro programa («de») dejó para estos archivos (de hace menos de 10 minutos); se quitan del traspaso"""
+    try:
+        p=_traspaso_ruta()
+        if not os.path.isfile(p):return {}
+        d=json.load(open(p,encoding="utf-8"))
+        if d.get("de")!=de or time.time()-float(d.get("t",0))>600:return {}
+        nc=lambda x:os.path.normcase(os.path.abspath(x))
+        q={nc(k):v for k,v in (d.get("archivos") or {}).items() if isinstance(v,dict)}
+        out={nc(a):q.pop(nc(a)) for a in archivos if nc(a) in q}
+        if out:
+            if q:d["archivos"]=q;json.dump(d,open(p,"w",encoding="utf-8"))
+            else:os.remove(p)
+        return out
+    except Exception:return {}
 _PUERTO_UNICO=47391
 def _instancia_unica(archivos):
     """Una sola ventana: la primera instancia escucha en 127.0.0.1; las siguientes (p. ej. «Abrir con» con varios
@@ -263,7 +321,7 @@ IDIOMAS={"es":"Español","en":"English"}
 TXT = {
 "es": {
 "titulo":"Jmg AudioProcesador 5.1", "ayuda":"❓ Ayuda", "acerca":"ℹ Acerca de", "contribuir":"Contribuir al proyecto (GitHub)", "idioma":"🌐 ES",
-"acerca_t":"Acerca de", "acerca_x":"Jmg AudioProcesador 5.1\nVersión 1.5\n\nHerramienta para procesar, convertir y ajustar pistas de audio multicanal usando FFmpeg.\n\nAutor: JMG\nCorreo: jmgsoftwaremultimedia@gmail.com\n\nSi te resulta útil, puedes apoyar el proyecto con un donativo (botón de abajo). ¡Gracias y que lo disfrutes!\n\nSoftware libre bajo licencia GNU GPL v3.\nUsa FFmpeg N-128094-g31855b2a70-20261025 (compilación de BtbN), licencia GNU GPL v3.\n«Jmg AudioProcesador» y el logo Jmg Software son de su autor: las versiones modificadas deben usar otro nombre.",
+"acerca_t":"Acerca de", "acerca_x":"Jmg AudioProcesador 5.1\nVersión 1.6\n\nHerramienta para procesar, convertir y ajustar pistas de audio multicanal usando FFmpeg.\n\nAutor: JMG\nCorreo: jmgsoftwaremultimedia@gmail.com\n\nSi te resulta útil, puedes apoyar el proyecto con un donativo (botón de abajo). ¡Gracias y que lo disfrutes!\n\nSoftware libre bajo licencia GNU GPL v3.\nUsa FFmpeg N-128094-g31855b2a70-20261025 (compilación de BtbN), licencia GNU GPL v3.\n«Jmg AudioProcesador» y el logo Jmg Software son de su autor: las versiones modificadas deben usar otro nombre.",
 "cerrar":"Cerrar", "edit_guardar":"Guardar cambios", "edit_reset":"Resetear", "edit_refrescar":"Refrescar valores",
 "sel":"📂 Seleccionar...", "add":"➕ Añadir...", "quit":"➖ Quitar", "limp":"🗑 Limpiar",
 "guardar_p":"💾 Guardar preset", "cargar_p":"📁 Cargar preset", "lbl_archivos":"Archivos (clic para ver pistas)",
@@ -333,7 +391,7 @@ TXT = {
 
 "en": {
 "titulo":"Jmg AudioProcesador 5.1", "ayuda":"❓ Help", "acerca":"ℹ About", "contribuir":"Support the project (GitHub)", "idioma":"🌐 EN",
-"acerca_t":"About", "acerca_x":"Jmg AudioProcesador 5.1\nVersion 1.5\n\nTool for processing, converting and adjusting multichannel audio tracks using FFmpeg.\n\nAuthor: JMG\nEmail: jmgsoftwaremultimedia@gmail.com\n\nIf you find it useful, you can support the project with a donation (button below). Thank you and enjoy it!\n\nFree software under the GNU GPL v3 license.\nUses FFmpeg N-128094-g31855b2a70-20261025 (BtbN build), GNU GPL v3 license.\n«Jmg AudioProcesador» and the Jmg Software logo belong to their author: modified versions must use a different name.",
+"acerca_t":"About", "acerca_x":"Jmg AudioProcesador 5.1\nVersion 1.6\n\nTool for processing, converting and adjusting multichannel audio tracks using FFmpeg.\n\nAuthor: JMG\nEmail: jmgsoftwaremultimedia@gmail.com\n\nIf you find it useful, you can support the project with a donation (button below). Thank you and enjoy it!\n\nFree software under the GNU GPL v3 license.\nUses FFmpeg N-128094-g31855b2a70-20261025 (BtbN build), GNU GPL v3 license.\n«Jmg AudioProcesador» and the Jmg Software logo belong to their author: modified versions must use a different name.",
 "cerrar":"Close", "edit_guardar":"Save changes", "edit_reset":"Reset", "edit_refrescar":"Refresh values",
 "sel":"📂 Select...", "add":"➕ Add...", "quit":"➖ Remove", "limp":"🗑 Clear",
 "guardar_p":"💾 Save preset", "cargar_p":"📁 Load preset", "lbl_archivos":"Files (click to see tracks)",
@@ -466,8 +524,8 @@ def _apoyo_toca():
     return (hoy-d0).days>=APOYO_DIAS
 _EXT_MM="*.mkv *.mp4 *.avi *.mov *.m2ts *.ts *.webm *.flac *.wav *.m4a *.ac3 *.eac3 *.dts *.mka"
 if sys.platform!="win32":_EXT_MM+=" "+_EXT_MM.upper()   # en Linux el filtro distingue mayusculas
-VERSION_PROG="1.5"   # la de construir.bat; el aviso de versión nueva la compara con la última Release de GitHub
-SUITE_VER="1.1"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
+VERSION_PROG="1.6"   # la de construir.bat; el aviso de versión nueva la compara con la última Release de GitHub
+SUITE_VER="1.2"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
 REPO_GH="jmgsoftwaremultimedia/JmgSuiteMultimedia"
 CONTACTO_MAIL="jmgsoftwaremultimedia@gmail.com"   # el logotipo abre un correo nuevo a esta direccion
 PMAR="#d4edda";PNOM="#f0f0f0";TMAR="#1a5c2a";TNOM="#666666"
@@ -506,7 +564,7 @@ CÓMO SE USA
 4. Pulsa PROCESAR: sale lo esencial y «🔍 Ver todo» enseña cada pista con su formato y sus efectos (se puede copiar). Tus archivos originales nunca se modifican. «Cancelar» detiene el proceso y borra lo que quedó a medias.
 
 VOLUMEN
-• Master: sube o baja todo. Debajo, el volumen de cada canal.
+• Master: sube o baja todo. Debajo, el volumen de cada canal. Master y cada canal llegan hasta -30 dB; una posición más abajo es «Mute» (en rojo): en silencio. El volumen por canal se aplica el último (tras Bass Management, Double Bass y Separación de canales): lo que pones es exactamente lo que sube o baja ese canal.
 • «Ajustar Master»: mide la pista y sube el Master hasta el objetivo sin pasar el límite de picos (anticlipping automático). Nunca baja el volumen: si ya está alto, se queda en 0 dB.
 • «Auto» de «Volumen por canal»: mide el volumen de cada canal de las pistas seleccionadas y mueve sus deslizadores para dejar un equilibrio de cine: el central no se toca, los frontales quedan unos 3 dB por debajo de él, los surrounds unos 7 dB y el subwoofer unos 6 dB (como mucho ±6 dB; el subwoofer, ±3 dB). Después puedes retocarlos a mano. Los frontales y los surrounds solo se bajan si van demasiado fuertes, nunca se suben: hay películas que no piden tanto estéreo ni surround.
 • «Auto» del EQ avanzado: mide graves, medios y agudos de frontales, traseros y central y los acerca entre sí (como mucho ±3 dB). Queda en el EQ Avanzado por grupo, donde puedes retocarlo. El subwoofer no se toca.
@@ -548,7 +606,7 @@ SALIDA
 • Los originales 7.1 salen en 5.1: los laterales se suman a los traseros.
 • Origen estéreo: 2.0 se queda en estéreo; 5.1 hace Upmix (con «Quitar voz» de frontales y traseros). Con Upmix solo se usan la Separación de canales, los volúmenes y los ecualizadores; lo demás (Presencia, normalizaciones, Gama, Procesado, Bass Management, Double Bass, Suavizado y Limpieza) se desactiva.
 • Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV por canal), RF64, W64 (Sound Forge), TrueHD y Passthrough (copia sin convertir). MP3 en 2.0 y 1.0. «Aften Dolby Digital» (por defecto) hace el AC3 con Aften, que da mejor gama dinámica en las películas que tienen mucha; «AC3», con FFmpeg. Sus ajustes, con «⚙ Aften...» como los de los demás formatos (por defecto, conmutación de bloques y ancho de banda fijo completo): CBR o VBR, ancho de banda, precisión, filtros, gama dinámica (DRC y nivel de diálogo) y la información del flujo para el amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Estándar o HDCD, downmix preferido y sus niveles). Un AC3 VBR no lo leen todos los aparatos.
-• «🎬 VideoEncoder» (arriba, detrás de «Crear ISO»): pasa los archivos seleccionados de la lista (o todos) a Jmg VideoEncoder. Si está abierto, van a su lista; si no, se abre con ellos. Si no lo encuentra, te pide que lo busques una vez. Después, este programa se cierra (los dos no se quedan abiertos a la vez).
+• «🎬 VideoEncoder» (arriba, detrás de «Crear ISO»): pasa los archivos seleccionados de la lista (o todos) a Jmg VideoEncoder. Si está abierto, van a su lista; si no, se abre con ellos. Si no lo encuentra, te pide que lo busques una vez. Después, este programa se cierra (los dos no se quedan abiertos a la vez). Los ajustes de audio de cada pista que tienen los dos programas (volúmenes, Presencia, ecualizador, Separación, Gama, sincronía y formato) pasan también. Sin archivos, solo cambia al otro programa.
 • «MKV con vídeo»: copia el vídeo, los subtítulos, los capítulos y las portadas, y añade las pistas procesadas. «Solo audio»: un archivo por pista. Debajo, «Nombre del archivo»: el nombre de lo que sale de cada archivo (↺ vuelve al automático) y dónde se guardará.
 • «Núcleo aparte» (en Salida, junto al formato; con «MKV con vídeo»): solo se activa en las pistas que lo llevan, y es de cada pista. Una DTS-HD (Master Audio o High Resolution) lleva dentro un DTS normal para los aparatos que no entienden el HD, y una Dolby Atmos (TrueHD) lleva un TrueHD sin Atmos; marcado, sale también como pista aparte, sin recomprimir y detrás de las originales.
 • «🔍 Buscar» (Salida, al lado de «➕ Añadir» de la portada; con «MKV con vídeo»): busca la película en TMDB y pone de portada el póster que elijas. Un cover.jpg o folder.jpg junto al archivo se usa solo si el vídeo no trae portada. Necesita tu propia clave de TMDB, gratuita: la primera vez el programa explica cómo conseguirla (cuenta en themoviedb.org → Ajustes → API). Sin conexión, simplemente no busca.
@@ -577,7 +635,7 @@ A TENER EN CUENTA
 • Gama dinámica y Procesado dinámico: solo uno a la vez, y las normalizaciones los desactivan. Presencia funciona con todos los efectos, menos con Upmix. El programa lo hace solo.
 • ⚠ Techo limitador «Sin límite»: puede saturar si subes mucho los efectos. Para ir sobre seguro, elige -1 dBFS.
 • «Resetear» limpia la pestaña abierta («Todo» = todo). Con los presets guardas y cargas tus ajustes.
-• «↶ Deshacer» y «↷ Rehacer» (abajo, junto a «Resetear»): deshacen y rehacen, una a una, las últimas 5 acciones: cambios de ajustes de cualquier pista, añadir o quitar archivos, eliminar pistas, títulos... En Visualización deshacen y rehacen los cambios del editor (lo silenciado o bajado). También con Ctrl+Z y Ctrl+Y.
+• «↶ Deshacer» y «↷ Rehacer» (abajo, junto a «Resetear»): deshacen y rehacen, una a una, las últimas 50 acciones: cambios de ajustes de cualquier pista, añadir o quitar archivos, eliminar pistas, títulos... En Visualización deshacen y rehacen los cambios del editor (lo silenciado o bajado). También con Ctrl+Z y Ctrl+Y.
 • El EQ de 3 bandas y el EQ avanzado no se usan a la vez: mientras uno tiene algo puesto, el otro queda desactivado. Lo mismo con el Master y el volumen por canal. Tampoco van juntos el Suavizado digital con los ecualizadores ni con la Limpieza de audio, ni la Limpieza de audio con los ecualizadores, la Gama dinámica o el Procesado dinámico. Los «Auto» apagan lo que no va junto y el aviso te dice qué.
 • «Abrir la carpeta de destino al terminar» (pestaña Salida): al acabar de procesar, abre la carpeta donde han quedado los archivos.
 • Si algo falla, mira la pestaña Edit/Log. El texto del log se puede seleccionar con el ratón y copiar (Ctrl+C o clic derecho → Copiar / Copiar todo el log).
@@ -609,7 +667,7 @@ HOW TO USE IT
 4. Press PROCESS: the essentials appear and «🔍 See everything» shows each track with its format and effects (it can be copied). Your original files are never modified. «Cancel» stops the process and deletes anything left half-written.
 
 VOLUME
-• Master: raises or lowers everything. Below it, the volume of each channel.
+• Master: raises or lowers everything. Below it, the volume of each channel. Master and each channel go down to -30 dB; one more step down is «Mute» (in red): silent. Volume per channel is applied last (after Bass Management, Double Bass and Channel separation): what you set is exactly how much that channel goes up or down.
 • «Set Master»: measures the track and raises the Master up to the target without exceeding the peak limit (automatic anti-clipping). It never lowers the volume: if the track is already loud, it stays at 0 dB.
 • «Auto» of «Volume per channel»: measures the loudness of each channel of the selected tracks and moves their sliders to a cinema balance: the center is not touched, the fronts end up about 3 dB below it, the surrounds about 7 dB and the subwoofer about 6 dB (at most ±6 dB; subwoofer ±3 dB). You can then adjust them by hand. Fronts and surrounds are only lowered when they are too loud, never raised: some movies do not ask for so much stereo or surround.
 • «Auto» of the advanced EQ: measures the bass, mids and treble of the fronts, surrounds and center and brings them closer together (at most ±3 dB). It stays in the Advanced EQ per group, where you can adjust it. The subwoofer is not touched.
@@ -651,7 +709,7 @@ OUTPUT
 • 7.1 sources are output as 5.1: the side channels are mixed into the rear ones.
 • Stereo source: 2.0 stays stereo; 5.1 performs an Upmix (with «Remove voice» from front and rear). With Upmix only Channel separation, the volumes and the equalizers are used; the rest (Presence, normalizations, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing and Cleanup) is disabled.
 • Formats: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (one WAV per channel), RF64, W64 (Sound Forge), TrueHD and Passthrough (copy without converting). MP3 for 2.0 and 1.0. «Aften Dolby Digital» (default) makes the AC3 with Aften, which gives better dynamic range in movies that have a lot; «AC3», with FFmpeg. Its settings, with «⚙ Aften...» like the other formats' ones (by default, block switching and fixed full bandwidth): CBR or VBR, bandwidth, accuracy, filters, dynamic range (DRC and dialogue level) and the bitstream information for the amplifier (Dolby Surround EX, Dolby Headphone, Standard or HDCD A/D converter, preferred downmix and its levels). Not every device reads a VBR AC3.
-• «🎬 VideoEncoder» (at the top, after «Create ISO»): sends the selected files in the list (or all of them) to Jmg VideoEncoder. If it is open, they go to its list; if not, it opens with them. If it is not found, it asks you to look for it once. Then this program closes (both do not stay open at the same time).
+• «🎬 VideoEncoder» (at the top, after «Create ISO»): sends the selected files in the list (or all of them) to Jmg VideoEncoder. If it is open, they go to its list; if not, it opens with them. If it is not found, it asks you to look for it once. Then this program closes (both do not stay open at the same time). The audio settings of each track that both programs share (volumes, Presence, EQ, separation, dynamic range, sync and format) go along too. With no files, it just switches to the other program.
 • «MKV with video»: copies the video, subtitles, chapters and covers, and adds the processed tracks. «Audio only»: one file per track. Below, «File name»: the name of what comes out of each file (↺ goes back to the automatic one) and where it will be saved.
 • «Core as a separate track» (in Output, next to the format; with «MKV with video»): it is only enabled on tracks that have one, and it is set per track. A DTS-HD track (Master Audio or High Resolution) carries a regular DTS inside for devices that do not understand HD, and a Dolby Atmos (TrueHD) track carries a TrueHD without Atmos; ticked, it also comes out as a separate track, not re-encoded, after the originals.
 • «🔍 Search» (Output, next to the cover «➕ Add»; with «MKV with video»): looks the movie up on TMDB and sets the poster you choose as the cover. A cover.jpg or folder.jpg next to the file is used by itself if the video has no cover. It needs your own TMDB key, which is free: the first time, the program explains how to get it (account at themoviedb.org → Settings → API). Without a connection, it simply does not search.
@@ -680,7 +738,7 @@ GOOD TO KNOW
 • Dynamic range and Dynamic processing: only one at a time, and normalizations disable them. Presence works with all effects, except with Upmix. The program does this automatically.
 • ⚠ Limiter ceiling «No limit»: it may clip if you push the effects hard. To be safe, choose -1 dBFS.
 • «Reset» clears the open tab («All» = everything). Presets save and load your settings.
-• «↶ Undo» and «↷ Redo» (at the bottom, next to «Reset»): undo and redo, one by one, the last 5 actions: setting changes on any track, adding or removing files, deleting tracks, titles... In Visualization they undo and redo the editor changes (what you silenced or lowered). Also with Ctrl+Z and Ctrl+Y.
+• «↶ Undo» and «↷ Redo» (at the bottom, next to «Reset»): undo and redo, one by one, the last 50 actions: setting changes on any track, adding or removing files, deleting tracks, titles... In Visualization they undo and redo the editor changes (what you silenced or lowered). Also with Ctrl+Z and Ctrl+Y.
 • The 3-band EQ and the advanced EQ are not used together: while one has something set, the other is disabled. The same goes for Master and the volume per channel. Digital smoothing does not go with the equalizers or with Audio cleanup either, nor Audio cleanup with the equalizers, Dynamic range or Dynamic processing. The «Auto» buttons switch off what does not go together and the notice tells you what.
 • «Open the destination folder when finished» (Output tab): when processing ends, it opens the folder where the files were saved.
 • If something goes wrong, check the Edit/Log tab. The log text can be selected with the mouse and copied (Ctrl+C or right-click → Copy / Copy the whole log).
@@ -714,7 +772,7 @@ UTILISATION
 4. Appuyez sur PROCESS : l'essentiel s'affiche et «🔍 See everything» montre chaque piste avec son format et ses effets (copiable). Vos fichiers originaux ne sont jamais modifiés. «Cancel» arrête le traitement et supprime ce qui est resté à moitié écrit.
 
 VOLUME
-• Master : monte ou baisse tout. En dessous, le volume de chaque canal.
+• Master : monte ou baisse tout. En dessous, le volume de chaque canal. Le Master et chaque canal descendent jusqu'à -30 dB ; une position de plus vers le bas, c'est «Mute» (en rouge) : silence. Le volume par canal s'applique en dernier (après Bass Management, Double Bass et Channel separation) : ce que vous réglez est exactement ce que ce canal monte ou baisse.
 • «Set Master» : mesure la piste et monte le Master jusqu'à la cible sans dépasser la limite de crête (anti-écrêtage automatique). Il ne baisse jamais le volume : si la piste est déjà forte, il reste à 0 dB.
 • «Auto» de «Volume per channel» : mesure le volume de chaque canal des pistes sélectionnées et déplace leurs curseurs vers un équilibre de cinéma : le central n'est pas modifié, les frontaux se placent environ 3 dB en dessous, les surrounds environ 7 dB et le subwoofer environ 6 dB (±6 dB au maximum ; subwoofer ±3 dB). Vous pouvez ensuite les retoucher à la main. Les frontaux et les surrounds sont seulement baissés s'ils sont trop forts, jamais montés : certains films ne demandent pas autant de stéréo ni de surround.
 • «Auto» de l'EQ avancé : mesure les graves, les médiums et les aigus des frontaux, des arrière et du central et les rapproche (±3 dB au maximum). Le résultat reste dans l'EQ avancé par groupe, où vous pouvez le retoucher. Le subwoofer n'est pas modifié.
@@ -756,7 +814,7 @@ OUTPUT
 • Les sources 7.1 sortent en 5.1 : les canaux latéraux sont additionnés aux canaux arrière.
 • Source stéréo : 2.0 reste en stéréo ; 5.1 fait un Upmix (avec «Remove voice» des avants et arrières). Avec Upmix, seuls Channel separation, les volumes et les égaliseurs s'utilisent ; le reste (Presence, normalisations, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing et Audio cleanup) est désactivé.
 • Formats : AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV par canal), RF64, W64 (Sound Forge), TrueHD et Passthrough (copie sans conversion). MP3 en 2.0 et 1.0. «Aften Dolby Digital» (par défaut) fait l'AC3 avec Aften, qui donne une meilleure dynamique dans les films qui en ont beaucoup ; «AC3», avec FFmpeg. Ses réglages, avec «⚙ Aften...» comme ceux des autres formats (par défaut, commutation de blocs et bande passante fixe complète) : CBR ou VBR, bande passante, précision, filtres, dynamique (DRC et niveau de dialogue) et les informations du flux pour l'amplificateur (Dolby Surround EX, Dolby Headphone, convertisseur A/D Standard ou HDCD, downmix préféré et ses niveaux). Tous les appareils ne lisent pas un AC3 VBR.
-• «🎬 VideoEncoder» (en haut, après «Create ISO») : envoie les fichiers sélectionnés de la liste (ou tous) à Jmg VideoEncoder. S'il est ouvert, ils vont dans sa liste ; sinon, il s'ouvre avec eux. S'il est introuvable, il vous demande de le chercher une fois. Ensuite, ce programme se ferme (les deux ne restent pas ouverts en même temps).
+• «🎬 VideoEncoder» (en haut, après «Create ISO») : envoie les fichiers sélectionnés de la liste (ou tous) à Jmg VideoEncoder. S'il est ouvert, ils vont dans sa liste ; sinon, il s'ouvre avec eux. S'il est introuvable, il vous demande de le chercher une fois. Ensuite, ce programme se ferme (les deux ne restent pas ouverts en même temps). Les réglages audio de chaque piste communs aux deux programmes (volumes, Presence, égaliseur, séparation, plage dynamique, synchro et format) suivent aussi. Sans fichiers, il passe simplement à l'autre programme.
 • «MKV with video» : copie la vidéo, les sous-titres, les chapitres et les pochettes, et ajoute les pistes traitées. «Audio only» : un fichier par piste. En dessous, «File name» : le nom de ce qui sort de chaque fichier (↺ revient au nom automatique) et où il sera enregistré.
 • «Core as a separate track» (dans Output, à côté du format ; avec «MKV with video») : il ne s'active que sur les pistes qui en ont un, et il se règle piste par piste. Une piste DTS-HD (Master Audio ou High Resolution) contient un DTS normal pour les appareils qui ne comprennent pas le HD, et une piste Dolby Atmos (TrueHD) un TrueHD sans Atmos ; coché, il sort aussi comme piste séparée, sans réencodage, après les originales.
 • «🔍 Search» (Output, à côté de «➕ Add» de la pochette ; avec «MKV with video») : cherche le film sur TMDB et met en pochette l'affiche que vous choisissez. Un cover.jpg ou folder.jpg à côté du fichier est utilisé tout seul si la vidéo n'a pas de pochette. Il faut votre propre clé TMDB, gratuite : la première fois, le programme explique comment l'obtenir (compte sur themoviedb.org → Paramètres → API). Sans connexion, la recherche ne se fait simplement pas.
@@ -785,7 +843,7 @@ COMBINE (DOUBLAGES ET SYNCHRONISATION)
 • Dynamic range et Dynamic processing : un seul à la fois, et les normalisations les désactivent. Presence fonctionne avec tous les effets, sauf avec Upmix. Le programme le fait tout seul.
 • ⚠ Plafond du limiteur «No limit» : risque de saturation si vous poussez beaucoup les effets. Par sécurité, choisissez -1 dBFS.
 • «Reset» efface l'onglet ouvert («All» = tout). Les presets enregistrent et chargent vos réglages.
-• «↶ Undo» et «↷ Redo» (en bas, à côté de «Reset») : annulent et rétablissent, une par une, les 5 dernières actions : réglages de n'importe quelle piste, ajout ou retrait de fichiers, suppression de pistes, titres... Dans Visualization, ils annulent et rétablissent les modifications de l'éditeur (ce qui a été coupé ou baissé). Aussi avec Ctrl+Z et Ctrl+Y.
+• «↶ Undo» et «↷ Redo» (en bas, à côté de «Reset») : annulent et rétablissent, une par une, les 50 dernières actions : réglages de n'importe quelle piste, ajout ou retrait de fichiers, suppression de pistes, titres... Dans Visualization, ils annulent et rétablissent les modifications de l'éditeur (ce qui a été coupé ou baissé). Aussi avec Ctrl+Z et Ctrl+Y.
 • L'EQ 3 bandes et l'EQ avancé ne s'utilisent pas ensemble : tant que l'un a un réglage, l'autre est désactivé. De même pour Master et le volume par canal. Digital smoothing ne va pas non plus avec les égaliseurs ni avec Audio cleanup, ni Audio cleanup avec les égaliseurs, Dynamic range ou Dynamic processing. Les boutons «Auto» éteignent ce qui ne va pas ensemble et le message vous indique quoi.
 • «Open the destination folder when finished» (onglet Output) : à la fin du traitement, ouvre le dossier où se trouvent les fichiers.
 • En cas de problème, consultez l'onglet Edit/Log. Le texte du log peut être sélectionné à la souris et copié (Ctrl+C ou clic droit → Copy / Copy the whole log).
@@ -819,7 +877,7 @@ SO GEHT'S
 4. PROCESS drücken: das Wesentliche erscheint, «🔍 See everything» zeigt jede Spur mit Format und Effekten (kopierbar). Ihre Originaldateien werden nie verändert. «Cancel» bricht ab und löscht halb geschriebene Dateien.
 
 VOLUME
-• Master: hebt oder senkt alles. Darunter die Lautstärke jedes Kanals.
+• Master: hebt oder senkt alles. Darunter die Lautstärke jedes Kanals. Master und jeder Kanal gehen bis -30 dB herunter; eine Stufe tiefer ist «Mute» (rot): stumm. Die Lautstärke pro Kanal wird zuletzt angewendet (nach Bass Management, Double Bass und Channel separation): Was Sie einstellen, ist genau, um wie viel dieser Kanal lauter oder leiser wird.
 • «Set Master»: misst die Spur und hebt den Master bis zum Zielwert an, ohne die Spitzengrenze zu überschreiten (automatischer Übersteuerungsschutz). Die Lautstärke wird nie gesenkt: Ist die Spur schon laut, bleibt es bei 0 dB.
 • «Auto» bei «Volume per channel»: misst die Lautstärke jedes Kanals der gewählten Spuren und stellt ihre Regler auf eine Kino-Balance: Der Center bleibt unverändert, die Frontkanäle liegen etwa 3 dB darunter, die Surrounds etwa 7 dB und der Subwoofer etwa 6 dB (höchstens ±6 dB; Subwoofer ±3 dB). Danach können Sie sie von Hand nachstellen. Front- und Surroundkanäle werden nur abgesenkt, wenn sie zu laut sind, nie angehoben: Manche Filme verlangen nicht so viel Stereo oder Surround.
 • «Auto» des erweiterten EQ: misst Bässe, Mitten und Höhen von Front, Surround und Center und gleicht sie einander an (höchstens ±3 dB). Das Ergebnis steht im erweiterten EQ pro Gruppe, wo Sie es nachstellen können. Der Subwoofer bleibt unverändert.
@@ -861,7 +919,7 @@ OUTPUT
 • 7.1-Quellen werden als 5.1 ausgegeben: Die seitlichen Kanäle werden zu den hinteren addiert.
 • Stereoquelle: 2.0 bleibt Stereo; 5.1 erzeugt ein Upmix (mit «Remove voice» für vorne und hinten). Mit Upmix werden nur Channel separation, die Lautstärken und die Equalizer verwendet; der Rest (Presence, Normalisierungen, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing und Audio cleanup) ist deaktiviert.
 • Formate: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (ein WAV pro Kanal), RF64, W64 (Sound Forge), TrueHD und Passthrough (Kopie ohne Umwandlung). MP3 bei 2.0 und 1.0. «Aften Dolby Digital» (Standard) erzeugt das AC3 mit Aften, das bei Filmen mit großer Dynamik die bessere Dynamik liefert; «AC3» mit FFmpeg. Seine Einstellungen über «⚙ Aften...» wie bei den anderen Formaten (standardmäßig Blockumschaltung und feste volle Bandbreite): CBR oder VBR, Bandbreite, Genauigkeit, Filter, Dynamik (DRC und Dialogpegel) und die Bitstream-Informationen für den Verstärker (Dolby Surround EX, Dolby Headphone, A/D-Wandler Standard oder HDCD, bevorzugter Downmix und seine Pegel). Nicht jedes Gerät liest ein VBR-AC3.
-• «🎬 VideoEncoder» (oben, hinter «Create ISO»): übergibt die gewählten Dateien der Liste (oder alle) an Jmg VideoEncoder. Ist es geöffnet, kommen sie in seine Liste; sonst wird es mit ihnen geöffnet. Wird es nicht gefunden, werden Sie einmal gebeten, es zu suchen. Danach schließt sich dieses Programm (beide bleiben nicht gleichzeitig geöffnet).
+• «🎬 VideoEncoder» (oben, hinter «Create ISO»): übergibt die gewählten Dateien der Liste (oder alle) an Jmg VideoEncoder. Ist es geöffnet, kommen sie in seine Liste; sonst wird es mit ihnen geöffnet. Wird es nicht gefunden, werden Sie einmal gebeten, es zu suchen. Danach schließt sich dieses Programm (beide bleiben nicht gleichzeitig geöffnet). Die Audioeinstellungen jeder Spur, die beide Programme haben (Lautstärken, Presence, EQ, Kanaltrennung, Dynamikumfang, Synchronität und Format), werden mit übergeben. Ohne Dateien wechselt er einfach zum anderen Programm.
 • «MKV with video»: kopiert Video, Untertitel, Kapitel und Cover und fügt die bearbeiteten Spuren hinzu. «Audio only»: eine Datei pro Spur. Darunter «File name»: der Name dessen, was aus jeder Datei entsteht (↺ zurück zum automatischen Namen), und wo es gespeichert wird.
 • «Core as a separate track» (in Output, neben dem Format; mit «MKV with video»): Er ist nur bei Spuren aktiv, die einen Kern haben, und gilt pro Spur. Eine DTS-HD-Spur (Master Audio oder High Resolution) enthält ein normales DTS für Geräte, die kein HD verstehen, und eine Dolby-Atmos-Spur (TrueHD) ein TrueHD ohne Atmos; angehakt kommt er zusätzlich als eigene Spur heraus, ohne Neukodierung, hinter den Originalen.
 • «🔍 Search» (Output, neben «➕ Add» beim Cover; mit «MKV with video»): sucht den Film bei TMDB und setzt das gewählte Poster als Cover. Eine cover.jpg oder folder.jpg neben der Datei wird automatisch verwendet, wenn das Video kein Cover hat. Dafür brauchen Sie einen eigenen, kostenlosen TMDB-Schlüssel: Beim ersten Mal erklärt das Programm, wie Sie ihn bekommen (Konto auf themoviedb.org → Einstellungen → API). Ohne Verbindung wird einfach nicht gesucht.
@@ -890,7 +948,7 @@ GUT ZU WISSEN
 • Dynamic range und Dynamic processing: immer nur eines davon, und Normalisierungen schalten sie ab. Presence funktioniert mit allen Effekten, außer mit Upmix. Das Programm erledigt das selbst.
 • ⚠ Limiter-Obergrenze «No limit»: kann übersteuern, wenn die Effekte stark aufgedreht sind. Sicherer ist -1 dBFS.
 • «Reset» leert die geöffnete Registerkarte («All» = alles). Mit Presets speichern und laden Sie Ihre Einstellungen.
-• «↶ Undo» und «↷ Redo» (unten, neben «Reset»): machen die letzten 5 Aktionen einzeln rückgängig bzw. wieder her: Einstellungen jeder Spur, Dateien hinzufügen oder entfernen, Spuren löschen, Titel... In Visualization machen sie die Änderungen des Editors rückgängig bzw. wieder her (Stummgeschaltetes oder Abgesenktes). Auch mit Strg+Z und Strg+Y.
+• «↶ Undo» und «↷ Redo» (unten, neben «Reset»): machen die letzten 50 Aktionen einzeln rückgängig bzw. wieder her: Einstellungen jeder Spur, Dateien hinzufügen oder entfernen, Spuren löschen, Titel... In Visualization machen sie die Änderungen des Editors rückgängig bzw. wieder her (Stummgeschaltetes oder Abgesenktes). Auch mit Strg+Z und Strg+Y.
 • Der 3-Band-EQ und der erweiterte EQ werden nicht zusammen verwendet: Solange einer eingestellt ist, ist der andere deaktiviert. Dasselbe gilt für Master und die Lautstärke pro Kanal. Auch Digital smoothing passt nicht zu den Equalizern oder zu Audio cleanup, und Audio cleanup nicht zu den Equalizern, Dynamic range oder Dynamic processing. Die «Auto»-Tasten schalten aus, was nicht zusammenpasst, und der Hinweis sagt Ihnen, was.
 • «Open the destination folder when finished» (Registerkarte Output): Nach der Verarbeitung wird der Ordner geöffnet, in dem die Dateien gespeichert wurden.
 • Wenn etwas schiefgeht: Registerkarte Edit/Log ansehen. Der Log-Text lässt sich mit der Maus markieren und kopieren (Strg+C oder Rechtsklick → Copy / Copy the whole log).
@@ -924,7 +982,7 @@ COMO USAR
 4. Carregue em PROCESS: aparece o essencial e «🔍 See everything» mostra cada faixa com o formato e os efeitos (pode copiar-se). Os ficheiros originais nunca são modificados. «Cancel» interrompe o processo e apaga o que ficou a meio.
 
 VOLUME
-• Master: sobe ou desce tudo. Por baixo, o volume de cada canal.
+• Master: sobe ou desce tudo. Por baixo, o volume de cada canal. O Master e cada canal descem até -30 dB; uma posição mais abaixo é «Mute» (a vermelho): em silêncio. O volume por canal aplica-se em último lugar (depois de Bass Management, Double Bass e Channel separation): o que define é exatamente o que esse canal sobe ou desce.
 • «Set Master»: mede a faixa e sobe o Master até ao objetivo sem ultrapassar o limite de picos (anti-clipping automático). Nunca baixa o volume: se a faixa já está alta, fica em 0 dB.
 • «Auto» de «Volume per channel»: mede o volume de cada canal das faixas selecionadas e move os seus controlos para um equilíbrio de cinema: o central não é alterado, os frontais ficam cerca de 3 dB abaixo dele, os surrounds cerca de 7 dB e o subwoofer cerca de 6 dB (no máximo ±6 dB; subwoofer ±3 dB). Depois pode retocá-los à mão. Os frontais e os surrounds só se baixam se estiverem demasiado altos, nunca se sobem: há filmes que não pedem tanto estéreo nem surround.
 • «Auto» do EQ avançado: mede graves, médios e agudos dos frontais, traseiros e central e aproxima-os entre si (no máximo ±3 dB). O resultado fica no EQ avançado por grupo, onde o pode retocar. O subwoofer não é alterado.
@@ -966,7 +1024,7 @@ OUTPUT
 • Origens 7.1 saem em 5.1: os canais laterais são somados aos traseiros.
 • Origem estéreo: 2.0 fica em estéreo; 5.1 faz Upmix (com «Remove voice» da frente e de trás). Com Upmix só se usam Channel separation, os volumes e os equalizadores; o resto (Presence, normalizações, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing e Audio cleanup) fica desativado.
 • Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (um WAV por canal), RF64, W64 (Sound Forge), TrueHD e Passthrough (cópia sem conversão). MP3 em 2.0 e 1.0. «Aften Dolby Digital» (por defeito) faz o AC3 com o Aften, que dá melhor gama dinâmica nos filmes que têm muita; «AC3», com o FFmpeg. Os seus ajustes, com «⚙ Aften...» como os dos outros formatos (por defeito, comutação de blocos e largura de banda fixa completa): CBR ou VBR, largura de banda, precisão, filtros, gama dinâmica (DRC e nível de diálogo) e a informação do fluxo para o amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Standard ou HDCD, downmix preferido e os seus níveis). Nem todos os aparelhos leem um AC3 VBR.
-• «🎬 VideoEncoder» (em cima, depois de «Create ISO»): passa os ficheiros selecionados da lista (ou todos) para o Jmg VideoEncoder. Se estiver aberto, vão para a lista dele; se não, abre-se com eles. Se não o encontrar, pede-lhe que o procure uma vez. Depois, este programa fecha-se (os dois não ficam abertos ao mesmo tempo).
+• «🎬 VideoEncoder» (em cima, depois de «Create ISO»): passa os ficheiros selecionados da lista (ou todos) para o Jmg VideoEncoder. Se estiver aberto, vão para a lista dele; se não, abre-se com eles. Se não o encontrar, pede-lhe que o procure uma vez. Depois, este programa fecha-se (os dois não ficam abertos ao mesmo tempo). As definições de áudio de cada faixa que os dois programas têm (volumes, Presence, equalizador, separação, gama dinâmica, sincronia e formato) também passam. Sem ficheiros, apenas muda para o outro programa.
 • «MKV with video»: copia o vídeo, as legendas, os capítulos e as capas, e acrescenta as faixas processadas. «Audio only»: um ficheiro por faixa. Por baixo, «File name»: o nome do que sai de cada ficheiro (↺ volta ao automático) e onde será guardado.
 • «Core as a separate track» (em Output, junto ao formato; com «MKV with video»): só se ativa nas faixas que o têm, e é de cada faixa. Uma faixa DTS-HD (Master Audio ou High Resolution) leva dentro um DTS normal para os aparelhos que não entendem o HD, e uma Dolby Atmos (TrueHD) leva um TrueHD sem Atmos; marcado, sai também como faixa à parte, sem recomprimir e depois das originais.
 • «🔍 Search» (Output, ao lado de «➕ Add» da capa; com «MKV with video»): procura o filme no TMDB e põe como capa o póster que escolher. Um cover.jpg ou folder.jpg junto ao ficheiro é usado sozinho se o vídeo não tiver capa. Precisa da sua própria chave do TMDB, gratuita: na primeira vez, o programa explica como obtê-la (conta em themoviedb.org → Definições → API). Sem ligação, simplesmente não procura.
@@ -995,7 +1053,7 @@ A TER EM CONTA
 • Dynamic range e Dynamic processing: só um de cada vez, e as normalizações desativam-nos. Presence funciona com todos os efeitos, exceto com Upmix. O programa faz isso sozinho.
 • ⚠ Teto do limitador «No limit»: pode saturar se puxar muito pelos efeitos. Para ir pelo seguro, escolha -1 dBFS.
 • «Reset» limpa o separador aberto («All» = tudo). Os presets guardam e carregam as suas definições.
-• «↶ Undo» e «↷ Redo» (em baixo, junto a «Reset»): desfazem e refazem, uma a uma, as últimas 5 ações: definições de qualquer faixa, adicionar ou remover ficheiros, eliminar faixas, títulos... Em Visualization, anulam e refazem as alterações do editor (o que foi silenciado ou baixado). Também com Ctrl+Z e Ctrl+Y.
+• «↶ Undo» e «↷ Redo» (em baixo, junto a «Reset»): desfazem e refazem, uma a uma, as últimas 50 ações: definições de qualquer faixa, adicionar ou remover ficheiros, eliminar faixas, títulos... Em Visualization, anulam e refazem as alterações do editor (o que foi silenciado ou baixado). Também com Ctrl+Z e Ctrl+Y.
 • O EQ de 3 bandas e o EQ avançado não se usam ao mesmo tempo: enquanto um tiver algo definido, o outro fica desativado. O mesmo com o Master e o volume por canal. O Digital smoothing também não vai com os equalizadores nem com o Audio cleanup, nem o Audio cleanup com os equalizadores, o Dynamic range ou o Dynamic processing. Os «Auto» desligam o que não vai junto e o aviso diz-lhe o quê.
 • «Open the destination folder when finished» (separador Output): no fim do processamento, abre a pasta onde ficaram os ficheiros.
 • Se algo falhar, veja o separador Edit/Log. O texto do log pode ser selecionado com o rato e copiado (Ctrl+C ou clique direito → Copy / Copy the whole log).
@@ -1029,7 +1087,7 @@ AYUDA["zh"]="""JMG AUDIOPROCESADOR 5.1 · 帮助
 4. 点击 PROCESS：显示要点，「🔍 See everything」显示每条音轨的格式和效果（可复制）。原始文件永远不会被修改。「Cancel」会停止处理，并删除未写完的文件。
 
 VOLUME（音量）
-• Master：整体提高或降低音量。下方是每个声道的音量。
+• Master：整体提高或降低音量。下方是每个声道的音量。 Master 和每个声道最低到 -30 dB；再往下一格是「Mute」（红色）：静音。 每声道音量最后应用（在 Bass Management、Double Bass 和 Channel separation 之后）：设置多少，该声道就正好升高或降低多少。
 • 「Set Master」：测量音轨，把 Master 提高到目标值，同时不超过峰值上限（自动防削波）。它从不降低音量：如果音轨已经很响，就保持 0 dB。
 • 「Volume per channel」的「Auto」：测量所选音轨每个声道的音量，并移动对应滑块，得到影院式的平衡：中置不变，前置比它低约 3 dB，环绕低约 7 dB，低音炮低约 6 dB（最多 ±6 dB；低音炮 ±3 dB）。之后可以手动微调。前置和环绕声道只会在过响时降低，从不提高：有些影片并不需要那么多立体声或环绕声。
 • 高级均衡器的「Auto」：测量前置、环绕和中置的低音、中音和高音，并使它们彼此接近（最多 ±3 dB）。结果保存在“按组高级 EQ”中，可以继续微调。低音炮不变。
@@ -1071,7 +1129,7 @@ OUTPUT（输出）
 • 7.1 来源会输出为 5.1：侧环绕声道会混入后环绕声道。
 • 立体声来源：2.0 保持立体声；5.1 进行升混（Upmix，可用「Remove voice」去除前后置中的人声）。使用 Upmix 时只能用 Channel separation、音量和均衡器；其余功能（Presence、响度标准化、Dynamic range、Dynamic processing、Bass Management、Double Bass、Smoothing 和 Audio cleanup）会被禁用。
 • 格式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（每个声道一个 WAV）、RF64、W64 (Sound Forge)、TrueHD 和 Passthrough（不转换直接复制）。2.0 和 1.0 还可选 MP3。「Aften Dolby Digital」（默认）用 Aften 编码 AC3，对动态范围大的影片效果更好；「AC3」用 FFmpeg。其设置在「⚙ Aften...」中，与其他格式相同（默认启用块切换和固定全带宽）：CBR 或 VBR、带宽、精度、滤波器、动态范围（DRC 和对白电平）以及供功放使用的码流信息（Dolby Surround EX、Dolby Headphone、A/D 转换器 Standard 或 HDCD、首选下混及其电平）。并非所有设备都能读取 VBR 的 AC3。
-• 「🎬 VideoEncoder」（顶部「Create ISO」之后）：把列表中选中的文件（或全部）交给 Jmg VideoEncoder。如果它已打开，文件会加入它的列表；否则会用这些文件打开它。如果找不到，会请您手动查找一次。之后本程序会关闭（两个程序不会同时开着）。
+• 「🎬 VideoEncoder」（顶部「Create ISO」之后）：把列表中选中的文件（或全部）交给 Jmg VideoEncoder。如果它已打开，文件会加入它的列表；否则会用这些文件打开它。如果找不到，会请您手动查找一次。之后本程序会关闭（两个程序不会同时开着）。两个程序共有的每条音轨的音频设置（音量、Presence、均衡器、声道分离、动态范围、同步和格式）也会一起传过去。 没有文件时，只是切换到另一个程序。
 • 「MKV with video」：复制视频、字幕、章节和封面，并加入处理后的音轨。「Audio only」：每条音轨输出一个文件。下方的「File name」：每个文件输出的名称（↺ 恢复自动名称），以及保存位置。
 • 「Core as a separate track」（在 Output 中，格式旁边；配合「MKV with video」）：只有带核心的音轨才能勾选，且按音轨分别设置。DTS-HD 音轨（Master Audio 或 High Resolution）内含一条普通 DTS，供不支持 HD 的设备使用；Dolby Atmos（TrueHD）音轨内含一条不带 Atmos 的 TrueHD。勾选后，它也会作为单独的音轨输出，不重新编码，排在原始音轨之后。
 • 「🔍 Search」（Output，在封面的「➕ Add」旁边；配合「MKV with video」）：在 TMDB 上查找电影，并把你选择的海报设为封面。如果视频本身没有封面，文件旁的 cover.jpg 或 folder.jpg 会被自动使用。需要你自己的免费 TMDB 密钥：第一次使用时，程序会说明如何获取（在 themoviedb.org 注册账号 → 设置 → API）。没有网络时只是不进行搜索。
@@ -1100,7 +1158,7 @@ COMBINE（合并音轨 · 配音与同步）
 • Dynamic range 和 Dynamic processing 一次只能启用一个，启用响度标准化会关闭它们。Presence 可与所有效果同时使用（Upmix 除外）。程序会自动处理。
 • ⚠ 限幅器上限选「No limit」时，如果效果开得很大，可能会削波。为保险起见，请选 -1 dBFS。
 • 「Reset」清空当前选项卡（勾选「All」= 全部）。预设（preset）可保存和载入你的设置。
-• 「↶ Undo」和「↷ Redo」（底部，「Reset」旁边）：逐一撤销和重做最近 5 个操作：任何音轨的设置更改、添加或移除文件、删除音轨、标题等。在 Visualization 中，它们撤销和重做编辑器中的更改（静音或降低的部分）。也可以用 Ctrl+Z 和 Ctrl+Y。
+• 「↶ Undo」和「↷ Redo」（底部，「Reset」旁边）：逐一撤销和重做最近 50 个操作：任何音轨的设置更改、添加或移除文件、删除音轨、标题等。在 Visualization 中，它们撤销和重做编辑器中的更改（静音或降低的部分）。也可以用 Ctrl+Z 和 Ctrl+Y。
 • 3 段均衡器和高级均衡器不能同时使用：其中一个有设置时，另一个处于禁用状态。Master 和各声道音量也是如此。Digital smoothing 也不能与均衡器或 Audio cleanup 同时使用，Audio cleanup 也不能与均衡器、Dynamic range 或 Dynamic processing 同时使用。「Auto」会关闭不能同时使用的项，提示会告诉您关闭了什么。
 • 「Open the destination folder when finished」（Output 选项卡）：处理完成后打开保存文件的文件夹。
 • 如果出现问题，请查看 Edit/Log 选项卡。日志文字可以用鼠标选中并复制（Ctrl+C 或右键 → Copy / Copy the whole log）。
@@ -1134,7 +1192,7 @@ AYUDA["ja"]="""JMG AUDIOPROCESADOR 5.1 · ヘルプ
 4. PROCESS を押します。要点が表示され、「🔍 See everything」で各トラックの形式とエフェクトを確認できます（コピー可）。元のファイルが変更されることはありません。「Cancel」で処理を止めると、書きかけのファイルは削除されます。
 
 VOLUME（音量）
-• Master：全体の音量を上げ下げします。その下は各チャンネルの音量です。
+• Master：全体の音量を上げ下げします。その下は各チャンネルの音量です。 Master と各チャンネルは -30 dB まで下げられます。さらに1つ下が「Mute」（赤）で、無音になります。 チャンネルごとの音量は最後に適用されます（Bass Management、Double Bass、Channel separation の後）。設定した値がそのままそのチャンネルの上げ下げになります。
 • 「Set Master」：トラックを測定し、ピークの上限を超えない範囲で Master を目標値まで上げます（自動クリッピング防止）。音量を下げることはありません。すでに大きい場合は 0 dB のままです。
 • 「Volume per channel」の「Auto」：選択したトラックの各チャンネルの音量を測定し、スライダーを映画向けのバランスに動かします。センターは変更せず、フロントはそれより約 3 dB 下、サラウンドは約 7 dB 下、サブウーファーは約 6 dB 下にします（最大 ±6 dB、サブウーファーは ±3 dB）。その後、手動で調整できます。フロントとサラウンドは大きすぎるときに下げるだけで、上げることはありません。ステレオやサラウンドをそれほど必要としない映画もあるためです。
 • 詳細 EQ の「Auto」：フロント、サラウンド、センターの低音、中音、高音を測定し、互いに近づけます（最大 ±3 dB）。結果はグループ別の詳細 EQ に入り、そこで調整できます。サブウーファーは変更しません。
@@ -1176,7 +1234,7 @@ OUTPUT（出力）
 • 7.1 の音源は 5.1 で出力されます：サイドチャンネルはリアチャンネルに加算されます。
 • ステレオ音源：2.0 はステレオのまま、5.1 はアップミックスします（「Remove voice」でフロントとリアの声を減らせます）。Upmix では Channel separation、音量、イコライザーだけが使えます。それ以外（Presence、ノーマライズ、Dynamic range、Dynamic processing、Bass Management、Double Bass、Smoothing、Audio cleanup）は無効になります。
 • 形式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（チャンネルごとに 1 つの WAV）、RF64、W64 (Sound Forge)、TrueHD、Passthrough（変換せずにコピー）。2.0 と 1.0 では MP3 も選べます。「Aften Dolby Digital」（既定）は Aften で AC3 を作り、ダイナミックレンジの大きい映画で優れます。「AC3」は FFmpeg です。設定はほかの形式と同じく「⚙ Aften...」から（初期値はブロック切り替えと固定・全帯域）：CBR/VBR、帯域幅、精度、フィルター、ダイナミックレンジ（DRC と台詞レベル）、アンプ向けのビットストリーム情報（Dolby Surround EX、Dolby Headphone、A/D コンバーター Standard または HDCD、推奨ダウンミックスとそのレベル）。VBR の AC3 はすべての機器で再生できるわけではありません。
-• 「🎬 VideoEncoder」（上部、「Create ISO」の後ろ）：リストで選んだファイル（またはすべて）を Jmg VideoEncoder に渡します。開いていればそのリストに入り、開いていなければそのファイルで起動します。見つからない場合は一度だけ場所を尋ねます。その後、このプログラムは閉じます（両方が同時に開いたままにはなりません）。
+• 「🎬 VideoEncoder」（上部、「Create ISO」の後ろ）：リストで選んだファイル（またはすべて）を Jmg VideoEncoder に渡します。開いていればそのリストに入り、開いていなければそのファイルで起動します。見つからない場合は一度だけ場所を尋ねます。その後、このプログラムは閉じます（両方が同時に開いたままにはなりません）。両方のプログラムに共通する各トラックの音声設定（音量、Presence、イコライザー、チャンネル分離、ダイナミックレンジ、同期、形式）も一緒に渡されます。 ファイルがないときは、もう一方のプログラムに切り替えるだけです。
 • 「MKV with video」：映像・字幕・チャプター・カバー画像をコピーし、処理済みトラックを追加します。「Audio only」：トラックごとに 1 ファイル。その下の「File name」：各ファイルから出力されるものの名前（↺ で自動の名前に戻ります）と保存先。
 • 「Core as a separate track」（Output の形式の横；「MKV with video」と一緒に）：コアを持つトラックでだけ有効になり、トラックごとに設定します。DTS-HD トラック（Master Audio または High Resolution）には HD に対応しない機器のための通常の DTS が、Dolby Atmos（TrueHD）トラックには Atmos なしの TrueHD が入っています。チェックすると、それも別のトラックとして再エンコードせずに、元のトラックの後に出力されます。
 • 「🔍 Search」（Output、カバーの「➕ Add」の横。「MKV with video」と一緒に）：TMDB で映画を検索し、選んだポスターをカバーにします。動画にカバーがない場合、ファイルの横の cover.jpg や folder.jpg を自動で使います。ご自身の無料の TMDB キーが必要です。初回に、プログラムが取得方法を説明します（themoviedb.org でアカウント作成 → 設定 → API）。接続がないときは検索しないだけです。
@@ -1205,7 +1263,7 @@ COMBINE（トラック結合 · 吹き替えと同期）
 • Dynamic range と Dynamic processing は同時に 1 つだけ使えます。ノーマライズを使うと無効になります。Presence はすべてのエフェクトと一緒に使えます（Upmix は除く）。切り替えはプログラムが自動で行います。
 • ⚠ リミッター上限を「No limit」にすると、効果を強くかけた場合に音割れすることがあります。安全のため -1 dBFS をおすすめします。
 • 「Reset」は開いているタブを初期化します（「All」= すべて）。プリセットで設定を保存・読み込みできます。
-• 「↶ Undo」と「↷ Redo」（下部、「Reset」の隣）：直前の 5 つの操作を 1 つずつ元に戻し、やり直します。どのトラックの設定変更、ファイルの追加や削除、トラックの削除、タイトルなども対象です。Visualization では、エディターでの変更（無音にした部分や下げた部分）を元に戻し、やり直します。Ctrl+Z と Ctrl+Y でも操作できます。
+• 「↶ Undo」と「↷ Redo」（下部、「Reset」の隣）：直前の 50 つの操作を 1 つずつ元に戻し、やり直します。どのトラックの設定変更、ファイルの追加や削除、トラックの削除、タイトルなども対象です。Visualization では、エディターでの変更（無音にした部分や下げた部分）を元に戻し、やり直します。Ctrl+Z と Ctrl+Y でも操作できます。
 • 3 バンド EQ と詳細 EQ は同時に使えません。一方に設定があるあいだ、もう一方は無効になります。Master とチャンネルごとの音量も同じです。Digital smoothing はイコライザーや Audio cleanup とも同時に使えず、Audio cleanup もイコライザー、Dynamic range、Dynamic processing と同時に使えません。「Auto」は同時に使えないものをオフにし、何をオフにしたかを通知に表示します。
 • 「Open the destination folder when finished」（Output タブ）：処理が終わると、ファイルを保存したフォルダーを開きます。
 • 問題が起きたときは Edit/Log タブを確認してください。ログの文字はマウスで選択してコピーできます（Ctrl+C または右クリック → Copy / Copy the whole log）。
@@ -1239,7 +1297,7 @@ AYUDA["ru"]="""JMG AUDIOPROCESADOR 5.1 · СПРАВКА
 4. Нажмите PROCESS: появится главное, а «🔍 See everything» покажет каждую дорожку с её форматом и эффектами (текст можно скопировать). Исходные файлы никогда не изменяются. «Cancel» останавливает обработку и удаляет всё, что осталось недописанным.
 
 ГРОМКОСТЬ
-• Master: поднимает или опускает всё сразу. Под ним — громкость каждого канала.
+• Master: поднимает или опускает всё сразу. Под ним — громкость каждого канала. Master и каждый канал опускаются до -30 дБ; ещё одна позиция ниже — «Mute» (красным): тишина. Громкость по каналам применяется последней (после Bass Management, Double Bass и Channel separation): сколько вы задали, ровно настолько канал станет громче или тише.
 • «Set Master»: измеряет дорожку и поднимает Master до цели, не превышая предел пиков (автоматическая защита от клиппинга). Громкость он никогда не снижает: если дорожка уже громкая, остаётся 0 dB.
 • «Auto» в «Volume per channel»: измеряет громкость каждого канала выбранных дорожек и ставит их ползунки в баланс, как в кинотеатре: центр не трогается, фронты оказываются примерно на 3 dB ниже него, тылы — примерно на 7 dB, сабвуфер — примерно на 6 dB (не больше ±6 dB; сабвуфер ±3 dB). Потом их можно подправить вручную. Фронты и тылы только опускаются, если они слишком громкие, и никогда не поднимаются: некоторым фильмам не нужно столько стерео и объёма.
 • «Auto» продвинутого эквалайзера: измеряет низкие, средние и высокие частоты фронтов, тылов и центра и сближает их (не больше ±3 dB). Результат остаётся в продвинутом эквалайзере по группам, где его можно подправить. Сабвуфер не трогается.
@@ -1281,7 +1339,7 @@ OUTPUT
 • Источники 7.1 выводятся как 5.1: боковые каналы подмешиваются к тыловым.
 • Стерео-источник: 2.0 остаётся стерео; 5.1 делает Upmix (с «Remove voice» спереди и сзади). При Upmix используются только Channel separation, громкости и эквалайзеры; остальное (Presence, нормализации, динамический диапазон, динамическая обработка, Bass Management, Double Bass, сглаживание и очистка) отключается.
 • Форматы: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (по WAV на канал), RF64, W64 (Sound Forge), TrueHD и Passthrough (копия без преобразования). MP3 для 2.0 и 1.0. «Aften Dolby Digital» (по умолчанию) делает AC3 через Aften, что даёт лучший динамический диапазон в фильмах, где его много; «AC3» — через FFmpeg. Его настройки — через «⚙ Aften...», как у других форматов (по умолчанию block switching и фиксированная полная полоса): CBR или VBR, полоса, точность, фильтры, динамический диапазон (DRC и уровень диалогов) и служебная информация для ресивера (Dolby Surround EX, Dolby Headphone, преобразователь Standard или HDCD, предпочитаемый даунмикс и его уровни). Не каждое устройство читает AC3 с VBR.
-• «🎬 VideoEncoder» (вверху, после «Create ISO»): отправляет выбранные в списке файлы (или все) в Jmg VideoEncoder. Если он открыт, они попадают в его список; если нет — он открывается с ними. Если его не найти, программа один раз попросит указать, где он. После этого эта программа закрывается (обе сразу открытыми не остаются).
+• «🎬 VideoEncoder» (вверху, после «Create ISO»): отправляет выбранные в списке файлы (или все) в Jmg VideoEncoder. Если он открыт, они попадают в его список; если нет — он открывается с ними. Если его не найти, программа один раз попросит указать, где он. После этого эта программа закрывается (обе сразу открытыми не остаются). Общие для обеих программ настройки звука каждой дорожки (громкости, Presence, эквалайзер, разделение каналов, динамический диапазон, синхронизация и формат) передаются тоже. Без файлов просто переключает на другую программу.
 • «MKV with video»: копирует видео, субтитры, главы и обложки и добавляет обработанные дорожки. «Audio only»: по файлу на дорожку. Ниже — «File name»: имя того, что получится из каждого файла (↺ возвращает автоматическое), и куда оно будет сохранено.
 • «Core as a separate track» (в Output, рядом с форматом; вместе с «MKV with video»): включается только на дорожках, где есть ядро, и задаётся для каждой дорожки. Дорожка DTS-HD (Master Audio или High Resolution) содержит обычный DTS для устройств, которые не понимают HD, а дорожка Dolby Atmos (TrueHD) — TrueHD без Atmos; если отмечено, ядро выводится и отдельной дорожкой, без перекодирования, после оригиналов.
 • «🔍 Search» (Output, рядом с «➕ Add» для обложки; вместе с «MKV with video»): ищет фильм на TMDB и ставит обложкой выбранный постер. cover.jpg или folder.jpg рядом с файлом используется сам, если у видео нет обложки. Нужен ваш собственный бесплатный ключ TMDB: в первый раз программа объяснит, как его получить (аккаунт на themoviedb.org → Настройки → API). Без подключения поиск просто не выполняется.
@@ -1310,7 +1368,7 @@ COMBINE TRACKS (ДУБЛЯЖИ И СИНХРОНИЗАЦИЯ)
 • Динамический диапазон и динамическая обработка: только по одному, и нормализации их отключают. Presence работает со всеми эффектами, кроме Upmix. Программа делает это сама.
 • ⚠ Потолок лимитера «No limit»: при сильных эффектах возможен клиппинг. Для надёжности выберите -1 dBFS.
 • «Reset» очищает открытую вкладку («All» = всё). Пресеты сохраняют и загружают ваши настройки.
-• «↶ Undo» и «↷ Redo» (внизу, рядом с «Reset»): отменяют и повторяют по одному последние 5 действий: изменения настроек любой дорожки, добавление или удаление файлов, удаление дорожек, названия... В Visualization они отменяют и повторяют изменения редактора (заглушённое или ослабленное). Также Ctrl+Z и Ctrl+Y.
+• «↶ Undo» и «↷ Redo» (внизу, рядом с «Reset»): отменяют и повторяют по одному последние 50 действий: изменения настроек любой дорожки, добавление или удаление файлов, удаление дорожек, названия... В Visualization они отменяют и повторяют изменения редактора (заглушённое или ослабленное). Также Ctrl+Z и Ctrl+Y.
 • 3-полосный EQ и продвинутый EQ вместе не используются: пока в одном что-то выставлено, другой отключён. То же с Master и громкостью по каналам. Цифровое сглаживание тоже не сочетается с эквалайзерами и с очисткой звука, а очистка — с эквалайзерами, динамическим диапазоном и динамической обработкой. Кнопки «Auto» выключают несовместимое, и сообщение говорит, что именно.
 • «Open the destination folder when finished» (вкладка Output): по окончании обработки открывает папку, куда сохранены файлы.
 • Если что-то пошло не так, посмотрите вкладку Edit/Log. Текст журнала можно выделить мышью и скопировать (Ctrl+C или правый щелчок → Copy / Copy the whole log).
@@ -1344,7 +1402,7 @@ AYUDA["hi"]="""JMG AUDIOPROCESADOR 5.1 · सहायता
 4. PROCESS दबाएँ: ज़रूरी जानकारी दिखती है और «🔍 See everything» हर ट्रैक को उसके फ़ॉर्मैट और इफ़ेक्ट के साथ दिखाता है (इसे कॉपी किया जा सकता है)। आपकी मूल फ़ाइलें कभी नहीं बदलतीं। «Cancel» प्रोसेस रोकता है और जो कुछ आधा लिखा रह गया हो उसे मिटा देता है।
 
 VOLUME (आवाज़)
-• Master: सब कुछ एक साथ ऊपर या नीचे करता है। उसके नीचे हर चैनल का वॉल्यूम है।
+• Master: सब कुछ एक साथ ऊपर या नीचे करता है। उसके नीचे हर चैनल का वॉल्यूम है। Master और हर चैनल -30 dB तक जाते हैं; उससे एक स्थान नीचे «Mute» (लाल) है: पूरी तरह चुप। प्रति चैनल वॉल्यूम सबसे आख़िर में लगता है (Bass Management, Double Bass और Channel separation के बाद): आप जितना सेट करते हैं, वह चैनल ठीक उतना ही ऊपर या नीचे जाता है।
 • «Set Master»: ट्रैक को मापता है और Master को लक्ष्य तक उठाता है, पीक की सीमा पार किए बिना (अपने-आप क्लिपिंग से बचाव)। यह वॉल्यूम कभी कम नहीं करता: अगर ट्रैक पहले से तेज़ है, तो 0 dB पर रहता है।
 • «Volume per channel» का «Auto»: चुने हुए ट्रैकों के हर चैनल की लाउडनेस मापता है और उनके स्लाइडरों को सिनेमा जैसे संतुलन पर ले आता है: सेंटर को नहीं छूता, फ़्रंट उससे लगभग 3 dB नीचे, सराउंड लगभग 7 dB और सबवूफ़र लगभग 6 dB नीचे (अधिकतम ±6 dB; सबवूफ़र ±3 dB)। बाद में आप उन्हें हाथ से ठीक कर सकते हैं। फ़्रंट और सराउंड सिर्फ़ तब घटाए जाते हैं जब वे बहुत तेज़ हों, कभी बढ़ाए नहीं जाते: कुछ फ़िल्मों को इतना स्टीरियो या सराउंड नहीं चाहिए।
 • एडवांस्ड EQ का «Auto»: फ़्रंट, सराउंड और सेंटर के बेस, मिड और ट्रेबल को मापता है और उन्हें एक-दूसरे के पास लाता है (अधिकतम ±3 dB)। नतीजा ग्रुप वाले एडवांस्ड EQ में रहता है, जहाँ आप उसे बदल सकते हैं। सबवूफ़र को नहीं छूता।
@@ -1386,7 +1444,7 @@ OUTPUT
 • 7.1 स्रोत 5.1 के रूप में निकलते हैं: साइड चैनल रियर में मिला दिए जाते हैं।
 • स्टीरियो स्रोत: 2.0 स्टीरियो ही रहता है; 5.1 एक Upmix करता है (फ़्रंट और रियर से «Remove voice» के साथ)। Upmix के साथ सिर्फ़ Channel separation, वॉल्यूम और इक्वलाइज़र इस्तेमाल होते हैं; बाकी (Presence, नॉर्मलाइज़ेशन, डायनामिक रेंज, डायनामिक प्रोसेसिंग, Bass Management, Double Bass, स्मूदिंग और सफ़ाई) बंद हो जाते हैं।
 • फ़ॉर्मैट: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (हर चैनल की एक WAV), RF64, W64 (Sound Forge), TrueHD और Passthrough (बिना बदले कॉपी)। 2.0 और 1.0 के लिए MP3। «Aften Dolby Digital» (डिफ़ॉल्ट) AC3 को Aften से बनाता है, जो ज़्यादा डायनामिक रेंज वाली फ़िल्मों में बेहतर रेंज देता है; «AC3», FFmpeg से। इसकी सेटिंग्स दूसरे फ़ॉर्मैटों की तरह «⚙ Aften...» से (डिफ़ॉल्ट: block switching और स्थिर पूरी बैंडविड्थ): CBR या VBR, बैंडविड्थ, सटीकता, फ़िल्टर, डायनामिक रेंज (DRC और संवाद स्तर) और एम्प्लीफ़ायर के लिए जानकारी (Dolby Surround EX, Dolby Headphone, Standard या HDCD A/D कनवर्टर, पसंदीदा डाउनमिक्स और उसके स्तर)। हर डिवाइस VBR वाला AC3 नहीं पढ़ता।
-• «🎬 VideoEncoder» (ऊपर, «Create ISO» के बाद): सूची की चुनी हुई फ़ाइलें (या सभी) Jmg VideoEncoder को भेजता है। अगर वह खुला है, तो वे उसकी सूची में जाती हैं; अगर नहीं, तो वह उनके साथ खुलता है। अगर वह न मिले, तो एक बार उसे ढूँढने को कहता है। फिर यह प्रोग्राम बंद हो जाता है (दोनों एक साथ खुले नहीं रहते)।
+• «🎬 VideoEncoder» (ऊपर, «Create ISO» के बाद): सूची की चुनी हुई फ़ाइलें (या सभी) Jmg VideoEncoder को भेजता है। अगर वह खुला है, तो वे उसकी सूची में जाती हैं; अगर नहीं, तो वह उनके साथ खुलता है। अगर वह न मिले, तो एक बार उसे ढूँढने को कहता है। फिर यह प्रोग्राम बंद हो जाता है (दोनों एक साथ खुले नहीं रहते)। दोनों प्रोग्रामों में मौजूद हर ट्रैक की ऑडियो सेटिंग्स (वॉल्यूम, Presence, इक्वलाइज़र, चैनल सेपरेशन, डायनामिक रेंज, सिंक और फ़ॉर्मेट) भी साथ जाती हैं। फ़ाइलें न हों तो बस दूसरे प्रोग्राम पर चला जाता है।
 • «MKV with video»: वीडियो, सबटाइटल, चैप्टर और कवर कॉपी करता है, और प्रोसेस किए गए ट्रैक जोड़ता है। «Audio only»: हर ट्रैक की एक फ़ाइल। नीचे «File name»: हर फ़ाइल से जो निकलेगा उसका नाम (↺ अपने-आप वाले नाम पर लौटाता है) और वह कहाँ सहेजा जाएगा।
 • «Core as a separate track» (Output में, फ़ॉर्मेट के पास; «MKV with video» के साथ): यह सिर्फ़ उन ट्रैकों पर चालू होता है जिनमें कोर होता है, और हर ट्रैक के लिए अलग से लगता है। DTS-HD ट्रैक (Master Audio या High Resolution) के अंदर उन डिवाइसों के लिए एक सामान्य DTS होता है जो HD नहीं समझते, और Dolby Atmos (TrueHD) ट्रैक के अंदर Atmos के बिना एक TrueHD; चुनने पर वह अलग ट्रैक के रूप में भी निकलता है, बिना दोबारा एन्कोड किए, मूल ट्रैकों के बाद।
 • «🔍 Search» (Output, कवर के «➕ Add» के पास; «MKV with video» के साथ): TMDB पर फ़िल्म खोजता है और आपका चुना हुआ पोस्टर कवर बना देता है। अगर वीडियो में कवर न हो, तो फ़ाइल के पास का cover.jpg या folder.jpg अपने-आप इस्तेमाल होता है। इसके लिए आपकी अपनी मुफ़्त TMDB key चाहिए: पहली बार प्रोग्राम बताता है कि इसे कैसे पाएँ (themoviedb.org पर खाता → Settings → API)। कनेक्शन न हो तो बस खोज नहीं होती।
@@ -1415,7 +1473,7 @@ COMBINE TRACKS (डबिंग और सिंक)
 • डायनामिक रेंज और डायनामिक प्रोसेसिंग: एक समय में सिर्फ़ एक, और नॉर्मलाइज़ेशन उन्हें बंद कर देते हैं। Presence सभी इफ़ेक्ट के साथ काम करता है, Upmix को छोड़कर। प्रोग्राम यह अपने-आप करता है।
 • ⚠ लिमिटर की सीमा «No limit»: इफ़ेक्ट ज़्यादा बढ़ाने पर क्लिपिंग हो सकती है। सुरक्षित रहने के लिए -1 dBFS चुनें।
 • «Reset» खुला टैब साफ़ करता है («All» = सब कुछ)। प्रीसेट आपकी सेटिंग्स सहेजते और लोड करते हैं।
-• «↶ Undo» और «↷ Redo» (नीचे, «Reset» के पास): आख़िरी 5 कार्यों को एक-एक करके वापस करते और दोहराते हैं: किसी भी ट्रैक की सेटिंग में बदलाव, फ़ाइलें जोड़ना या हटाना, ट्रैक मिटाना, शीर्षक... Visualization में ये एडिटर के बदलाव (म्यूट किए या कम किए गए हिस्से) वापस करते और दोहराते हैं। Ctrl+Z और Ctrl+Y से भी।
+• «↶ Undo» और «↷ Redo» (नीचे, «Reset» के पास): आख़िरी 50 कार्यों को एक-एक करके वापस करते और दोहराते हैं: किसी भी ट्रैक की सेटिंग में बदलाव, फ़ाइलें जोड़ना या हटाना, ट्रैक मिटाना, शीर्षक... Visualization में ये एडिटर के बदलाव (म्यूट किए या कम किए गए हिस्से) वापस करते और दोहराते हैं। Ctrl+Z और Ctrl+Y से भी।
 • 3-बैंड EQ और एडवांस्ड EQ एक साथ इस्तेमाल नहीं होते: जब तक एक में कुछ सेट है, दूसरा बंद रहता है। Master और हर चैनल के वॉल्यूम के साथ भी ऐसा ही। डिजिटल स्मूदिंग भी इक्वलाइज़रों या ऑडियो सफ़ाई के साथ नहीं चलता, न ऑडियो सफ़ाई इक्वलाइज़रों, डायनामिक रेंज या डायनामिक प्रोसेसिंग के साथ। «Auto» बटन जो साथ नहीं चलता उसे बंद कर देते हैं और सूचना बताती है कि क्या।
 • «Open the destination folder when finished» (Output टैब): प्रोसेस ख़त्म होने पर वह फ़ोल्डर खोलता है जहाँ फ़ाइलें सहेजी गईं।
 • अगर कुछ गड़बड़ हो, तो Edit/Log टैब देखें। लॉग का टेक्स्ट माउस से चुना और कॉपी किया जा सकता है (Ctrl+C या दायाँ क्लिक → Copy / Copy the whole log)।
@@ -1756,7 +1814,7 @@ class _ReproFF:
         af=[]
         if ich is not None and nch>1:
             af.append("aeval=exprs='"+"|".join(("val(%d)"%i if i==ich else "0") for i in range(nch))+"':c=same")
-        if estereo:af.append("aformat=channel_layouts=stereo")
+        if estereo:af.append(_pan_est(nch) or "aformat=channel_layouts=stereo")   # (JMG, 18-11) con el subwoofer
         cmd=[FFPLAY,"-nodisp","-autoexit","-hide_banner","-loglevel","error"]+(["-i","-"] if arg else ["-ss","%.3f"%max(0.0,pos)]+(["-af",",".join(af)] if af else [])+[src])
         try:
             self.pr=subprocess.Popen(cmd,stdin=self.p0.stdout if arg else subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
@@ -2477,7 +2535,7 @@ class AudioProcessorGUI:
             try:
                 if cls=="Entry":
                     pass
-                    w.configure(bg=CDN,fg=CT,insertbackground=CT,
+                    w.configure(bg=CDN,fg=_fg_mute(w,CT),insertbackground=CT,
                                 highlightbackground=CSB,highlightcolor=CID,
                                 highlightthickness=1,borderwidth=0,relief="flat",
                                 disabledbackground=CDN,disabledforeground=CA)
@@ -2796,7 +2854,10 @@ class AudioProcessorGUI:
                     c=self._cfg_nueva(base_cfg,ps[k])
                     # la sincronizacion no se hereda de otro archivo: su propio framerate, sin conversion ni delay
                     c.update({"fps_from":_f,"fps_to":_f,"fps_metodo":"tono","delay_init":0})
+                    q_=getattr(self,"_tr_pend",{}).get(os.path.normcase(os.path.abspath(ruta)))   # (árbitro, 18-11) llegó de Jmg VideoEncoder con sus ajustes
+                    if q_ and q_.get(str(ps[k].get("index_global"))):self._traspaso_a_cfg(c,q_[str(ps[k].get("index_global"))],ps[k])
                     self.pconf[(ruta,k)]=c
+                getattr(self,"_tr_pend",{}).pop(os.path.normcase(os.path.abspath(ruta)),None)
             for p in ps:
                 idx=p['orden']
                 if idx in self.borrar_pistas.get(ruta,()):continue
@@ -2988,7 +3049,7 @@ class AudioProcessorGUI:
             is_excluded = ruta in self.excluir_pistas and idx in self.excluir_pistas[ruta]
 
             if is_excluded:
-                txt=f"[-] {pref}#{p['orden']}  [{p['lang']}]  {_nombre_codec(p['codec'],p.get('perfil'))}  {p['layout']} ({p['channels']}ch){bt}{tt}"
+                txt=f"[-] {pref}#{p['orden']}  [{p['lang']}]  {_nombre_codec(p['codec'],p.get('perfil'))}  {p['layout']} ({p['channels']}ch){bt}{tt}"+(self._sal_pista_txt(ruta,idx) if i in sel else "")   # (JMG, 18-11) sin la original, la pista nueva sigue diciendo cómo sale
                 bg=CDN; fg=CAV
             elif i in sel:
                 txt=f"* {pref}#{p['orden']}  [{p['lang']}]  {_nombre_codec(p['codec'],p.get('perfil'))}  {p['layout']} ({p['channels']}ch){bt}{tt}"+self._sal_pista_txt(ruta,idx)   # (JMG, 24-11) cómo sale
@@ -3111,7 +3172,7 @@ class AudioProcessorGUI:
 
     # ---------- Deshacer / Rehacer: las ultimas 5 acciones, de cualquier tipo (ajustes de cualquier pista, añadir o quitar archivos,
     #            eliminar pistas, titulos, marcas...), en todas las pestañas y en Visualizacion, los cambios del editor (18-11) ----------
-    _UD_MAX=5
+    _UD_MAX=50   # (JMG, 19-11) antes 5: «solo me ha deshecho una cosa»
     _UD_ARCH=("ppa","usp","ext_subs","ext_cover","pmark","ptramos","ptitulo","borrar_pistas","excluir_pistas","sel_por_archivo")
     _UD_GLOB=("remux","remux_subs","remux_caps","remux_adj","remux_meta","destino_modo","destino_carpeta","dup_modo","al_terminar")
     def _ud_tick(self):
@@ -3272,7 +3333,7 @@ class AudioProcessorGUI:
         except Exception:
             try:return float(var.get())
             except Exception:return 0.0
-    def _sl(self,p,lbl,var,a,b,r,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=0):
+    def _sl(self,p,lbl,var,a,b,r,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=0,mute=False):
         if not step and isinstance(var,tk.IntVar):step=1
         if lbl:(ttk.Label(p,text=lbl) if lw>=20 else ttk.Label(p,text=lbl,width=lw)).grid(row=r,column=cl,sticky="w",padx=5,pady=3)
         e=ttk.Scale(p,from_=a,to=b,variable=var,orient="horizontal",length=int(sl*0.75))
@@ -3286,15 +3347,23 @@ class AudioProcessorGUI:
             return x
         def oc(*_):
             x=rv()
+            if mute:   # (JMG, 19-11) abajo del todo: «Mute» en rojo (en silencio)
+                if x<=a+0.5:
+                    if ve.get()!="Mute":ve.set("Mute")
+                    en.configure(fg="#ff4040");return
+                en.configure(fg=CT if str(en.cget("state"))=="normal" else CA)   # (árbitro) apagada, sigue en gris
             try:ac=float(ve.get().replace(",","."))
             except ValueError:ac=None
             if ac is None or abs(ac-x)>0.001:ve.set(self._fv(x))
         self._tra(var,oc,e)
         def ap(e_=None):
+            if mute and ve.get().strip().lower() in ("mute","m","-inf"):ve.set(self._fv(a))   # (JMG, 19-11) escribir «Mute» = abajo del todo
             try:v=float(ve.get().replace(",","."))
-            except ValueError:ve.set(self._fv(rv()));self.root.focus_set();return
+            except ValueError:ve.set(self._fv(rv()));(oc() if mute else None);self.root.focus_set();return
             if step:v=int(round(v/float(step))*step)
-            v=max(a,min(b,v));var.set(v);ve.set(self._fv(v))
+            v=max(a,min(b,v))
+            if mute and v<a+1-1e-9:v=a   # (JMG, 19-11) por debajo de -30: Mute
+            var.set(v);ve.set("Mute" if (mute and v<=a+0.5) else self._fv(v))
             try:e.set(v)
             except Exception:pass
             if e_ and e_.keysym in ("Return", "KP_Enter"):
@@ -3323,14 +3392,26 @@ class AudioProcessorGUI:
                     if abs(float(e.get())-sv)>1e-6:e.set(sv)
                 except Exception:pass
             e.bind("<ButtonRelease-1>",soltar,add="+")
+        if mute:   # (JMG, 19-11) de -30 a Mute de un salto (sin medias)
+            _gm=[False]
+            def msnap(*_):
+                if _gm[0]:return
+                x=self._raw(var)
+                if a<x<a+1:
+                    _gm[0]=True
+                    try:var.set(a if x<a+0.5 else a+1)
+                    finally:_gm[0]=False
+            self._tra(var,msnap,e);oc()
         # flechas del teclado: clic en el deslizador y ← → (o ↑ ↓) lo mueven de uno en uno
-        paso=step or (0.5 if isinstance(var,tk.DoubleVar) and (b-a)<=40 else 1)
+        paso=step or (0.5 if isinstance(var,tk.DoubleVar) and ((b-a)<=40 or mute) else 1)
         e.configure(takefocus=1);e.bind("<Button-1>",lambda ev:e.focus_set(),add="+")
         def mv(ev,s):
             try:
                 if "disabled" in e.state():return "break"
             except Exception:pass
             v=max(a,min(b,round(self._raw(var)/paso)*paso+s*paso))
+            if mute and s<0 and v<a+1-1e-9:v=a   # (JMG, 19-11) de -30 hacia abajo: Mute
+            elif mute and s>0 and self._raw(var)<=a+0.5:v=a+1   # de Mute hacia arriba: -30
             var.set(int(v) if float(paso).is_integer() else v)
             return "break"
         for k_,s_ in (("<Left>",-1),("<Down>",-1),("<Right>",1),("<Up>",1)):e.bind(k_,lambda ev,s_=s_:mv(ev,s_))
@@ -3447,12 +3528,12 @@ class AudioProcessorGUI:
         b_iso=ttk.Button(bt,text="💿 "+self._vt("Crear ISO...","Create ISO..."),command=self._crear_iso_ve);b_iso.pack(side="left",padx=2,after=b_dvd)
         self._ayuda_flotante(b_iso,self._vt("Imagen .iso de un disco o de una carpeta de DVD o Blu-ray:\nabre la ventana de Crear ISO de Jmg VideoEncoder.","An .iso image of a disc or of a DVD or Blu-ray folder:\nopens Jmg VideoEncoder's Create ISO window."))
         _bo=ttk.Button(bt,text="🎬 "+"VideoEncoder",command=self._pasar_otro);_bo.pack(side="left",padx=(10,2))
-        self._ayuda_flotante(_bo,self._vt("Pasa los archivos seleccionados (o todos) a Jmg VideoEncoder:\nsi está abierto, a su lista; si no, lo abre con ellos.",
-                                          "Sends the selected files (or all of them) to Jmg VideoEncoder:\nif it is open, to its list; if not, it opens it with them."))
+        self._ayuda_flotante(_bo,self._vt("Pasa los archivos seleccionados (o todos) a Jmg VideoEncoder:\nsi está abierto, a su lista; si no, lo abre con ellos.\nSin archivos, solo cambia al otro programa.",
+                                          "Sends the selected files (or all of them) to Jmg VideoEncoder:\nif it is open, to its list; if not, it opens it with them.\nWith no files, it just switches to the other program."))
         _bg=ttk.Button(bt,text=T("guardar_p"),command=self._gp);_bg.pack(side="left",padx=(16,2))
         self.btn_cp=ttk.Button(bt,text=T("cargar_p"),command=self._mp);self.btn_cp.pack(side="left",padx=2)
         # sin archivos: solo quedan activos Seleccionar, Añadir, Ayuda, Acerca de, Tema, Idioma y Salir
-        self._sin_arch=[_bq,_bl,_bo,_bg,self.btn_cp]
+        self._sin_arch=[_bq,_bl,_bg,self.btn_cp]   # (JMG, 19-11) el botón al VideoEncoder, también sin archivos (cambia de programa)
         self.root.after(150,lambda b_=bt:self._ancho_min(b_))
         ttk.Button(bt,text=T("ayuda"),command=self._av).pack(side="left",padx=(16,2))
         ttk.Button(bt,text=T("acerca"),command=self._acv).pack(side="left",padx=2)
@@ -4677,7 +4758,7 @@ class AudioProcessorGUI:
             self._cfgw(self.btn_scan,state="disabled")
         else:
             self._cfgw(self.sl_m,state="normal")
-            self._cfgw(self.en_m,state="normal",bg=CDN,fg=CT,insertbackground=CT)
+            self._cfgw(self.en_m,state="normal",bg=CDN,fg=_fg_mute(self.en_m,CT),insertbackground=CT)
             self._cfgw(self.btn_scan,state="normal")
 
         if loud:
@@ -5360,6 +5441,7 @@ class AudioProcessorGUI:
         if activo:
             try:self._ex_eqvol()
             except Exception:pass
+        self._vis_comb_estado()
 
     def _rec_set_enabled(self,padre,estado):
         for w in padre.winfo_children():
@@ -5484,7 +5566,7 @@ class AudioProcessorGUI:
 
         ttk.Label(L,text=T("ayuda_slider"),foreground=CA,font=("",8,"italic")).grid(row=0,column=0,columnspan=3,sticky="w",padx=5,pady=(2,6))
 
-        self.sl_m,self.en_m=self._sl(L,T("master"),self.var_master,-20,20,1)
+        self.sl_m,self.en_m=self._sl(L,T("master"),self.var_master,-31,20,1,mute=True)   # (JMG, 19-11) hasta -30 y Mute
 
         row_chk=ttk.Frame(L)
         row_chk.grid(row=2,column=0,columnspan=3,sticky="w",padx=5,pady=(4,2))
@@ -5543,7 +5625,7 @@ class AudioProcessorGUI:
         self._tit_auto(L,13,self._vt("Volumen por canal","Volume per channel"),"vol")   # su «Auto» (antes «Ajustar canales»), alineado con los demas
         self._w_vch={}
         for _c,_k,_r in (("FL","fl",14),("FR","fr",15),("FC","fc",16),("LFE","lfe",17),("BL","bl",18),("BR","br",19)):
-            _w=self._sl(L,T(_k),getattr(self,"var_"+_k),-20,20,_r);self._w_vch[_c]=list(_w)
+            _w=self._sl(L,T(_k),getattr(self,"var_"+_k),-31,20,_r,mute=True);self._w_vch[_c]=list(_w)   # (JMG, 19-11) hasta -30 y Mute
             if _c in ("FC","LFE","BL","BR"):self._cw[_c].extend(_w)
 
         # ─── Columna derecha: Sincronizacion ───
@@ -5822,7 +5904,10 @@ class AudioProcessorGUI:
             c+=["-filter_complex",";".join(P)+";"+s_+f",atrim=start={M:.3f},asetpts=PTS-STARTPTS[ra]","-map","[ra]"]
         else:
             c+=["-map",f"1:a:{ai}"]+(["-af",",".join(af)] if af else [])
-        if sal=="st":c+=["-ac","2"]
+        if sal=="st":   # (JMG, 18-11) en estéreo, con el subwoofer dentro
+            try:nch=int((self.pc.get(ra) or [])[ai].get("channels",2))
+            except Exception:nch=2
+            c=_estereo_cmd(c,nch)
         return c+self._REV_VID
     def _sinc_revisar(self):
         """«▶ Revisar sincronización»: la película con la pista activa, como saldrá, para verlo con los ojos"""
@@ -7184,7 +7269,7 @@ class AudioProcessorGUI:
         for w in ws:
             try:
                 if w.winfo_class()=="Entry":
-                    if ok:self._cfgw(w,state="normal",bg=CDN,fg=CT,insertbackground=CT)
+                    if ok:self._cfgw(w,state="normal",bg=CDN,fg=_fg_mute(w,CT),insertbackground=CT)
                     else:self._cfgw(w,state="readonly",readonlybackground=CDN,bg=CDN,fg=CA)
                 else:self._cfgw(w,state="normal" if ok else "disabled")
             except Exception:pass
@@ -7461,6 +7546,7 @@ class AudioProcessorGUI:
         self.cmb_vis_zh.bind("<<ComboboxSelected>>",self._vis_zh_sel)
         self.btn_vis_comb=ttk.Button(top,text="🔀 "+self._vt("Volver a Combinar","Back to Combine"),command=self._vis_a_comb)
         self.btn_vis_comb.pack(side="right");self._sin_arch.append(self.btn_vis_comb)
+        for w_ in (self.la,self.lp):w_.bind("<<ListboxSelect>>",lambda e:self.root.after(60,self._vis_comb_estado),add="+")   # (JMG, 18-11)
         ra=ttk.Frame(outer);ra.pack(fill="x",padx=8,pady=(2,2))
         self.btn_vis_pa=ttk.Button(ra,text="▶ "+self._vt("Escuchar ANTES","Play BEFORE"),command=lambda:self._vis_play_ab("antes"),state="disabled")
         self.btn_vis_pa.pack(side="left")
@@ -7705,7 +7791,7 @@ class AudioProcessorGUI:
         if mc:o+=","+self._vis_gan(n,True)
         elif solo is not None and len(solo)==1:   # un canal, por los dos altavoces: como el canal suelto de la escucha normal
             k=min(solo);o+=f",pan=stereo|c0=c{k}|c1=c{k},"+self._vis_gan(n,True)
-        else:o+=",aformat=sample_fmts=fltp:channel_layouts=stereo,"+self._vis_gan(n,False)
+        else:o+=","+(_pan_est(n) or "aformat=sample_fmts=fltp:channel_layouts=stereo")+","+self._vis_gan(n,False)   # (JMG, 18-11) con el subwoofer
         return ";".join(P+[o+"anull[o]"])
     def _ed_play(self,cual,pos):
         V=self._vt;sel=getattr(self,"_vis_solo_sel",None)
@@ -7942,7 +8028,16 @@ class AudioProcessorGUI:
         if self._vis_play:self._vis_pausa()
         else:
             self._vis_stop_mci();self._vis_botones()
+    def _vis_comb_estado(self):
+        """(JMG, 18-11) «Volver a Combinar» solo se puede pulsar con una pista combinada antes seleccionada"""
+        try:
+            rec=self._comb_rec_sel()[1] if self.files else None
+            self.btn_vis_comb.configure(state="normal" if rec else "disabled")
+        except Exception:pass
     def _vis_a_comb(self):
+        try:
+            if not self._comb_rec_sel()[1]:return
+        except Exception:return
         self._vis_callar();self._combinar()
     def _vis_tab(self,e=None):
         try:
@@ -8570,8 +8665,8 @@ class AudioProcessorGUI:
             pre="aresample=48000,aformat=sample_fmts=fltp,asplit=3[pv][pp][pf]"
             def vis(nc):
                 return ("[pv]asetnsamples=n=%d:p=0,astats=metadata=1:reset=1:measure_perchannel=Min_level+Max_level:measure_overall=none,"
-                        "ametadata=mode=print:file=-[vis];[pp]aresample=32000,aformat=sample_fmts=fltp:channel_layouts=stereo,%saformat=sample_fmts=s16[ply];"
-                        "[pf]aresample=32000,%saformat=sample_fmts=s16[pl6]")%(n,self._vis_gan(nc,False),self._vis_gan(nc,True))
+                        "ametadata=mode=print:file=-[vis];[pp]aresample=32000,%s,%saformat=sample_fmts=s16[ply];"
+                        "[pf]aresample=32000,%saformat=sample_fmts=s16[pl6]")%(n,_pan_est(nc) or "aformat=sample_fmts=fltp:channel_layouts=stereo",self._vis_gan(nc,False),self._vis_gan(nc,True))   # (JMG, 18-11) con el subwoofer
             try:ne=int((self.pc.get(ruta) or [])[idx].get("channels",6))
             except Exception:ne=6
             wa=os.path.join(tmp,"antes.wav");wd=os.path.join(tmp,"despues.wav")
@@ -8691,7 +8786,7 @@ class AudioProcessorGUI:
                               "Press “Generate visualization” to compare the original audio (before) with the result of your settings (after), with the six channels shown separately, and listen to it."))
             cv.configure(scrollregion=(0,0,W,140))
             return
-        ML,MR,RH=92,12,22
+        ML,MR,RH=92,2,22   # (JMG, 19-11) los carriles llegan al borde derecho (antes quedaban 12 px sin pintar; 2 px para el cursor y los marcos)
         try:zoom=float(str(self.var_vis_zoom.get()).lstrip("x"))
         except ValueError:zoom=1.0
         ant=data["antes"] or [];des=data["despues"] or []
@@ -8715,7 +8810,7 @@ class AudioProcessorGUI:
             if x>=ML-1:
                 cv.create_line(x,RH-6,x,RH,fill=suave)
                 lb=self._vis_fmt(t) if paso>=1 else self._hms(t)
-                cv.create_text(min(x+3,ML+ancho-2),RH/2-1,anchor="w" if x+40<ML+ancho else "e",text=lb,fill=suave,font=("",8))
+                cv.create_text(min(x+3,ML+ancho-2),RH/2-1,anchor="w" if x+3+(62 if paso<1 else 42)<ML+ancho else "e",text=lb,fill=suave,font=("",8))
             t+=paso
         y=RH
         self._vis_lanes=[]
@@ -8906,7 +9001,7 @@ class AudioProcessorGUI:
         if not hasattr(self,"txt_edit"):return
         lines=[]
         try:
-            lines.append(f"Master: {self._fv(self.var_master.get())} dB")
+            lines.append("Master: "+("Mute" if float(self.var_master.get())<=-30.5 else f"{self._fv(self.var_master.get())} dB"))   # (JMG, 19-11)
         except Exception:
             lines.append("Master: 0.0 dB")
 
@@ -8947,6 +9042,7 @@ class AudioProcessorGUI:
 
             num_match = re.search(r'(-?\d+\.?\d*)', val)
             num = float(num_match.group(1)) if num_match else None
+            if num is None and key.strip().lower() in ("master","volumen master","volumen","master volume") and val.strip().lower().startswith("mute"):num=-31.0   # (JMG, 19-11) «Master: Mute»
 
             try:
                 if key in ("master", "volumen master", "volumen", "master volume") and num is not None:
@@ -9386,7 +9482,7 @@ class AudioProcessorGUI:
         if cfg is None:cfg=self._snap()
         cfg=dict(cfg)
         for _k in ("loudnorm_vol","norm_vol","gdin_vol","din_vol"):cfg[_k]=0   # atenuadores retirados
-        def db2lin(db):return round(10**(db/20.0),6)
+        def db2lin(db):return 0.0 if db<=-30.5 else round(10**(db/20.0),6)   # (JMG, 19-11) -31 = Mute: en silencio
 
         dyn_v=int(cfg.get("dyn_norm",0));sp_v=int(cfg.get("speech_norm",0))
         din_act = int(cfg.get("din_modo",0))!=0
@@ -9410,6 +9506,9 @@ class AudioProcessorGUI:
         gFC=db2lin(cfg["fc"]) if "FC" in act else 1.0
         gLFE=db2lin(cfg["lfe"]) if "LFE" in act else 1.0
         gBL=db2lin(cfg["bl"]) if "BL" in act else 1.0;gBR=db2lin(cfg["br"]) if "BR" in act else 1.0
+        # (JMG, 19-11) el volumen por canal va el ÚLTIMO (tras Bass Management, Double Bass, dinámica, limpieza del LFE y Separación):
+        # antes iba aquí y el Double Bass / Bass Management le devolvían al subwoofer los graves de los altavoces (a -20 dB casi no bajaba)
+        _vch=(gFL,gFR,gFC,gLFE,gBL,gBR);gFL=gFR=gFC=gLFE=gBL=gBR=1.0
 
         # Presencia -> dB reales (curva progresiva)
         pv=0.0 if ("FC" not in act or up) else self._eff(cfg["voz"],8,24)   # (JMG, 18-11) con Upmix, Presencia no
@@ -9718,6 +9817,8 @@ class AudioProcessorGUI:
         # ---- (JMG, 27-11) Separación de canales: más (o menos) diferencia entre izquierda y derecha, y delante / detrás ----
         _spn=_separ_filtro(cfg.get("separ",0),["FL","FR","FC","LFE","BL","BR"],"5.1",not (_est and not up))
         if _spn:P.append(f"[{_src}]{_spn}[d_sep]");_src="d_sep"
+        if any(abs(g_-1.0)>1e-9 for g_ in _vch):   # (JMG, 19-11) el volumen por canal, el último: lo que se pone es lo que baja (o sube)
+            P.append(f"[{_src}]pan=5.1|"+"|".join(f"c{i}={g_:.6f}*c{i}" for i,g_ in enumerate(_vch))+"[d_vch]");_src="d_vch"
         # ---- Disposicion de salida: los canales descartados se SUMAN a los que quedan ----
         _dmx=bool(cfg.get("downmix"))
         if _dmx:
@@ -9763,6 +9864,7 @@ class AudioProcessorGUI:
         LIM=f"alimiter=limit={_lim_fin}:attack=5:release=80:level=0:latency=1" if (_lim_fin and _sube) else "anull"
         if (_lay!="5.1" or (_dmx and not (_est and not up))) and LIM=="anull":
             LIM="alimiter=limit=0.944:attack=5:release=80:level=0:latency=1"  # sumar canales puede subir el nivel: proteccion minima (-0,5 dBFS)
+        if _canal_sube and LIM=="anull":LIM="alimiter=limit=0.944:attack=5:release=80:level=0:latency=1"   # (árbitro, 19-11) el volumen por canal va el último: si alguno sube, protección
         if _ln_fin:
             if _ln_fin.startswith("volume="):LIM=f"alimiter=limit={_ln_lim}:attack=5:release=80:level=0:latency=1"
             P.append(f"[{_src}]{_ln_fin},aresample=48000,{LIM}[outfinal]")
@@ -9793,11 +9895,11 @@ class AudioProcessorGUI:
         elif cfg.get("speech_norm",0)>0:
             e.append(f"SpeechNorm: {cfg['speech_norm']}/10")
         elif cfg.get("master",0)!=0:
-            e.append(f"Master: {self._fv(cfg['master'])} dB")
+            e.append("Master: "+("Mute" if float(cfg['master'])<=-30.5 else f"{self._fv(cfg['master'])} dB"))
 
         for n_,k in [("FL","fl"),("FR","fr"),("FC","fc"),("LFE","lfe"),("BL","bl"),("BR","br")]:
             v=cfg.get(k,0)
-            if v!=0:e.append(f"Vol {n_}: {self._fv(v)} dB")
+            if v!=0:e.append(f"Vol {n_}: "+("Mute" if float(v)<=-30.5 else f"{self._fv(v)} dB"))
         for n_,k in ([] if cfg.get("upmix")=="S" else [(V("Voz","Voice"),"voz"),("Amb","amb"),(V("Efc","Effects"),"efc"),("Sub","sub")]):   # (árbitro) con Upmix, Presencia no
             v=cfg.get(k,0)
             if v!=0:e.append(f"{n_}: {self._fv(v)}")
@@ -10151,11 +10253,11 @@ class AudioProcessorGUI:
         """los archivos seleccionados (o todos) a Jmg VideoEncoder: si está abierto, a su lista; si no, se abre con ellos"""
         V=self._vt
         sel=[self.files[i] for i in self.la.curselection() if i<len(self.files)] or list(self.files)
-        if not sel:
-            self._toast(T("warn_tit"),V("Añade antes algún archivo a la lista.","Add some file to the list first."),tipo="warning",seg=4);return
+        if sel:self._traspaso_dejar(sel)   # (JMG, 18-11) los ajustes de audio de cada pista van también
+        # (JMG, 19-11) sin archivos también: se cambia de programa (por si te has equivocado), sin tener que salir y buscar la suite
         if _otro_enviar(sel):
             self._log(f"[->] {OTRO_NOMBRE}: "+", ".join(os.path.basename(x) for x in sel))
-            self._toast(T("info_tit"),V(f"Pasados a {OTRO_NOMBRE}: {len(sel)} archivo(s).",f"Sent to {OTRO_NOMBRE}: {len(sel)} file(s)."),seg=4)
+            self._toast(T("info_tit"),(V(f"Pasados a {OTRO_NOMBRE}: {len(sel)} archivo(s).",f"Sent to {OTRO_NOMBRE}: {len(sel)} file(s).") if sel else V(f"Cambiando a {OTRO_NOMBRE}...",f"Switching to {OTRO_NOMBRE}...")),seg=4)
             self.root.after(700,self._on_close);return   # (JMG, 16-11) los dos no se quedan abiertos a la vez
         exe=_otro_buscar(self._cfg_x("otro_exe"))
         if not exe:
@@ -10173,9 +10275,90 @@ class AudioProcessorGUI:
                 cmd=[py]+cmd
             subprocess.Popen(cmd,cwd=os.path.dirname(exe) or None)
             self._log(f"[->] {OTRO_NOMBRE} ({exe}): "+", ".join(os.path.basename(x) for x in sel))
-            self._toast(T("info_tit"),V(f"Abriendo {OTRO_NOMBRE} con {len(sel)} archivo(s)...",f"Opening {OTRO_NOMBRE} with {len(sel)} file(s)..."),seg=5)
+            self._toast(T("info_tit"),(V(f"Abriendo {OTRO_NOMBRE} con {len(sel)} archivo(s)...",f"Opening {OTRO_NOMBRE} with {len(sel)} file(s)...") if sel else V(f"Cambiando a {OTRO_NOMBRE}...",f"Switching to {OTRO_NOMBRE}...")),seg=5)
             self.root.after(700,self._on_close)   # (JMG, 16-11) los dos no se quedan abiertos a la vez
         except Exception as e:self._toast(T("error_tit"),str(e),tipo="error")
+    def _traspaso_comun(self,cfg):
+        """(JMG, 18-11) los ajustes de audio de una pista que entiende Jmg VideoEncoder"""
+        c={"ef":{}}
+        def num(k):
+            try:return float(cfg.get(k,0) or 0)
+            except (TypeError,ValueError):return 0.0
+        for k in _TR_EF:
+            if num(k):c["ef"][k]=num(k)
+        g=max(num("gdin_front"),num("gdin_tras"))
+        if g:c["ef"]["gama"]=-g   # la Gama dinámica = la parte izquierda del deslizador del VE
+        if num("gdin_cent"):c["ef"]["gama_c"]=-num("gdin_cent")
+        if num("delay_init"):c["delay"]=int(round(num("delay_init")))
+        fd,fa=str(cfg.get("fps_from") or ""),str(cfg.get("fps_to") or "")
+        if fd and fa and fd!=fa:c.update(fps_de=fd,fps_a=fa,fps_met=cfg.get("fps_metodo") or "tono")
+        f=str(cfg.get("formato") or "")
+        cod={AF_FMT:"ac3","AC3":"ac3","EAC3":"eac3","TRUEHD":"truehd","DTS":"dts","AAC":"aac","FLAC":"flac","Passthrough":"copy"}.get(f)
+        try:   # (árbitro) el formato solo va si se cambió (el Aften 640 de partida no: el VE dejaría de copiar la pista sin necesidad)
+            lay=str(cfg.get("layout") or "5.1");fd=self.formatos_mono if lay=="1.0" else (self.formatos_down if lay=="2.0" else None)
+            de_partida=(f==DEF_FMT and str(cfg.get("bitrate") or "")==str(self._br_defecto(f,(fd or self.formatos).get(f) or [],None,{"1.0":1,"2.0":2}.get(lay,6))))
+        except Exception:de_partida=False
+        if cod and not de_partida:
+            c["cod"]=cod;c["aften"]=(f==AF_FMT)
+            m_=re.match(r"\s*(\d+)",str(cfg.get("bitrate") or ""))
+            if m_:c["kbps"]=int(m_.group(1))
+        return c
+    def _traspaso_dejar(self,sel):
+        """(JMG, 18-11) al pasar archivos a Jmg VideoEncoder: los ajustes de audio de sus pistas (las que tienen ajustes)"""
+        try:self._guardar_conf_pista()
+        except Exception:pass
+        datos={}
+        for r_ in sel:
+            for i_,p_ in enumerate(self.pc.get(r_) or []):
+                cf=self.pconf.get((r_,i_))
+                if cf:datos.setdefault(r_,{})[str(p_.get("index_global"))]=self._traspaso_comun(cf)
+        _traspaso_guardar("ap",datos)
+    def _traspaso_a_cfg(self,cfg,c,p=None):
+        """(JMG, 18-11) los ajustes que vienen de Jmg VideoEncoder, en la configuración de una pista (p = la pista, para su formato)"""
+        for k in _TR_EF+("gdin_front","gdin_tras","gdin_cent"):cfg[k]=0   # (árbitro) lo que se traspasa empieza de cero: sin mezclas
+        cfg["delay_init"]=0
+        for k,v in (c.get("ef") or {}).items():
+            if k not in _TR_EF:continue
+            a,b={"suav":(0,5),"db":(0,5)}.get(k,(-31,20) if k in ("fl","fr","fc","lfe","bl","br") else (-10,10))   # (JMG, 19-11) -31 = Mute
+            try:cfg[k]=max(a,min(b,float(v))) if k in ("fl","fr","fc","lfe","bl","br") else max(a,min(b,int(round(float(v)))))
+            except (TypeError,ValueError):pass
+        g=(c.get("ef") or {}).get("gama",0) or 0;gc=(c.get("ef") or {}).get("gama_c",0) or 0
+        if g<0:cfg["gdin_front"]=cfg["gdin_tras"]=min(10,int(round(-g)))   # la compresión del VE (a la derecha) no tiene igual aquí
+        if gc<0:cfg["gdin_cent"]=min(10,int(round(-gc)))
+        if "delay" in c:cfg["delay_init"]=int(c["delay"])
+        if c.get("fps_de") and c.get("fps_a"):cfg["fps_from"],cfg["fps_to"],cfg["fps_metodo"]=str(c["fps_de"]),str(c["fps_a"]),c.get("fps_met") or "tono"
+        cod=c.get("cod")
+        fmt={"ac3":AF_FMT if (c.get("aften") and AFTEN) else "AC3","eac3":"EAC3","truehd":"TRUEHD","dts":"DTS","aac":"AAC","flac":"FLAC","copy":"Passthrough"}.get(cod)
+        if fmt:   # (árbitro) con la lista de su disposición, como _cfg_nueva; si no vale, se queda el de la pista
+            lay=str(cfg.get("layout") or "5.1")
+            fd=self.formatos_mono if lay=="1.0" else (self.formatos_down if lay=="2.0" else None)
+            nch=int((p or {}).get("channels",6) or 6) if p else 6
+            ok=(list(fd.keys())+(["Passthrough"] if (lay=="2.0" and nch<=2) else [])) if fd is not None else (LAY_FMT.get(lay) or list(self.formatos.keys()))
+            hay_ef=any(cfg.get(k) for k in _TR_EF+("gdin_front","gdin_tras","gdin_cent")) or cfg.get("delay_init")
+            if fmt in ok and not (fmt=="Passthrough" and hay_ef):
+                n_={"1.0":1,"2.0":2}.get(lay,6);vals=(fd or self.formatos).get(fmt) or []
+                cfg["formato"]=fmt;br=f"{int(c.get('kbps') or 0)} kbps"
+                cfg["bitrate"]=br if (c.get("kbps") and self._br_valido(fmt,br,vals,n_)) else (self._br_defecto(fmt,vals,None,n_) or cfg.get("bitrate"))
+    def _traspaso_leer(self,archivos):
+        """(JMG, 18-11) archivos que llegan de Jmg VideoEncoder con sus ajustes de audio: a los que ya tienen su configuración, ahora;
+        a los demás, cuando se crea (al elegirlos, _multi_cp)"""
+        d_=_traspaso_cargar("ve",archivos)
+        if not d_:return
+        if not hasattr(self,"_tr_pend"):self._tr_pend={}
+        self._tr_pend.update(d_);hechos=[]
+        for r_ in list(self.pmark):
+            q=self._tr_pend.pop(os.path.normcase(os.path.abspath(r_)),None)
+            if not q:continue
+            for i_,p_ in enumerate(self.pc.get(r_) or []):
+                c=q.get(str(p_.get("index_global")))
+                if c and (r_,i_) in self.pconf:self._traspaso_a_cfg(self.pconf[(r_,i_)],c,p_);hechos.append((r_,i_))
+        if hechos and self.pactual in hechos:
+            try:self._cargar_conf_pista(*self.pactual)
+            except Exception:pass
+        try:self._pintar_pistas()
+        except Exception:pass
+        self._log("[<-] "+self._vt(f"Ajustes de audio de {OTRO_NOMBRE}: {len(d_)} archivo(s)",f"Audio settings from {OTRO_NOMBRE}: {len(d_)} file(s)"))
+        self._toast(T("info_tit"),self._vt(f"Llegan con sus ajustes de audio de {OTRO_NOMBRE}.",f"They come with their audio settings from {OTRO_NOMBRE}."),seg=4)
     def _traer_al_frente(self,archivos):
         """otra instancia nos ha pasado archivos: se añaden y la ventana se pone delante"""
         try:
@@ -10185,7 +10368,7 @@ class AudioProcessorGUI:
             self.root.focus_force()
         except Exception:pass
         if archivos:
-            try:self._addl(archivos);self._vis_chk_files()
+            try:self._addl(archivos);self._vis_chk_files();self._traspaso_leer(archivos)   # (JMG, 18-11) con sus ajustes de audio
             except Exception as e:self._log(f"[!] Abrir con: {e}")
     def _normalizar_ya(self):
         """«Normalizar»: mide AHORA el volumen (Loudnorm) de las pistas marcadas, con barra de progreso.
@@ -13615,7 +13798,7 @@ if __name__=="__main__":
         if srv:threading.Thread(target=_escuchar_instancias,args=(srv,app),daemon=True).start()
         def _ver_ya():
             app._mostrar()
-            if archivos:root.after(100, lambda: app._addl(archivos))
+            if archivos:root.after(100, lambda: (app._addl(archivos),app._traspaso_leer(archivos)))   # (JMG, 18-11) con sus ajustes de audio
         cerrar_inicio(_ver_ya)
         root.after(4000, app._ver_nueva)   # solo al arrancar el programa de verdad (las pruebas no lo llaman)
         root.after(7000, app._apoyo_aviso)   # (JMG, 13-11) el recordatorio de contribuir, cada 45 días

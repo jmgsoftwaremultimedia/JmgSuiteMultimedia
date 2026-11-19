@@ -6,16 +6,16 @@
 
 Los dos programas de Jmg Software en una sola instalación, gratis y de código abierto, para mejorar el audio y el vídeo de tus películas y series. Usan FFmpeg y nunca tocan tus archivos originales.
 
-- **Jmg VideoEncoder 1.4**: comprime y convierte vídeos (H.264, H.265, H.266 / VVC, AV1, VP9, ProRes y DNxHR, con el procesador o la tarjeta gráfica NVIDIA / AMD), con su audio, subtítulos, recorte por tramos, ajustes de imagen y sincronización. MKV, MP4, MOV, AVI y WebM.
-- **Jmg AudioProcesador 5.1 (1.5)**: procesa, convierte y ajusta pistas de audio multicanal (5.1 / 7.1): volumen y normalización, presencia y ecualización, dinámica y graves, upmix de estéreo a 5.1 y «Combinar», que une canales de varias pistas para montar doblajes con su delay calculado solo.
+- **Jmg VideoEncoder 1.5**: comprime y convierte vídeos (H.264, H.265, H.266 / VVC, AV1, VP9, ProRes y DNxHR, con el procesador o la tarjeta gráfica NVIDIA / AMD), con su audio, subtítulos, recorte por tramos, ajustes de imagen y sincronización. MKV, MP4, MOV, AVI y WebM.
+- **Jmg AudioProcesador 5.1 (1.6)**: procesa, convierte y ajusta pistas de audio multicanal (5.1 / 7.1): volumen y normalización, presencia y ecualización, dinámica y graves, upmix de estéreo a 5.1 y «Combinar», que une canales de varias pistas para montar doblajes con su delay calculado solo.
 
 ## Vídeo tutorial
 
-[![Tutorial de Jmg SuiteMultimedia en YouTube](https://img.youtube.com/vi/Je15lQCIsfw/hqdefault.jpg)](https://youtu.be/Je15lQCIsfw)
+[![Tutorial de Jmg SuiteMultimedia en YouTube](https://img.youtube.com/vi/Qg61nox0Ox4/hqdefault.jpg)](https://youtu.be/Qg61nox0Ox4)
 
-▶️ **[Ver el tutorial en YouTube](https://youtu.be/Je15lQCIsfw)** (3 minutos, con subtítulos en 9 idiomas)
+▶️ **[Ver el tutorial en YouTube](https://youtu.be/Qg61nox0Ox4)** (3 minutos, con subtítulos en 9 idiomas)
 
-También doblado en: [Español](https://youtu.be/Je15lQCIsfw) · [English](https://youtu.be/RiSDJqCJTtI) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/ygDAXCbkrww) · [हिन्दी](https://youtu.be/kc6WEocuOkw) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
+También doblado en: [Español](https://youtu.be/Qg61nox0Ox4) · [English](https://youtu.be/F5a_0C-4iZw) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/j38NfoqlnSM) · [हिन्दी](https://youtu.be/h6ygC4n67YE) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
 
 ## Descarga
 
@@ -23,15 +23,15 @@ También doblado en: [Español](https://youtu.be/Je15lQCIsfw) · [English](https
 
 | Archivo | Para |
 |---|---|
-| `JmgSuiteMultimedia_1.1_setup.exe` | Windows 10 / 11 (64 bits): instalador. Puedes elegir los dos programas (recomendado) o solo uno |
-| `JmgSuiteMultimedia_1.1_portable.zip` | Windows sin instalar: descomprime y abre `Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe` |
-| `jmg-audioprocesador_1.5_all.deb` · `jmg-videoencoder_1.4_all.deb` | Linux (Debian, Ubuntu...): `sudo apt install ./jmg-videoencoder_1.4_all.deb` |
+| `JmgSuiteMultimedia_1.2_setup.exe` | Windows 10 / 11 (64 bits): instalador. Puedes elegir los dos programas (recomendado) o solo uno |
+| `JmgSuiteMultimedia_1.2_portable.zip` | Windows sin instalar: descomprime y abre `Jmg SuiteMultimedia\Jmg SuiteMultimedia.exe` |
+| `jmg-audioprocesador_1.6_all.deb` · `jmg-videoencoder_1.5_all.deb` | Linux (Debian, Ubuntu...): `sudo apt install ./jmg-videoencoder_1.5_all.deb` |
 
 En Windows, FFmpeg va incluido (una sola vez para los dos programas): no hace falta instalar nada más. Los programas avisan cuando sale una versión nueva.
 
 > Algunos antivirus desconfían de los programas nuevos sin firma digital. Si te avisa, es un falso positivo: el código fuente está aquí.
 
-**¿Tenías Jmg AudioProcesador 7.0?** Ahora va dentro de esta suite, con una numeración nueva (1.5). El instalador ofrece quitar la versión anterior y tus ajustes se conservan.
+**¿Tenías Jmg AudioProcesador 7.0?** Ahora va dentro de esta suite, con una numeración nueva (1.6). El instalador ofrece quitar la versión anterior y tus ajustes se conservan.
 
 ## Qué hace
 
@@ -85,18 +85,18 @@ Unos 45 días de trabajo, con pruebas en películas reales. Desarrollado por JMG
 
 Jmg Software's two programs in a single installation, free and open source, to improve the audio and video of your movies and series. They use FFmpeg and never touch your original files.
 
-- **Jmg VideoEncoder 1.4**: compresses and converts videos (H.264, H.265, H.266 / VVC, AV1, VP9, ProRes and DNxHR, on the processor or an NVIDIA / AMD graphics card), with their audio, subtitles, trimming by parts, picture adjustments and synchronization. MKV, MP4, MOV, AVI and WebM.
-- **Jmg AudioProcesador 5.1 (1.5)**: processes, converts and adjusts multichannel audio tracks (5.1 / 7.1): volume and normalization, presence and EQ, dynamics and bass, stereo-to-5.1 upmix and «Combine», which joins channels from several tracks to build dubs with their delay calculated by itself.
+- **Jmg VideoEncoder 1.5**: compresses and converts videos (H.264, H.265, H.266 / VVC, AV1, VP9, ProRes and DNxHR, on the processor or an NVIDIA / AMD graphics card), with their audio, subtitles, trimming by parts, picture adjustments and synchronization. MKV, MP4, MOV, AVI and WebM.
+- **Jmg AudioProcesador 5.1 (1.6)**: processes, converts and adjusts multichannel audio tracks (5.1 / 7.1): volume and normalization, presence and EQ, dynamics and bass, stereo-to-5.1 upmix and «Combine», which joins channels from several tracks to build dubs with their delay calculated by itself.
 
-▶️ **[Watch the tutorial on YouTube](https://youtu.be/RiSDJqCJTtI)** (3 minutes, in English) · Other languages: [Español](https://youtu.be/Je15lQCIsfw) · [English](https://youtu.be/RiSDJqCJTtI) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/ygDAXCbkrww) · [हिन्दी](https://youtu.be/kc6WEocuOkw) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
+▶️ **[Watch the tutorial on YouTube](https://youtu.be/F5a_0C-4iZw)** (3 minutes, in English) · Other languages: [Español](https://youtu.be/Qg61nox0Ox4) · [English](https://youtu.be/F5a_0C-4iZw) · [Français](https://youtu.be/wQW2m7Ejoco) · [Deutsch](https://youtu.be/gIqQqycyFZk) · [Português](https://youtu.be/fmZs9UNtxaI) · [Русский](https://youtu.be/j38NfoqlnSM) · [हिन्दी](https://youtu.be/h6ygC4n67YE) · [中文](https://youtu.be/h5cUSRnSc-g) · [日本語](https://youtu.be/51X65EwN1nw)
 
 ### Download
 
-👉 **[Latest version](https://github.com/jmgsoftwaremultimedia/JmgSuiteMultimedia/releases/latest)**: `JmgSuiteMultimedia_1.1_setup.exe` (Windows installer: both programs or just one), `JmgSuiteMultimedia_1.1_portable.zip` (Windows, no install) or the `.deb` packages (Linux: `sudo apt install ./jmg-videoencoder_1.4_all.deb`). FFmpeg is included on Windows. The programs tell you when a new version is out.
+👉 **[Latest version](https://github.com/jmgsoftwaremultimedia/JmgSuiteMultimedia/releases/latest)**: `JmgSuiteMultimedia_1.2_setup.exe` (Windows installer: both programs or just one), `JmgSuiteMultimedia_1.2_portable.zip` (Windows, no install) or the `.deb` packages (Linux: `sudo apt install ./jmg-videoencoder_1.5_all.deb`). FFmpeg is included on Windows. The programs tell you when a new version is out.
 
 > Some antivirus programs distrust new unsigned software. If yours complains, it is a false positive: the source code is here.
 
-**Did you have Jmg AudioProcesador 7.0?** It is now part of this suite, with new version numbers (1.5). The installer offers to remove the old version and your settings are kept.
+**Did you have Jmg AudioProcesador 7.0?** It is now part of this suite, with new version numbers (1.6). The installer offers to remove the old version and your settings are kept.
 
 ### Build from source
 

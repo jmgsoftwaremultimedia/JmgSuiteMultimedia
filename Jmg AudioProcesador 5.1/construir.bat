@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "APP=Jmg AudioProcesador"
-set "VER=1.5"
+set "VER=1.6"
 echo.
 echo  ==============================================================
 echo    %APP% %VER%  -  crear instalador y version portable

@@ -1,4 +1,4 @@
-JMG AUDIOPROCESADOR 5.1 · versión 1.5
+JMG AUDIOPROCESADOR 5.1 · versión 1.6
 =====================================
 
 Procesa, convierte y ajusta pistas de audio multicanal (5.1) de tus películas y
@@ -83,7 +83,7 @@ CONTACTO Y APOYO
   solo y, si pulsas el enlace de contribuir, no vuelve a salir.
 
 
-JMG AUDIOPROCESADOR 5.1 · version 1.5  (English)
+JMG AUDIOPROCESADOR 5.1 · version 1.6  (English)
 ================================================
 
 Processes, converts and adjusts multichannel (5.1) audio tracks of your movies and

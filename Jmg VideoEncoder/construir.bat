@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "APP=Jmg VideoEncoder"
-set "VER=1.4"
+set "VER=1.5"
 echo.
 echo  ==============================================================
 echo    %APP% %VER%  -  crear instalador y version portable

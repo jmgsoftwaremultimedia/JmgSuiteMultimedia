@@ -2,7 +2,7 @@
 ; Lo compila construir_suite.py (construir_suite.bat). Antes hay que construir los programas (lo hace ese mismo script).
 
 #define MyAppName "Jmg SuiteMultimedia"
-#define MyAppVersion "1.1"
+#define MyAppVersion "1.2"
 #define AP "Jmg AudioProcesador"
 #define VE "Jmg VideoEncoder"
 #define MyAppId "4E7B1C2D-9A3F-4B6E-8D1C-5F2A7E9B3C61"

@@ -1,4 +1,4 @@
-JMG SUITEMULTIMEDIA · versión 1.1
+JMG SUITEMULTIMEDIA · versión 1.2
 =================================
 
 Los dos programas de Jmg Software en una sola instalación, con un solo FFmpeg:
@@ -31,7 +31,7 @@ Cada 45 días, al abrir cualquiera de los dos programas, un mensaje de 5 segundo
 se puede contribuir; se cierra solo y, si pulsas el enlace de contribuir, no vuelve a salir.
 
 
-JMG SUITEMULTIMEDIA · version 1.1  (English)
+JMG SUITEMULTIMEDIA · version 1.2  (English)
 ============================================
 
 Jmg Software's two programs in a single installation, with a single FFmpeg:

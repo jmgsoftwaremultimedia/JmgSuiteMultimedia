@@ -1,4 +1,4 @@
-JMG VIDEOENCODER · versión 1.4
+JMG VIDEOENCODER · versión 1.5
 ==============================
 
 Comprime y convierte vídeos con FFmpeg, con la misma cara que Jmg AudioProcesador.
@@ -50,7 +50,7 @@ Cada 45 días, al abrir el programa, un mensaje de 5 segundos recuerda que se pu
 se cierra solo y, si pulsas el enlace de contribuir, no vuelve a salir.
 
 
-JMG VIDEOENCODER · version 1.4  (English)
+JMG VIDEOENCODER · version 1.5  (English)
 =========================================
 
 Compresses and converts videos with FFmpeg, with the same look as Jmg AudioProcesador.
