@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Jmg VideoEncoder - GUI v1.5 (ES/EN)"""
+"""Jmg VideoEncoder - GUI v1.5.1 (ES/EN)"""
 import os,sys,json,threading,subprocess,re,locale,time,base64,shutil,tempfile,math,tkinter as tk
 from tkinter import ttk,filedialog,messagebox
 # ---------- (JMG, 29-11) los símbolos de los botones, como iconos en color: todos del mismo tamaño y centrados con las letras ----------
@@ -22,15 +22,46 @@ def _ico_alto(w):
         f=ttk.Style(w).lookup(_TTK_BOTON.cget(w,"style") or "TButton","font") or "TkDefaultFont"
         return int(tkf.Font(root=w,font=f).metrics("linespace"))
     except Exception:return 0
-def _ico_img(ch,w,verde=False):
+def _verde_ac():return globals().get("VERDE_JMG","#3cb95a")
+def _png_verde(b64,col):
+    """(árbitro, 26-11) el mismo icono PNG en verde (col) conservando su transparencia: lo azul pasa al verde, lo blanco sigue blanco"""
+    import zlib,struct,base64 as _b6
+    try:
+        d=_b6.b64decode(b64);p=8;ihdr=None;idat=b""
+        while p<len(d):
+            n=struct.unpack(">I",d[p:p+4])[0];t=d[p+4:p+8];c=d[p+8:p+8+n];p+=12+n
+            if t==b"IHDR":ihdr=c
+            elif t==b"IDAT":idat+=c
+        w,h,bd,ct,_c,_f,il=struct.unpack(">IIBBBBB",ihdr)
+        if bd!=8 or ct not in (2,6) or il:return b64
+        bpp=4 if ct==6 else 3;st=w*bpp;raw=zlib.decompress(idat);out=bytearray();prev=bytearray(st);q=0
+        V=[int(col[i:i+2],16) for i in (1,3,5)]
+        for y in range(h):
+            f=raw[q];q+=1;row=bytearray(raw[q:q+st]);q+=st
+            for i in range(st):
+                a=row[i-bpp] if i>=bpp else 0;b=prev[i];c=prev[i-bpp] if i>=bpp else 0
+                if f==1:row[i]=(row[i]+a)&255
+                elif f==2:row[i]=(row[i]+b)&255
+                elif f==3:row[i]=(row[i]+((a+b)>>1))&255
+                elif f==4:
+                    pa,pb,pc=abs(b-c),abs(a-c),abs(a+b-2*c);row[i]=(row[i]+(a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)))&255
+            prev=bytearray(row)
+            for x in range(0,st,bpp):
+                mn=min(row[x],row[x+1],row[x+2]);k=min(1.0,(max(row[x],row[x+1],row[x+2])-mn)/153.0)
+                for j in range(3):row[x+j]=max(0,min(255,int(round(mn+(V[j]-mn)*k))))
+            out+=b"\0"+row
+        ck=lambda t,c:struct.pack(">I",len(c))+t+c+struct.pack(">I",zlib.crc32(t+c)&0xffffffff)
+        return _b6.b64encode(d[:8]+ck(b"IHDR",ihdr)+ck(b"IDAT",zlib.compress(bytes(out),9))+ck(b"IEND",b"")).decode("ascii")
+    except Exception:return b64
+def _ico_img(ch,w,verde=False,ac=False):
     """(icono, icono desactivado) de un símbolo, o None. verde: el del botón que lleva al otro programa, en el verde del logo"""
     try:
         if ch not in ICO_B64[16]:return None
-        b=_ico_tam(w);h=_ico_alto(w);v=bool(verde and ch in ICO_B64V[b]);k=(ch,b,h,v,id(w.tk))
+        b=_ico_tam(w);h=_ico_alto(w);v=bool(verde and ch in ICO_B64V[b]);k=(ch,b,h,v,id(w.tk),(_verde_ac() if ac else None))
         if k not in _ICO_IMG:
             par=[]
             for D in ((ICO_B64V if v else ICO_B64),ICO_B64D):
-                im=tk.PhotoImage(master=w,data=D[b][ch])
+                im=tk.PhotoImage(master=w,data=(_png_verde(D[b][ch],_verde_ac()) if (ac and D is not ICO_B64D) else D[b][ch]))
                 if 0<h<b:   # se quita el margen vacío de arriba y abajo (y de los lados, lo mismo): queda cuadrado y centrado
                     c=(b-h)//2;im2=tk.PhotoImage(master=w,width=h,height=h);im2.tk.call(im2,"copy",im,"-from",c,c,c+h,c+h,"-to",0,0);im=im2
                 par.append(im)
@@ -73,9 +104,20 @@ class _BotonIco(_TTK_BOTON):
         if par:
             _TTK_BOTON.configure(self,text=r,image=(par[0],"disabled",par[1]),compound=("left" if r else "image"),
                                  width=(_ico_ancho(self,par[0].width(),self._ico_w0) if r else self._ico_w0));self._ico_puesto=True
+            if str(_TTK_BOTON.cget(self,"style"))=="Act.TButton":self._ico_verde(True)   # (JMG, 27-11) encendido: el icono sigue en verde
         else:
             if self._ico_puesto:_TTK_BOTON.configure(self,image="",compound="none",width=self._ico_w0);self._ico_puesto=False
             _TTK_BOTON.configure(self,text=self._ico_t)
+    def _ico_verde(self,on):
+        """(JMG, 27-11) en verde (lo que está en marcha, la pausa puesta): el icono también, no solo el texto; (árbitro) el PNG
+        recoloreado con su transparencia, en el verde del tema"""
+        try:
+            if not self._ico_puesto:return
+            ch,r=_ico_partir(self._ico_t);vd=self._ico_t in _ICO_VERDE;par=_ico_img(ch,self,vd)
+            if not par:return
+            if on:par=(_ico_img(ch,self,vd,ac=True) or par)[:1]+par[1:]
+            _TTK_BOTON.configure(self,image=(par[0],"disabled",par[1]))
+        except Exception:pass
     def configure(self,cnf=None,**kw):
         if isinstance(cnf,str):
             r=_TTK_BOTON.configure(self,cnf)
@@ -284,6 +326,154 @@ LOGO_B64="iVBORw0KGgoAAAANSUhEUgAAAEsAAAAaCAYAAAD/nKG4AAAP/0lEQVR42t2ZebRU1ZXGf/
 WEB_URL="https://github.com/jmgsoftwaremultimedia"   # (JMG, 22-11) su espacio en GitHub, «como mi página web»: el logo de la ventana principal
 DONAR_URL="https://github.com/jmgsoftwaremultimedia"  # el enlace de «Acerca de» y el del recordatorio (JMG, 13-11: su página de GitHub, donde pondrá el botón de contribuir; se cambia aquí)
 APOYO_DIAS=45   # (JMG, 13-11) cada cuántos días sale el recordatorio de contribuir
+_PART_LOCK=threading.Lock()
+_FF_SIN_VALOR={"-y","-n","-nostdin","-hide_banner","-nostats","-stats","-an","-vn","-sn","-dn","-shortest","-copyts","-re","-accurate_seek",
+               "-noaccurate_seek","-autorotate","-noautorotate","-ignore_unknown","-copy_unknown","-benchmark","-xerror","-start_at_zero"}
+def _part_de(ruta):
+    """(JMG, 20-11) «nombre.ext» -> «nombre.part.ext» (la extensión no cambia: FFmpeg sigue sabiendo el formato)"""
+    b,e=os.path.splitext(ruta);return b+".part"+e
+def _es_final(ruta):
+    """una ruta de archivo de verdad (no una tubería, ni un patrón %d, ni la carpeta temporal del sistema)"""
+    try:
+        s=str(ruta)
+        if not s or s in ("-","NUL","/dev/null") or ":" in s[2:] or "%" in os.path.basename(s) or not os.path.isabs(s):return False
+        if ".part." in os.path.basename(s):return False
+        if os.environ.get("JMG_PART_TEMP")=="1":return True
+        import tempfile as _tf
+        t=os.path.normcase(os.path.abspath(_tf.gettempdir()));return not os.path.normcase(os.path.abspath(s)).startswith(t+os.sep)
+    except Exception:return False
+def _a_medias_ruta():return os.path.join(_data_dir(),"a_medias.json")
+def _a_medias(part,poner):
+    """registro de lo que se está escribiendo (si se va la luz, al arrancar se avisa)"""
+    with _PART_LOCK:
+        try:l=json.load(open(_a_medias_ruta(),encoding="utf-8"))
+        except Exception:l=[]
+        if not isinstance(l,list):l=[]
+        l=[x for x in l if x!=part]+([part] if poner else [])
+        try:_json_seguro(_a_medias_ruta(),l)
+        except Exception:pass
+def _es_num(s):
+    try:float(s);return True
+    except Exception:return False
+def _part_cmd(cmd):
+    """(JMG, 20-11) la orden de FFmpeg con cada salida que es un archivo de verdad cambiada a «.part» -> (orden, [(bueno, part)]).
+    Una salida: lo que no es el valor de una opción. Si el archivo ya existe y la orden no lleva -y, no se toca (FFmpeg decide)"""
+    try:
+        c=list(cmd);pares=[]
+        for i in range(1,len(c)):
+            a=c[i]
+            if not isinstance(a,str) or a.startswith("-") or not _es_final(a):continue
+            pr=c[i-1]
+            if isinstance(pr,str) and pr.startswith("-") and not _es_num(pr) and pr not in _FF_SIN_VALOR:continue
+            if os.path.exists(a) and "-y" not in c:continue
+            p=_part_de(a);c[i]=p;pares.append((a,p))
+        for a,p in pares:_a_medias(p,True)
+        return c,pares
+    except Exception:return list(cmd),[]
+def _part_fin(pares,ok):
+    """bien: cada «.part» pasa a su nombre de golpe (os.replace; Windows o el antivirus pueden tardar en soltarlo); mal: se borra"""
+    for a,p in pares:
+        try:
+            if ok and os.path.isfile(p):
+                for i in range(40):
+                    try:os.replace(p,a);_ULTIMOS.append(a);del _ULTIMOS[:-50];break
+                    except PermissionError:
+                        if i==39:raise
+                        time.sleep(0.25)
+            elif os.path.isfile(p):
+                for i in range(10):
+                    try:os.remove(p);break
+                    except OSError:time.sleep(0.3)
+        except Exception:
+            ok=False
+            try:os.remove(p)
+            except Exception:pass
+        _a_medias(p,False)
+    return ok
+def _a_medias_aviso(app):
+    """(JMG, 20-11) al arrancar: lo que se quedó a medias la última vez (se fue la luz o se cerró mientras procesaba) se avisa"""
+    try:
+        with _PART_LOCK:
+            try:l=json.load(open(_a_medias_ruta(),encoding="utf-8"))
+            except Exception:l=[]
+            if not isinstance(l,list):l=[]
+            q=[x for x in l if isinstance(x,str) and os.path.isfile(x)]
+            if l:_json_seguro(_a_medias_ruta(),[])
+        if not q:return
+        V_=app._vt
+        for x in q:app._ls("[!] "+V_("A medias (de la última vez): ","Unfinished (from last time): ")+x)
+        app._toast(T("warn_tit"),V_(f"La última vez se cortó mientras se procesaba (¿se fue la luz o se cerró el programa?) y quedaron {len(q)} archivo(s) sin terminar. Llevan «.part» en el nombre y se pueden borrar:\n",
+                                    f"Last time the processing was cut off (power cut, or the program was closed?) and {len(q)} unfinished file(s) were left. They have «.part» in their name and can be deleted:\n")
+                   +"\n".join(os.path.basename(x) for x in q[:4])+("\n..." if len(q)>4 else ""),seg=15)
+    except Exception:pass
+_DRC_CACHE={}
+_EXT_SIN_AC3={".wav",".flac",".w64",".rf64",".mp3",".aac",".m4a",".opus",".ogg",".dts",".dtshd",".thd",".mlp",".png",".jpg",".jpeg",
+              ".bmp",".txt",".srt",".ass",".ssa",".sup",".sub",".idx",".wv",".ape",".aif",".aiff",".caf",".pcm",".raw",".bat",".ps1"}
+def _tiene_ac3(ruta):
+    """(JMG, 20-11) ¿lleva el archivo audio AC3 o E-AC3? (ffprobe, en caché)"""
+    try:
+        e=os.path.splitext(str(ruta))[1].lower()
+        if e in (".ac3",".eac3",".ec3"):return os.path.isfile(ruta)
+        if e in _EXT_SIN_AC3 or not os.path.isfile(ruta):return False
+        st=os.stat(ruta);k=(os.path.normcase(os.path.abspath(ruta)),st.st_size,int(st.st_mtime))
+        if k in _DRC_CACHE:return _DRC_CACHE[k]
+        r=rh([FFPROBE,"-v","error","-select_streams","a","-show_entries","stream=codec_name","-of","csv=p=0",ruta],timeout=60)
+        v=any(x.strip().lower() in ("ac3","eac3") for x in (r.stdout or "").splitlines());_DRC_CACHE[k]=v;return v
+    except Exception:return False
+def _sin_drc(cmd):
+    """(JMG, 20-11) AC3/E-AC3 sin la compresión que FFmpeg aplica por su cuenta (drc_scale=1 por defecto, bajaba los picos hasta 4 dB):
+    «-drc_scale 0» delante de cada entrada AC3/E-AC3 que no lleve ya su ajuste. El «none» de Azid: el sonido original"""
+    try:
+        if not isinstance(cmd,list) or not cmd:return cmd
+        n=os.path.basename(str(cmd[0])).lower()
+        if not (n.startswith("ffmpeg") or n.startswith("ffplay")):return cmd
+        c=list(cmd)
+        if n.startswith("ffplay") and "-i" not in c:
+            return c[:-1]+["-drc_scale","0",c[-1]] if len(c)>1 and "-drc_scale" not in c and _tiene_ac3(str(c[-1])) else c
+        out=[c[0]];ini=1
+        for j in range(1,len(c)):
+            a=c[j]
+            if a=="-i" and j+1<len(c) and isinstance(c[j+1],str) and "-drc_scale" not in c[ini:j] and _tiene_ac3(c[j+1]):out+=["-drc_scale","0"]
+            out.append(a)
+            if c[j-1]=="-i":ini=j+1
+        return out
+    except Exception:return cmd
+class _PopenJmg(subprocess.Popen):
+    """todas las órdenes de FFmpeg / FFplay del programa pasan por _sin_drc"""
+    _jmg=True
+    def __init__(self,args,*a,**k):super().__init__(_sin_drc(args),*a,**k)
+if not getattr(subprocess.Popen,"_jmg",False):subprocess.Popen=_PopenJmg
+VERDE_JMG="#3cb95a"   # (JMG, 21-11) nuestro verde (el de los «Auto» puestos): el título de un efecto puesto
+class _SBAuto(ttk.Scrollbar):
+    """(JMG, 21-11) la barra de desplazamiento sale solo cuando hace falta (pestañas, listas y textos de los dos programas)"""
+    def set(self,lo,hi):
+        try:
+            sobra=float(lo)<=0.0 and float(hi)>=1.0;mg=self.winfo_manager()
+            if sobra and mg:
+                if mg=="pack":
+                    sl=self.master.pack_slaves();i=sl.index(self);info=self.pack_info();info.pop("in",None)
+                    self._jmg_pk=(info,sl[i+1] if i+1<len(sl) else None);self.pack_forget()
+                elif mg=="grid":self._jmg_pk=("grid",None);self.grid_remove()
+            elif not sobra and not mg and getattr(self,"_jmg_pk",None):
+                info,sig=self._jmg_pk;self._jmg_pk=None
+                if info=="grid":self.grid()
+                else:
+                    if sig is not None and sig.winfo_exists() and sig.winfo_manager()=="pack" and sig.master is self.master:info["before"]=sig
+                    self.pack(**info)
+        except Exception:pass
+        super().set(lo,hi)
+if not getattr(ttk.Scrollbar,"_jmg",False):_SBAuto._jmg=True;ttk.Scrollbar=_SBAuto
+def _json_seguro(ruta,obj,**kw):
+    """(JMG, 20-11) guardar sin riesgo: se escribe a un temporal al lado y se cambia por el bueno de golpe (os.replace); si se va la
+    luz o se cierra a mitad, queda el archivo de antes entero, nunca uno a medias"""
+    t=ruta+".tmp"
+    try:
+        with open(t,"w",encoding="utf-8") as f:json.dump(obj,f,**kw);f.flush();os.fsync(f.fileno())
+        os.replace(t,ruta)
+    except Exception:
+        try:os.remove(t)
+        except Exception:pass
+        raise
 def _apoyo_ruta():
     """(JMG, 13-11) el recordatorio de contribuir es de la suite: un solo archivo para los dos programas"""
     a=_app_dir()
@@ -302,7 +492,7 @@ def _apoyo_leer():
     except Exception:return {}
 def _apoyo_guardar(j):
     try:
-        with open(_apoyo_ruta(),"w",encoding="utf-8") as f:json.dump(j,f)
+        _json_seguro(_apoyo_ruta(),j)
     except Exception:pass
 def _apoyo_hecho():
     """se ha abierto la página de contribuir: el recordatorio no vuelve a salir (en ninguno de los dos programas)"""
@@ -318,8 +508,8 @@ def _apoyo_toca():
     if d0 is None or d0>hoy:j["desde"]=hoy.isoformat();_apoyo_guardar(j);return False   # el primer arranque (o el reloj cambiado): empieza a contar
     return (hoy-d0).days>=APOYO_DIAS
 CONTACTO_MAIL="jmgsoftwaremultimedia@gmail.com"   # el logotipo abre un correo nuevo a esta direccion
-VERSION_PROG="1.5"   # la de construir.bat; el aviso de version nueva la compara con la ultima Release de GitHub
-SUITE_VER="1.2"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
+VERSION_PROG="1.5.1"   # la de construir.bat; el aviso de version nueva la compara con la ultima Release de GitHub
+SUITE_VER="1.2.1"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
 REPO_GH="jmgsoftwaremultimedia/JmgSuiteMultimedia"
 _EXT_VID="*.mkv *.mp4 *.m4v *.avi *.mov *.m2ts *.mts *.ts *.webm *.wmv *.flv *.mpg *.mpeg *.vob *.ogv *.3gp *.mxf *.divx"
 if sys.platform!="win32":_EXT_VID+=" "+_EXT_VID.upper()   # en Linux el filtro distingue mayusculas
@@ -328,8 +518,9 @@ PALETAS={
 "oscuro":{"CF":"#2b2b2b","CT":"#e0e0e0","CSB":"#505050","CSK":"#383838","CA":"#b8b8b8","CDO":"#3a5a3a","CDN":"#2a2a2a","CAV":"#e08080","CID":"#7bb8e5","CPS":"#4a5a7a","CASB":"#404040","CASF":"#ffffff","CPB":"#4CAF50","CPT":"#454545"}
 }
 def _set_paleta(nombre):
-    global CF,CT,CSB,CSK,CA,CDO,CDN,CAV,CID,CPS,CASB,CASF,CPB,CPT
+    global CF,CT,CSB,CSK,CA,CDO,CDN,CAV,CID,CPS,CASB,CASF,CPB,CPT,VERDE_JMG
     p=PALETAS.get(nombre,PALETAS["claro"])
+    VERDE_JMG="#1e8a3a" if p is PALETAS["claro"] else "#3cb95a"   # (JMG, 22-11) en el tema claro, más oscuro
     CF=p["CF"];CT=p["CT"];CSB=p["CSB"];CSK=p["CSK"];CA=p["CA"]
     CDO=p["CDO"];CDN=p["CDN"];CAV=p["CAV"];CID=p["CID"];CPS=p["CPS"]
     CASB=p["CASB"];CASF=p["CASF"];CPB=p["CPB"];CPT=p["CPT"]
@@ -360,14 +551,31 @@ VCODECS=[("copy","Passthrough"),("h264","H.264 / AVC"),("hevc","H.265 / HEVC"),(
 INTRA=("prores","dnxhr")   # para editar: cada fotograma entero, sin calidad ni bitrate que elegir
 VENC={("h264","cpu"):"libx264",("hevc","cpu"):"libx265",("vvc","cpu"):"libvvenc",("av1","cpu"):"libsvtav1",("prores","cpu"):"prores_ks",("vp9","cpu"):"libvpx-vp9",("dnxhr","cpu"):"dnxhd",
       ("h264","nvidia"):"h264_nvenc",("hevc","nvidia"):"hevc_nvenc",("av1","nvidia"):"av1_nvenc",
-      ("h264","amd"):"h264_amf",("hevc","amd"):"hevc_amf",("av1","amd"):"av1_amf"}
-GPU_ENC=("h264_nvenc","hevc_nvenc","av1_nvenc","h264_amf","hevc_amf","av1_amf")
+      ("h264","amd"):"h264_amf",("hevc","amd"):"hevc_amf",("av1","amd"):"av1_amf",
+      ("h264","intel"):"h264_qsv",("hevc","intel"):"hevc_qsv",("av1","intel"):"av1_qsv",   # (JMG, 21-11) Intel (Quick Sync)
+      ("h264","vulkan"):"h264_vulkan",("hevc","vulkan"):"hevc_vulkan",("av1","vulkan"):"av1_vulkan"}   # (JMG, 21-11) Vulkan (cualquier marca)
+GPU_ENC=("h264_nvenc","hevc_nvenc","av1_nvenc","h264_amf","hevc_amf","av1_amf","h264_qsv","hevc_qsv","av1_qsv")
+_VK={"dev":None}   # (JMG, 21-11) la tarjeta Vulkan que codifica (la encuentra _detectar_gpu)
 _AMF_2P={}   # (22-11) la ayuda de «2 pasadas» que admite cada AMD de este PC (-preanalysis o -preencode); la rellena _detectar_gpu
 KBPS_HEVC=((2160,16000),(1440,9000),(1080,6000),(720,3000),(480,1800),(0,1200))   # kbps de referencia en HEVC segun la altura
 KBPS_FACTOR={"h264":1.6,"hevc":1.0,"vvc":0.65,"av1":0.75,"vp9":0.85}                         # los demas, respecto a HEVC
 CRF_DEF={"h264":20,"hevc":22,"vvc":30,"av1":30,"vp9":31,"prores":0,"dnxhr":0}   # calidad constante: x264/x265 crf, vvenc qp, SVT-AV1 crf (menos = mejor)
 RESOLUCIONES=["orig","2160","1440","1080","720","576","480"]
 VIMG_KEYS=("brillo","contraste","satur","tono","nitidez","ruido")   # (JMG, 20-11) + tono   # correcciones de imagen (Visualizacion / Edicion)
+_ULTIMOS=[]   # (JMG, 22-11) lo último que se ha escrito (para abrir su carpeta con el archivo ya elegido)
+def _abrir_marcado(archivo):
+    """(JMG, 22-11) abre la carpeta con el archivo ya seleccionado (para no tener que buscarlo)"""
+    try:
+        if sys.platform=="win32" and archivo and os.path.isfile(archivo):
+            subprocess.Popen(["explorer","/select,",os.path.normpath(archivo)]);return True
+    except Exception:pass
+    return _abrir_externo(os.path.dirname(archivo) or archivo)
+def _boton_abajo():
+    """(JMG, 26-11) ¿el botón izquierdo del ratón está pulsado de verdad? (si se pierde el «soltar», las ondas no se quedan sin rehacer)"""
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.GetAsyncKeyState(1)&0x8000)
+    except Exception:return True
 def _vimg_filtro(v):
     """brillo / contraste / saturacion (eq), nitidez (unsharp) y quitar ruido (hqdn3d) de los deslizadores -> filtros"""
     f=[];b=v.get("brillo",0);c=v.get("contraste",0);s=v.get("satur",0);n=v.get("nitidez",0);r=v.get("ruido",0)
@@ -381,7 +589,7 @@ VELS=("lenta","media","rapida")
 PRESET={"libx264":{"lenta":"slow","media":"medium","rapida":"veryfast"},"libx265":{"lenta":"slow","media":"medium","rapida":"fast"},
         "libvvenc":{"lenta":"medium","media":"fast","rapida":"faster"},"libvpx-vp9":{"lenta":"1","media":"2","rapida":"4"},"libsvtav1":{"lenta":"4","media":"6","rapida":"9"},
         "h264_nvenc":{"lenta":"p7","media":"p5","rapida":"p3"},"hevc_nvenc":{"lenta":"p7","media":"p5","rapida":"p3"},"av1_nvenc":{"lenta":"p7","media":"p5","rapida":"p3"},
-        "h264_amf":{"lenta":"quality","media":"balanced","rapida":"speed"},"hevc_amf":{"lenta":"quality","media":"balanced","rapida":"speed"},"av1_amf":{"lenta":"quality","media":"balanced","rapida":"speed"}}
+        "h264_amf":{"lenta":"quality","media":"balanced","rapida":"speed"},"hevc_amf":{"lenta":"quality","media":"balanced","rapida":"speed"},"av1_amf":{"lenta":"quality","media":"balanced","rapida":"speed"},"h264_qsv":{"lenta":"veryslow","media":"medium","rapida":"veryfast"},"hevc_qsv":{"lenta":"veryslow","media":"medium","rapida":"veryfast"},"av1_qsv":{"lenta":"veryslow","media":"medium","rapida":"veryfast"},"h264_vulkan":{"lenta":"4","media":"2","rapida":"0"},"hevc_vulkan":{"lenta":"4","media":"2","rapida":"0"},"av1_vulkan":{"lenta":"4","media":"2","rapida":"0"}}
 def _kbps_obj(codec,h,hdr=False):
     """kbps de vídeo que el Auto pone para ese codec y esa altura (HDR, un 20 % mas)"""
     b=next(k for hh,k in KBPS_HEVC if h>=hh)
@@ -389,7 +597,7 @@ def _kbps_obj(codec,h,hdr=False):
 
 # ---------- audio ----------
 ACODECS=[("copy","Passthrough"),("ac3","AC3 (Dolby Digital)"),("eac3","E-AC3 (Dolby Digital Plus)"),("truehd","Dolby TrueHD"),("dts","DTS"),("aac","AAC"),("mp3","MP3 (estéreo)"),("flac","FLAC"),("opus","Opus")]
-AKBPS={"ac3":(96,112,128,160,192,224,256,320,384,448,512,576,640),"eac3":(64,96,128,160,192,224,256,320,384,448,512,576,640,768,1024,1536),"dts":(768,1536),"aac":(128,192,256,320,384,512),"mp3":(128,192,256,320),"opus":(96,128,192,256,320,384,512),"flac":(16,24),"truehd":(16,24),"copy":()}
+AKBPS={"ac3":(96,112,128,160,192,224,256,320,384,448,512,576,640),"eac3":(64,96,128,160,192,224,256,320,384,448,512,576,640,768,1024,1536),"dts":(768,1536),"aac":(128,192,256,320,384,512,640,768),"mp3":(128,192,256,320),"opus":(96,128,192,256,320,384,512),"flac":(16,24),"truehd":(16,24),"copy":()}
 ABITS=("flac","truehd")   # sin perdidas: en vez de kbps se elige 16 o 24 bits
 def _akbps_def(cod,nch):
     """bitrate por defecto de cada codec de audio segun los canales"""
@@ -407,6 +615,7 @@ def _akbps_lista(cod,nch):
     l=list(AKBPS.get(cod,()))
     if cod=="ac3" and nch>2:l=[x for x in l if x>=224]
     if cod=="eac3":lo,hi=_eac3_rango(nch);l=[x for x in l if lo<=x<=hi]
+    if cod=="aac":l=[x for x in l if x<=288*max(1,nch)]   # (árbitro) el AAC de FFmpeg da como mucho unos 288 kbps por canal
     return l
 ACOD_DE_ORIGEN={"ac3":"ac3","eac3":"eac3","dts":"dts","aac":"aac","flac":"flac","opus":"opus","truehd":"truehd","mp3":"mp3"}   # al aplicar efectos a una pista en Passthrough
 IDIOMAS_PISTA=["spa","eng","cat","glg","eus","fre","ger","ita","por","jpn","chi","kor","rus","dut","pol","swe","und"]
@@ -419,8 +628,9 @@ DEF_LAY={1:"mono",2:"stereo",3:"2.1",4:"quad",5:"5.0",6:"5.1",7:"6.1",8:"7.1"}
 SLIDER_CH={"FL":"fl","FR":"fr","FC":"fc","LFE":"lfe","BL":"bl","BR":"br","SL":"bl","SR":"br","BC":"bl"}
 SUAV_FC=(7500,6000,5000,4300,3600)   # corte del Suavizado 1-5 (los mismos que Jmg AudioProcesador)
 EQ3_F=(100,1000,5000)
-VOL_CH=("fl","fr","fc","lfe","bl","br")   # (JMG, 18-11) volumen por canal: de -20 a +20 dB y con décimas (como Jmg AudioProcesador)
-AEF_KEYS=("gama","gama_c","fl","fr","fc","lfe","bl","br","suav","eq_bass","eq_mids","eq_treble","db","voz","amb","efc","sub","separ")   # (JMG, 27-11) + Separación de canales
+VOL_CH=("fl","fr","fc","lfe","bl","br")
+FINO=()   # (JMG, 20-11) ya sin medios: Presencia, Gama, Separación y ecualizador de -15 a +15, de 1 en 1 (el 15 = el 10 de antes)   # (JMG, 19-11) de 0,5 en 0,5 (el Double Bass, de 1 en 1 hasta 6: JMG, noche)   # (JMG, 18-11) volumen por canal: de -20 a +20 dB y con décimas (como Jmg AudioProcesador)
+AEF_KEYS=("din_modo","din_ft","din_fc","din_lfe","din_techo","fl","fr","fc","lfe","bl","br","suav","eq_bass","eq_mids","eq_treble","db","voz","amb","efc","sub","separ")   # (JMG, 27-11) + Separación de canales
 def _separ_medida(arch,chs,orden=0,dur=0.0):
     """(JMG, 28-11) la separación que tiene una pista: dB de lo distinto entre izquierda y derecha frente a lo común, en los delanteros
     («F») y en los traseros («T»). chs = {canal: índice}. Un archivo largo (dur > 10 min) se mide en 12 trozos de 30 s repartidos"""
@@ -455,7 +665,7 @@ def _separ_auto(W,I,R,V):
     lr=[R[c] for c in ("FL","FR","BL","BR","SL","SR") if ok(c) and c in R]
     if lr:p.append(cl((m(lr)-15.0)/10.0,0.0,1.0))         # contraste 15 LU: tranquila; 25 LU: mucha acción (lo normal en cine, 15-25)
     a=m(p) if p else 0.5;obj=-7.0+6.0*a;w=m(list(W.values()))
-    x=cl((10.0**((obj-w)/20.0)-1.0)/0.7,-1.0,0.3+0.7*a*a);s=int(round(10*x))   # una tranquila, como mucho +3; una de mucha acción, hasta +10
+    xm=0.3+0.7*a*a;x=cl((10.0**((obj-w)/20.0)-1.0)/0.7,-1.0,xm);s=min(int(round(15*x)),int(15*xm+1e-9))   # una tranquila, como mucho +4 (el +3 de antes); una de mucha acción, hasta +15 (el tope)
     tipo=V("de mucha acción","with lots of action") if a>=0.66 else (V("tranquila","calm") if a<0.33 else V("intermedia","in between"))
     return s,V(f"película {tipo} ({a*100:.0f} %) · separación medida {w:+.1f} dB, la que le va {obj:+.1f} dB → {s:+d} (el central no se toca)",
                f"movie {tipo} ({a*100:.0f} %) · measured separation {w:+.1f} dB, the right one {obj:+.1f} dB → {s:+d} (the center is not touched)")
@@ -463,10 +673,10 @@ def _separ_filtro(s,chans,lay,env=True):
     """(JMG, 27-11) «Separación de canales» (-10..+10): cada pareja izquierda / derecha (delanteros, traseros, laterales) se ensancha o se
     estrecha (lo común a los dos canales se queda; la diferencia sube o baja) sin subir el volumen, y en positivo los traseros se retrasan
     un poco (hasta 10 ms, como los decodificadores de cine) para despegar lo de detrás de lo de delante. -> filtros o None"""
-    try:s=max(-10,min(10,int(s)))
+    try:s=max(-15,min(15,int(round(float(s)))))   # (JMG, 20-11) de -15 a +15, de 1 en 1: el 15 hace lo que antes el 10
     except (TypeError,ValueError):return None
     if not s or not chans:return None
-    x=s/10.0;w=0.7*x;k=1.0+w;g=((1.0+0.25)/(1.0+0.25*k*k))**0.5 if w>0 else 1.0   # ensanchar: se compensa el nivel de una mezcla de cine normal (lo distinto, ~6 dB por debajo de lo común)
+    x=s/15.0;w=0.7*x;k=1.0+w;g=((1.0+0.25)/(1.0+0.25*k*k))**0.5 if w>0 else 1.0   # ensanchar: se compensa el nivel de una mezcla de cine normal (lo distinto, ~6 dB por debajo de lo común)
     a=round(g*(1.0+k)/2.0,4);b=round(g*(1.0-k)/2.0,4)
     idx={c:i for i,c in enumerate(chans)};ex={i:f"c{i}" for i in range(len(chans))};hay=False
     for l,r in [("FL","FR")]+([("BL","BR"),("SL","SR")] if env else []):
@@ -534,6 +744,42 @@ def _pausar_pid(pid,on):
         os.kill(int(pid),signal.SIGSTOP if on else signal.SIGCONT);return True
     except Exception:return False
 _BD_LISTA={}   # (JMG, 13-11) carpeta BDMV -> la lista de reproducción (.mpls) que _bd_titulo eligió como película
+_ISO1_2={"es":"spa","en":"eng","ca":"cat","gl":"glg","eu":"baq","fr":"fre","de":"ger","it":"ita","pt":"por","ja":"jpn","zh":"chi","ko":"kor","ru":"rus",
+         "nl":"dut","pl":"pol","sv":"swe","da":"dan","no":"nor","fi":"fin","cs":"cze","hu":"hun","el":"gre","tr":"tur","he":"heb","ar":"ara","hi":"hin",
+         "th":"tha","is":"ice","hr":"hrv","ro":"rum","sk":"slo","sl":"slv","bg":"bul","uk":"ukr","sr":"srp","et":"est","lv":"lav","lt":"lit","id":"ind",
+         "ms":"may","vi":"vie","la":"lat"}
+def _dvd_idiomas(vobs):
+    """(JMG, 22-11) DVD: {id de la pista, como lo da FFmpeg: idioma} de sus pistas de audio y de subtítulos, leídos del .IFO de su
+    VTS, porque los .VOB no traen el idioma. {} si no se puede leer"""
+    res={}
+    try:
+        m_=re.match(r"(VTS_\d\d)_\d\.VOB$",os.path.basename(vobs[0]),re.I)
+        if not m_:return {}
+        with open(os.path.join(os.path.dirname(vobs[0]),m_.group(1)+"_0.IFO"),"rb") as fh:d=fh.read(1<<20)
+        if d[:12]!=b"DVDVIDEO-VTS":return {}
+        def lg(b2):
+            t=b2.decode("latin1").lower().strip("\x00 ")
+            return _ISO1_2.get(t) if len(t)==2 else None
+        na=min(8,int.from_bytes(d[0x202:0x204],"big"));ns=min(32,int.from_bytes(d[0x254:0x256],"big"))
+        ac=list(range(8));sc=list(range(32))   # el número de cada pista dentro del VOB: del primer PGC del título (si no, en orden)
+        try:
+            pt=int.from_bytes(d[0xCC:0xD0],"big")*2048;o=pt+int.from_bytes(d[pt+12:pt+16],"big")
+            for i in range(8):
+                w=int.from_bytes(d[o+0x0C+2*i:o+0x0E+2*i],"big")
+                if w&0x8000:ac[i]=(w>>8)&7
+            for i in range(32):
+                w=int.from_bytes(d[o+0x1C+4*i:o+0x20+4*i],"big")
+                if w&0x80000000:sc[i]=(w>>24)&0x1F
+        except Exception:pass
+        for i in range(na):
+            a=d[0x204+8*i:0x20C+8*i];base={0:0x80,2:0x1C0,3:0x1C0,4:0xA0,6:0x88}.get(a[0]>>5)   # AC3, MPEG, LPCM, DTS
+            l_=lg(a[2:4]) if (a[0]>>2)&3==1 else None
+            if l_ and base is not None:res[base+ac[i]]=l_
+        for i in range(ns):
+            s=d[0x256+6*i:0x25C+6*i];l_=lg(s[2:4]) if s[0]&3==1 else None
+            if l_:res[0x20+sc[i]]=l_
+    except Exception:return {}
+    return res
 def _bd_idiomas(carpeta):
     """(JMG, 13-11) Blu-ray: {PID: idioma} de las pistas de audio y de subtítulos de la película, leídos de la tabla de pistas
     (STN) de su lista de reproducción, porque los .m2ts no traen el idioma. {} si no se puede leer"""
@@ -697,7 +943,7 @@ def _tmdb_clave():
     except Exception:return ""
 def _tmdb_clave_poner(c):
     try:
-        with open(_tmdb_cfg_ruta(),"w",encoding="utf-8") as f:json.dump({"clave":str(c).strip()},f)
+        _json_seguro(_tmdb_cfg_ruta(),{"clave":str(c).strip()})
     except Exception:pass
 def _tmdb_hay():
     return bool(TMDB_SERVICIO or _tmdb_clave())
@@ -863,24 +1109,31 @@ def _srt_escribir(cues,ruta):
     def f(s):
         ms=int(round(max(0.0,s)*1000));h,ms=divmod(ms,3600000);m,ms=divmod(ms,60000);s_,ms=divmod(ms,1000)
         return f"{h:02d}:{m:02d}:{s_:02d},{ms:03d}"
-    with open(ruta,"w",encoding="utf-8") as fh:
+    t_=ruta+".tmp"   # (JMG, 20-11) con temporal: nunca un .srt a medias
+    with open(t_,"w",encoding="utf-8") as fh:
         for k,(a,b,t) in enumerate(cues,1):fh.write(f"{k}\n{f(a)} --> {f(b)}\n{t}\n\n")
+        fh.flush();os.fsync(fh.fileno())
+    os.replace(t_,ruta)
+def _ef_on(ef):
+    """(JMG, 22-11) ¿lleva algún efecto? El Procesado dinámico cuenta solo con su modo puesto (sus intensidades y su techo, no)"""
+    ef=ef or {}
+    return bool(int(ef.get("din_modo") or 0)) or any(ef.get(k) for k in AEF_KEYS if not k.startswith("din_"))
 def _a_proc(t):
     """(JMG, 8-11) pista «procesada» (sale la primera, «Jmg procesada», con la original detrás) solo si lleva efectos;
     cambiar el códec o el bitrate (o el delay, los tramos o el framerate) la recomprime en su sitio, sin más"""
-    return any((t.get("ef") or {}).get(k) for k in AEF_KEYS)
+    return _ef_on(t.get("ef"))
 def _eff(v,top_pos,top_neg=None,expo=1.4):
     """Presencia (como en Jmg AudioProcesador): deslizador -10..10 -> dB reales, curva suave y con tope"""
     try:v=float(v)
     except Exception:return 0.0
     if abs(v)<0.05:return 0.0
     top=top_pos if v>0 else (top_neg if top_neg is not None else top_pos)
-    return round((1 if v>0 else -1)*top*(min(abs(v),10.0)/10.0)**expo,2)
+    return round((1 if v>0 else -1)*top*(min(abs(v),15.0)/15.0)**expo,2)   # (JMG, 20-11) de -15 a +15: el 15 da el tope (lo que antes el 10)
 def _eff_inv(db,top_pos,top_neg,expo=1.4):
     """lo contrario de _eff: valor del deslizador que da mas o menos esos dB"""
     if abs(db)<0.05:return 0
     t=top_pos if db>0 else top_neg
-    return int((1 if db>0 else -1)*round(10.0*(min(abs(db),t)/t)**(1.0/expo)))
+    return int((1 if db>0 else -1)*round(15.0*(min(abs(db),t)/t)**(1.0/expo)))
 DB_CORTE=90   # Double Bass: corte de los graves (Hz), como en Jmg AudioProcesador
 def _gd_points(nivel):
     """Gama dinamica (EXPANSION, la de Jmg AudioProcesador) en el nivel 1-5: los sonidos flojos bajan, los fuertes se quedan"""
@@ -891,7 +1144,7 @@ def _gd_points(nivel):
     return "|".join(f"{x}/{round(max(-110.0,o(x)),1)}" for x in xs)
 def _comp_points(nivel):
     """Compresion (la «Elevacion» del Procesado dinamico de Jmg AudioProcesador) en el nivel 1-5: suben los sonidos flojos"""
-    vn=max(0,min(10,int(round(2*float(nivel)))))
+    vn=max(0.0,min(10.0,2.0*float(nivel)))   # (JMG, 20-11) sin redondear: los pasos de 2/3
     u=(vn-1)/9.0;L=lambda a,b:a+(b-a)*u;xtra=6.0*vn/10.0
     up55=L(2.5,13)+xtra;up40=L(2,9)+xtra;up30=L(1,4.5)+xtra;Pe=-25.0
     ex=[q for q in [(-90,-90),(-72,-72+up55*0.3),(-55,-55+up55),(-40,-40+up40),(-30,-30+up30)] if q[0]<Pe-1]+[(Pe,Pe),(0,0),(20,20)]
@@ -901,7 +1154,7 @@ def _comp_points(nivel):
     return "|".join(f"{a:g}/{b:.1f}" for a,b in ex)
 def _compand(g):
     """g = deslizador -5..+5: a la izquierda gama dinamica (expansion), a la derecha compresion; 0 = apagado"""
-    g=int(round(g or 0))   # (JMG, 9-11) deslizador -10..+10, más preciso: cada paso, medio nivel de antes (el 10 = el 5 de antes)
+    g=max(-15,min(15,int(round(float(g or 0)))))*2/3.0   # (JMG, 20-11) de -15 a +15, de 1 en 1: cada paso, 2/3 del de antes (el 15 = el 10 de antes)   # (JMG, 9-11) deslizador -10..+10, más preciso: cada paso, medio nivel de antes (el 10 = el 5 de antes)
     if g<0:return f"compand=attacks=0.05:decays=0.4:points={_gd_points(-g/2.0)}:soft-knee=6:gain=0:volume=0"
     if g>0:return f"compand=attacks=0.008:decays=0.25:points={_comp_points(g/2.0)}:soft-knee=4:gain=0:volume=-30"
     return None
@@ -1057,13 +1310,26 @@ def _estereo_cmd(c,ch):
     return c+["-af",f]
 # ---------- (JMG, 18-11) los ajustes de audio de cada pista, de un programa al otro ----------
 _TR_EF=("fl","fr","fc","lfe","bl","br","voz","amb","efc","sub","separ","eq_bass","eq_mids","eq_treble","suav","db")
+def _presets_suite(viejo=None):
+    """(JMG, 26-11) los presets, comunes a Jmg AudioProcesador y Jmg VideoEncoder: «Jmg SuiteMultimedia\\presets» al lado de la carpeta
+    de ajustes de cada uno (portable: junto a los programas; instalado: en %APPDATA%). La primera vez se copian los de antes"""
+    d=os.path.join(os.path.dirname(_data_dir().rstrip("\\/")),"Jmg SuiteMultimedia","presets")
+    try:
+        try:os.makedirs(d,exist_ok=True)
+        except OSError:return viejo or d   # (árbitro, 26-11) sin poder crear la común, la de siempre
+        if viejo and os.path.isdir(viejo) and os.path.normcase(os.path.abspath(viejo))!=os.path.normcase(os.path.abspath(d)):
+            import shutil as _sh
+            for f in os.listdir(viejo):
+                if f.lower().endswith(".json") and not os.path.exists(os.path.join(d,f)):_sh.copy2(os.path.join(viejo,f),os.path.join(d,f))
+    except Exception:pass
+    return d
 def _traspaso_ruta():
     import tempfile;return os.path.join(tempfile.gettempdir(),"jmg_traspaso_ajustes.json")
 def _traspaso_guardar(de,datos):
     """deja los ajustes de las pistas que se pasan al otro programa: {archivo: {índice de la pista en el archivo: ajustes}}"""
     try:
         p=_traspaso_ruta()
-        if datos:json.dump({"de":de,"t":time.time(),"archivos":datos},open(p,"w",encoding="utf-8"))
+        if datos:_json_seguro(p,{"de":de,"t":time.time(),"archivos":datos})
         elif os.path.isfile(p):os.remove(p)
     except Exception:pass
 def _traspaso_cargar(de,archivos):
@@ -1077,7 +1343,7 @@ def _traspaso_cargar(de,archivos):
         q={nc(k):v for k,v in (d.get("archivos") or {}).items() if isinstance(v,dict)}
         out={nc(a):q.pop(nc(a)) for a in archivos if nc(a) in q}
         if out:
-            if q:d["archivos"]=q;json.dump(d,open(p,"w",encoding="utf-8"))
+            if q:d["archivos"]=q;_json_seguro(p,d)
             else:os.remove(p)
         return out
     except Exception:return {}
@@ -1489,7 +1755,7 @@ class VideoEncoderGUI:
         except Exception:self.root.geometry("1300x950")
         self.root.minsize(1000,min(700,max(500,self.root.winfo_screenheight()-140)))
         self.root.configure(bg=CF)
-        self.root.protocol("WM_DELETE_WINDOW",self._on_close);self.root.after(900,self._extras_10_11)   # (JMG, 10-11) bandeja y descripciones
+        self.root.protocol("WM_DELETE_WINDOW",self._on_close);self._quitar_desc(self.root);self._tit_registrar(self.root);self.root.after(900,self._extras_10_11)   # (JMG, 10-11) bandeja y descripciones
         import queue as _q
         self._uiq=_q.Queue()
         # datos
@@ -1503,7 +1769,14 @@ class VideoEncoderGUI:
         self._muestras={}      # (ruta, pista) -> WAV de muestra para los «Auto» de audio
         self._ext_info={}      # archivo de una pista de audio añadida -> lo que dice ffprobe
         self._repro=None       # escucha en marcha
+        try:   # (árbitro, 26-11) carpetas temporales de otras veces que no se borraron (p. ej. el PC se apagó con el programa abierto): de más de 12 h
+            import shutil as _sh;_td=tempfile.gettempdir();_ah=time.time()
+            for _n in os.listdir(_td):
+                _p=os.path.join(_td,_n)
+                if _n.startswith("jmg_ve_") and os.path.isdir(_p) and _ah-os.path.getmtime(_p)>12*3600:_sh.rmtree(_p,ignore_errors=True)
+        except Exception:pass
         self._tmp=tempfile.mkdtemp(prefix="jmg_ve_")
+        self.root.after(2500,lambda:_a_medias_aviso(self))   # (JMG, 20-11) lo que quedó a medias la última vez
         self._cargando=False   # mientras se pasan los ajustes de un trabajo a la pantalla: las trazas no guardan
         self._escaneando=False
         self.var_al_terminar=tk.StringVar(value="nada");self.var_reset_all=tk.BooleanVar(value=False)
@@ -1523,7 +1796,7 @@ class VideoEncoderGUI:
         self.var_nom=tk.StringVar(value="")   # nombre del archivo del vídeo de las pestañas
         self._aften=dict(AFTEN_DEF);self._aften.update({k:v for k,v in _af_migrar(o.get("aften")).items() if k in AFTEN_DEF})   # (JMG, 8-11)
         self._vars_video();self._vars_audio();self._vars_subs()
-        self._estilo();self._build()
+        self._estilo();self._build();self._quitar_desc(self.root);self._tit_registrar(self.root)
         self.root.after(40,self._ui_poll)
         self.root.bind_class('TCombobox','<<ComboboxSelected>>',self._cmb_sin_foco,add='+')
         def _enter_fija(e):
@@ -1561,13 +1834,15 @@ class VideoEncoderGUI:
         except Exception:pass
         s.configure("TNotebook",borderwidth=0,lightcolor=CSB,darkcolor=CSB,bordercolor=CSB,background=CF)
         s.configure("TNotebook.Tab",padding=[6,2],font=("",9),background=CSB,foreground=CT,borderwidth=0,focuscolor=CF,lightcolor=CSB,darkcolor=CSB,bordercolor=CSB)
-        s.map("TNotebook.Tab",background=[("selected",CF),("active",CSK),("!active",CSB)],foreground=[("selected",CT),("active",CT),("!active",CT)],
+        s.map("TNotebook.Tab",background=[("selected",CF),("active",CSK),("!active",CSB)],foreground=[("selected",VERDE_JMG),("active",VERDE_JMG),("!active",CT)],   # (JMG, 22-11) la abierta y la del ratón, en verde
               expand=[("selected",(0,0,0,0)),("active",(0,0,0,0)),("!active",(0,0,0,0))])
         s.configure("TFrame",background=CF,borderwidth=0,relief="flat")
         s.configure("NbBorder.TFrame",background=CSB,borderwidth=1,relief="flat")
         s.configure("TLabel",background=CF,foreground=CT)
         s.configure("TButton",padding=4,borderwidth=1,relief="solid",background=CF,foreground=CT,bordercolor=CSB,lightcolor=CF,darkcolor=CF)
-        s.map("TButton",background=[("active",CSB),("pressed",CSK),("disabled",CF)],foreground=[("active",CT),("pressed",CT),("disabled",CA)])
+        s.map("TButton",background=[("active",CF),("pressed",CF),("disabled",CF)],foreground=[("active",VERDE_JMG),("pressed",VERDE_JMG),("disabled",CA)])   # (JMG, 21-11) al pasar el ratón, en verde
+        s.map("Intel.G.TRadiobutton",foreground=[("disabled",CA),("selected","#2f8de4")])   # (JMG, 22-11) Intel elegido, en azul
+        s.configure("Rueda.TButton",padding=(1,0),font=("",10))   # (JMG, 25-11) la «⚙»
         s.configure("G.TCheckbutton",font=("",10),padding=6,background=CF,foreground=CT,focuscolor=CF,borderwidth=0)
         s.map("G.TCheckbutton",background=[("active",CF),("!active",CF)],foreground=[("active",CT),("disabled",CA),("!active",CT)])
         s.configure("G.TRadiobutton",font=("",10),padding=4,background=CF,foreground=CT,focuscolor=CF,borderwidth=0)
@@ -1579,8 +1854,8 @@ class VideoEncoderGUI:
             s.configure(st_+".G.TRadiobutton",font=("",10,"bold"),padding=4,background=CF,foreground=col,focuscolor=CF,borderwidth=0)
             s.map(st_+".G.TRadiobutton",background=[("active",CF),("!active",CF)],foreground=[("disabled",CA),("selected",col),("!selected",CT)])   # (JMG, 8-11) color solo el marcado
         s.configure("Auto.TButton",padding=0,anchor="center",font=("",8))   # (JMG, 14-11) «Auto»: del tamaño de las casillas de valor (_caja_auto), centrado
-        s.configure("AutoOn.TButton",padding=0,anchor="center",font=("",8,"bold"),foreground="#3cb95a")   # puesto: la palabra en verde
-        s.map("AutoOn.TButton",foreground=[("disabled",CA),("pressed","#3cb95a"),("active","#3cb95a"),("!active","#3cb95a")])
+        s.configure("AutoOn.TButton",padding=0,anchor="center",font=("",8,"bold"),foreground=VERDE_JMG)   # puesto: la palabra en verde
+        s.map("AutoOn.TButton",foreground=[("disabled",CA),("pressed",VERDE_JMG),("active",VERDE_JMG),("!active",VERDE_JMG)])
         s.configure("Vertical.TScrollbar",background=CSB,troughcolor=CF,bordercolor=CF,arrowcolor=CT,borderwidth=0,arrowsize=12)
         s.map("Vertical.TScrollbar",background=[("active",CSK)])
         s.configure("Horizontal.TScrollbar",background=CSB,troughcolor=CF,bordercolor=CF,arrowcolor=CT,borderwidth=0,arrowsize=12)
@@ -1719,6 +1994,169 @@ class VideoEncoderGUI:
             return "break"
         for k,s in (("<Left>",-1),("<Down>",-1),("<Right>",1),("<Up>",1)):e.bind(k,lambda ev,s=s:mv(ev,s))
     # ---------- (JMG, 10-11) icono en la bandeja del sistema y descripciones al pasar el ratón (los dos programas igual) ----------
+    _TIP_CLS=("TScale","Scale","Entry","TEntry","TCombobox","TSpinbox","Spinbox","TCheckbutton","Checkbutton","TRadiobutton","Radiobutton","TButton","Button")
+    @staticmethod
+    def _tit_ne(x,v):
+        try:return float(x)==float(v)
+        except (TypeError,ValueError):return str(x).strip() in ("","0","False","None")
+    def _tit_ne_g(self,*ks):
+        vs=[getattr(self,"var_"+k) for k in ks if hasattr(self,"var_"+k)]
+        return (vs,lambda vs=vs:any(not self._tit_ne(v.get(),0) for v in vs))
+    def _tit_registrar(self,raiz):
+        """(JMG, 21-11) el título de cada efecto, en nuestro verde cuando está puesto"""
+        try:G=self._tit_grupos()
+        except Exception:return
+        def hijos(w):
+            for c in w.winfo_children():
+                yield c;yield from hijos(c)
+        self._tits=[(w,k) for w,k in getattr(self,"_tits",[]) if w.winfo_exists()]
+        for w in [raiz]+list(hijos(raiz)):
+            try:
+                if w.winfo_class()=="TLabel" and "bold" in str(w.cget("font")):
+                    t=str(w.cget("text")).strip()
+                    if t in G and all(w is not x for x,_ in self._tits):self._tits.append((w,t))
+            except Exception:pass
+        if not getattr(self,"_tit_traz",False):
+            self._tit_traz=True
+            for vs,_ in G.values():
+                for v in vs:
+                    try:v.trace_add("write",lambda *a:self._tit_pintar_luego())
+                    except Exception:pass
+        self._vst=set()
+        try:W=self._tit_widgets()
+        except Exception:W={}
+        self._tbtn=[(w,k) for w,k in getattr(self,"_tbtn",[]) if w.winfo_exists()]
+        for w in [raiz]+list(hijos(raiz)):   # (JMG, 21-11) botones y textos que ya han corregido algo
+            try:
+                c=w.winfo_class()
+                if c in ("TButton","TCheckbutton","TLabel"):
+                    t=str(w.cget("text")).strip()
+                    if t in W and all(w is not x for x,_ in self._tbtn):w._jmg_st=str(w.cget("style")) or c;self._tbtn.append((w,t))
+            except Exception:pass
+        if not getattr(self,"_tit_bucle_on",False):
+            self._tit_bucle_on=True
+            try:self.root.after(1000,self._tit_bucle)
+            except Exception:pass
+        self._tit_pintar()
+        try:self.root.after(400,self._tit_pintar)   # después de que el tema repinte los colores
+        except Exception:pass
+    def _tit_pintar_luego(self):
+        try:
+            if getattr(self,"_tit_id",None):return
+            self._tit_id=self.root.after(40,self._tit_pintar)
+        except Exception:pass
+    def _tit_pintar(self):
+        self._tit_id=None
+        try:G=self._tit_grupos()
+        except Exception:return
+        for w,t in list(getattr(self,"_tits",[])):
+            try:
+                if w.winfo_exists():w.configure(foreground=VERDE_JMG if G[t][1]() else "")
+            except Exception:pass
+        try:W=self._tit_widgets()
+        except Exception:W={}
+        for w,t in list(getattr(self,"_tbtn",[])):
+            try:
+                if not w.winfo_exists() or t not in W:continue
+                on=bool(W[t]())
+                if w.winfo_class()=="TLabel":w.configure(foreground=VERDE_JMG if on else "")
+                else:
+                    st=self._verde_estilo(w._jmg_st) if on else w._jmg_st
+                    if str(w.cget("style"))!=st:w.configure(style=st)
+            except Exception:pass
+    def _verde_estilo(self,base):
+        """el mismo estilo del botón, con las letras en nuestro verde"""
+        n="Verde."+base
+        if n not in getattr(self,"_vst",set()):
+            s=ttk.Style();s.configure(n,foreground=VERDE_JMG)
+            s.map(n,foreground=[("disabled",CA),("pressed",VERDE_JMG),("active",VERDE_JMG),("!disabled",VERDE_JMG)])
+            self._vst=getattr(self,"_vst",set())|{n}
+        return n
+    def _tit_bucle(self):
+        """lo que no son variables (tramos medidos...) se repasa cada segundo"""
+        try:self._tit_pintar()
+        except Exception:pass
+        try:self.root.after(1000,self._tit_bucle)
+        except Exception:pass
+    def _tit_widgets(self):
+        """(JMG, 21-11) botones que se ponen en verde cuando ya han corregido algo -> {texto: ¿puesto?}"""
+        V=self._vt;ne=lambda v:not self._tit_ne(v.get(),0)
+        def tr_a():
+            try:
+                j=self._job();i=int(getattr(self,"_a_i",-1))
+                return bool(j and 0<=i<len(j["a"]) and j["a"][i].get("tramos"))
+            except Exception:return False
+        def mas():
+            try:
+                j=self._job() or {}
+                return any(ne(getattr(self,"var_"+k)) for k in VIMG_KEYS) or bool(self.var_crop_on.get()) or bool((j.get("rec") or {}).get("tramos"))
+            except Exception:return False
+        return {"🎯 "+V("Calcular delay","Calculate delay"):lambda:ne(self.var_a_delay),"✂ "+V("Corregir por tramos","Fix by parts"):tr_a,
+                "🔧 "+V("Más opciones","More options"):mas}
+    def _tit_grupos(self):
+        """título de cada efecto -> (sus variables, ¿está puesto?)"""
+        V=self._vt;n=self._tit_ne_g;g={}
+        g[V("Volumen por canal (dB)","Volume per channel (dB)")]=n("fl","fr","fc","lfe","bl","br")
+        def _sinc():
+            de,a=str(self.var_a_fps_de.get()).strip(),str(self.var_a_fps_a.get()).strip()
+            return not self._tit_ne(self.var_a_delay.get(),0) or bool(de and a and de!=a) or str(self.var_a_fps_met.get())!="tono"
+        g[V("Sincronización","Synchronization")]=([self.var_a_delay,self.var_a_fps_de,self.var_a_fps_a,self.var_a_fps_met],_sinc)
+        g[V("Suavizado digital","Digital smoothing")]=n("suav");g[V("Ecualizador de 3 bandas","3-band equalizer")]=n("eq_bass","eq_mids","eq_treble")
+        g[V("Double Bass","Double Bass")]=n("db");g[V("Presencia","Presence")]=n("voz","amb","efc","sub")
+        g[V("Procesado dinámico","Dynamic processing")]=([self.var_din_modo,self.var_din_ft,self.var_din_fc,self.var_din_lfe,self.var_din_techo],lambda:bool(int(self.var_din_modo.get() or 0)));g[V("Separación de canales","Channel separation")]=n("separ")
+        def _img():   # (JMG, 21-11) la Imagen de la pestaña Vídeo y la de «Más opciones»
+            return str(self.var_res.get())!="orig" or str(self.var_bits.get())!="auto" or str(self.var_deint.get())!="auto" or any(not self._tit_ne(getattr(self,"var_"+k).get(),0) for k in VIMG_KEYS)
+        g[V("Imagen","Picture")]=([self.var_res,self.var_bits,self.var_deint]+[getattr(self,"var_"+k) for k in VIMG_KEYS],_img)
+        g[V("Color","Color")]=([self.var_color,self.var_lut,self.var_log],lambda:str(self.var_color.get())!="auto" or bool(str(self.var_lut.get()).strip()) or bool(self.var_log.get()))
+        g[V("Bandas negras","Black bars")]=([self.var_crop_on],lambda:bool(self.var_crop_on.get()))
+        def _rec():
+            try:return bool(((self._job() or {}).get("rec") or {}).get("tramos"))
+            except Exception:return False
+        g[V("Recorte por tramos","Trimming by parts")]=([],_rec)
+        return g
+    def _quitar_desc(self,raiz):
+        """(JMG, 21-11) fuera las descripciones (texto gris en cursiva): ya salen al pasar el ratón. Su texto pasa a la descripción flotante
+        de los controles de su apartado que no tenían ninguna (y a su título); los avisos (_jmg_aviso) se quedan"""
+        def hijos(w):
+            for c in w.winfo_children():
+                yield c;yield from hijos(c)
+        for w in list(hijos(raiz)):
+            try:
+                if w.winfo_class()!="TLabel" or getattr(w,"_jmg_aviso",False) or isinstance(w,tk.Toplevel):continue
+                if str(w.cget("foreground"))!=str(CA) or "italic" not in str(w.cget("font")) or str(w.cget("textvariable")):continue
+                txt=str(w.cget("text")).strip();mg=w.winfo_manager()
+                if not txt or not mg:continue
+                self._desc_a_tips(w,txt)
+                if mg=="grid":w.grid_remove()
+                elif mg=="pack":w.pack_forget()
+                w._jmg_desc=txt
+            except Exception:pass
+    def _desc_a_tips(self,w,txt):
+        def todos(x):
+            yield x
+            for c in x.winfo_children():yield from todos(c)
+        p=w.master;sec=[];mg=w.winfo_manager()
+        try:
+            if mg=="grid":
+                r=int(w.grid_info()["row"]);fil=[]
+                for x in p.grid_slaves():
+                    try:xr=int(x.grid_info()["row"])
+                    except Exception:continue
+                    if xr<r:fil.append((xr,x))
+                lim=max([xr for xr,x in fil if x.winfo_class()=="TSeparator" and str(x.cget("orient"))=="horizontal"]+[-1])
+                sec=[x for xr,x in fil if xr>lim]
+            elif mg=="pack":
+                sl=p.pack_slaves();i=sl.index(w)
+                for x in reversed(sl[:i]):
+                    if x.winfo_class()=="TSeparator":break
+                    sec.append(x)
+        except Exception:return
+        for x in sec:
+            for y in todos(x):
+                try:
+                    c=y.winfo_class()
+                    if (c in self._TIP_CLS or (c in ("TLabel","Label") and "bold" in str(y.cget("font")))) and not self._tip_texto(y):self._ayuda_flotante(y,txt)
+                except Exception:pass
     def _extras_10_11(self):
         """se llama una vez al abrir: la bandeja (solo Windows) y las descripciones"""
         try:self._tips_iniciar()
@@ -1809,11 +2247,13 @@ class VideoEncoderGUI:
         if not hasattr(self,"_tip_fijo"):self._tip_fijo={}
         for ev,f in (("<Enter>",self._tip_entrar),("<Leave>",self._tip_quitar),("<ButtonPress>",self._tip_quitar),("<KeyPress>",self._tip_quitar)):
             self.root.bind_all(ev,f,add="+")
+        self.root.bind_all("<ButtonPress-1>",lambda e:setattr(self,"_raton_abajo",True),add="+")   # (JMG, 22-11) para no rehacer la onda a mitad
+        self.root.bind_all("<ButtonRelease-1>",lambda e:setattr(self,"_raton_abajo",False),add="+")
     def _tip_entrar(self,e):
         self._tip_quitar()
         try:
             w=e.widget
-            if isinstance(w,str):return
+            if isinstance(w,str) or w is getattr(self,"_tip_visto",None):return   # (JMG, 26-11) ya se fue sola: hasta salir y volver a entrar
             txt=self._tip_texto(w)
         except Exception:return
         if txt:self._tip_id=self.root.after(self._TIP_RETRASO,lambda:self._tip_mostrar(w,txt))
@@ -1829,9 +2269,18 @@ class VideoEncoderGUI:
             sw,sh=self.root.winfo_screenwidth(),self.root.winfo_screenheight()
             px=min(x+16,sw-tw-4);py=y+20 if y+20+th<sh-40 else y-th-12
             t.geometry(f"+{max(0,px)}+{max(0,py)}");self._tip_top=t
-            self._tip_fin=self.root.after(self._TIP_DURA,self._tip_quitar)
+            self._tip_fin=self.root.after(self._TIP_DURA,lambda w=w:self._tip_caduca(w))
         except Exception:pass
+    def _tip_caduca(self,w):
+        """(JMG, 26-11) la descripción se va sola; al cerrarla, Windows vuelve a «entrar» en el control y salía otra vez: ese control queda marcado"""
+        self._tip_fin=None;self._tip_visto=w;self._tip_quitar()
     def _tip_quitar(self,e=None):
+        v=getattr(self,"_tip_visto",None)
+        if v is not None and e is not None and str(getattr(e,"type",""))in("Leave","8") and getattr(e,"widget",None) is v:
+            try:
+                x,y=self.root.winfo_pointerxy()
+                if self.root.winfo_containing(x,y) is not v:self._tip_visto=None
+            except Exception:self._tip_visto=None
         for k in ("_tip_id","_tip_fin"):
             i=getattr(self,k,None)
             if i:
@@ -1889,6 +2338,13 @@ class VideoEncoderGUI:
                 if (n==p[1:]) if p.startswith("=") else n.startswith(p):return a if es else b
         return None
     _TIPS=[
+        (("pistas de audio","audio tracks"),"Las pistas de audio del vídeo: doble clic incluye o quita una; ⬆ ⬇ cambian el orden.","The video's audio tracks: double-click includes or removes one; ⬆ ⬇ change the order."),
+        (("buscar en internet","search online"),"Busca la película en TMDB y pone de portada el póster que elijas (con el nombre «Título (Año)»).","Looks the movie up on TMDB and sets the poster you choose as the cover (named «Title (Year)»)."),
+        (("procesado dinámico","dynamic processing"),"Como en Jmg AudioProcesador: Elevación sube lo flojo, Impacto hace que lo fuerte destaque. Cada grupo con su intensidad (0 = sin efecto).","As in Jmg AudioProcesador: Lift raises quiet sounds, Impact makes loud sounds stand out. Each group with its own strength (0 = no effect)."),
+        (("front./traseros 0-15","front/rear 0-15"),"Intensidad en los frontales y los traseros (0 = sin efecto).","Strength on the fronts and surrounds (0 = no effect)."),
+        (("central 0-15","center 0-15"),"Intensidad en el central, el de los diálogos (0 = sin efecto).","Strength on the center, the dialogue one (0 = no effect)."),
+        (("subwoofer 0-15",),"Intensidad en el subwoofer (0 = sin efecto). Mejor a 0 si usas Double Bass.","Strength on the subwoofer (0 = no effect). Better at 0 if you use Double Bass."),
+        (("separación de canales","separación","channel separation","separation"),"Más o menos separación entre izquierda y derecha (delanteros y traseros) y entre delante y detrás, sin subir el volumen. 0 = sin cambio; a la izquierda, más junto. «Auto» pone la que le va a la película.","More or less separation between left and right (fronts and surrounds) and between front and back, without raising the volume. 0 = no change; to the left, closer together. «Auto» sets the right one for the movie."),   # (JMG, 21-11)
         # --- abajo ---
         (("=procesar","=process"),"Empieza a procesar todo lo que está en la lista, con los ajustes de cada archivo o pista.","Starts processing everything in the list, with the settings of each file or track."),
         (("=cancelar","=cancel"),"Para el proceso en marcha. Lo que se estaba haciendo no se guarda a medias.","Stops the running process. What was being made is not left half-saved."),
@@ -1942,6 +2398,8 @@ class VideoEncoderGUI:
         (("=procesador","=processor","=cpu"),"Codifica con el procesador: la mejor calidad para el tamaño, pero más lento.","Encodes with the processor: the best quality for its size, but slower."),
         (("=nvidia",),"Codifica con la tarjeta gráfica NVIDIA (NVENC): mucho más rápido.","Encodes with the NVIDIA graphics card (NVENC): much faster."),
         (("=amd",),"Codifica con la tarjeta gráfica AMD (AMF): mucho más rápido.","Encodes with the AMD graphics card (AMF): much faster."),
+        (("=intel",),"Codifica con la gráfica Intel (Quick Sync): Arc o integrada. Mucho más rápido. Solo se activa si el PC la tiene.","Encodes with the Intel graphics (Quick Sync): Arc or integrated. Much faster. Only enabled if the PC has it."),
+        (("=vulkan",),"Codifica con la tarjeta gráfica por Vulkan: cualquier marca con drivers recientes. En NVIDIA y AMD dan algo más de calidad sus propios botones.","Encodes with the graphics card through Vulkan: any brand with recent drivers. On NVIDIA and AMD their own buttons give a bit more quality."),
         (("dos pasadas","two passes","2 pasadas","2 passes"),"Analiza el vídeo una vez antes de codificarlo: reparte mejor el bitrate (tarda el doble).","Analyses the video once before encoding it: spreads the bitrate better (takes twice as long)."),
         (("=mov",),"MOV: el de Apple, para editar.","MOV: Apple's, for editing."),
         (("=avi",),"AVI: para aparatos antiguos (sin subtítulos; audio AC3, MP3 o DTS).","AVI: for old devices (no subtitles; AC3, MP3 or DTS audio)."),
@@ -1961,7 +2419,7 @@ class VideoEncoderGUI:
         # --- Vídeo ---
         (("=auto",),"Mide y lo pone solo según la película. Pulsado otra vez sin tocar nada, lo quita. En verde mientras sigue lo que puso.","Measures and sets it by itself for the movie. Pressed again without touching anything, it removes it. Green while what it set is still in place."),
         (("códec de vídeo","video codec"),"Con qué se comprime la imagen: H.265 (pequeño y bueno), H.264 (lo lee todo), AV1 (lo más moderno) o Passthrough (sin tocar).","How the picture is compressed: H.265 (small and good), H.264 (plays everywhere), AV1 (the newest) or Passthrough (untouched)."),
-        (("codificar con","encode with"),"Procesador (la mejor calidad por tamaño) o la tarjeta gráfica NVIDIA / AMD (mucho más rápido).","Processor (the best quality for its size) or the NVIDIA / AMD graphics card (much faster)."),
+        (("codificar con","encode with"),"CPU (el procesador: la mejor calidad por tamaño) o la tarjeta gráfica NVIDIA / AMD (mucho más rápido).","CPU (the processor: the best quality for its size) or the NVIDIA / AMD graphics card (much faster)."),
         (("calidad constante","constant quality"),"La misma calidad en toda la película; el tamaño final depende de la película.","The same quality throughout the movie; the final size depends on the movie."),
         (("bitrate (tamaño fijo)","bitrate (fixed size)"),"Un tamaño final conocido de antemano (con 2 pasadas, mejor repartido).","A final size known in advance (with 2 passes, better spread)."),
         (("calidad (menos","quality (lower"),"Número de calidad: más bajo = mejor imagen y archivo más grande.","Quality number: lower = better picture and bigger file."),
@@ -2029,7 +2487,7 @@ class VideoEncoderGUI:
         (("traseros (bl/br)","surround (bl/br)"),"Gama dinámica de los traseros: más contraste.","Dynamic range of the surrounds: more contrast."),
         (("gama dinámica","dynamic range"),"Aumenta el contraste: los sonidos flojos bajan y los fuertes se quedan igual. Esconde ruidos y eco.","Increases the contrast: quiet sounds go down and loud ones stay. Hides noise and echo."),
         (("procesado dinámico","dynamic processing"),"Elevación (sube lo flojo), Impacto (lo fuerte destaca) o las dos cosas, por grupos de altavoces.","Elevation (raises the quiet), Impact (the loud stands out) or both, per speaker group."),
-        (("modo:","mode:"),"0 = apagado · 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas.","0 = off · 1 Elevation: raises the quiet · 2 Impact: the loud stands out · 3 both."),
+        (("modo:","mode:"),"1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas.","1 Elevation: raises the quiet · 2 Impact: the loud stands out · 3 both."),
         (("front./traseros","front/rear"),"Intensidad para los delanteros y traseros (0 = sin efecto).","Strength for the fronts and surrounds (0 = no effect)."),
         (("central 0-10","center 0-10"),"Intensidad para el central (0 = sin efecto).","Strength for the center (0 = no effect)."),
         (("=central","=center"),"Solo el canal central, el de los diálogos.","Only the center channel, the dialogue one."),
@@ -2432,7 +2890,7 @@ class VideoEncoderGUI:
         try:self._log_txt=self.txt_log.get("1.0","end-1c")
         except Exception:pass
         for w in self.root.winfo_children():w.destroy()
-        self.root.configure(bg=CF);self._estilo();self._build()
+        self.root.configure(bg=CF);self._estilo();self._build();self._quitar_desc(self.root);self._tit_registrar(self.root)
         self._pintar_lista()
         for i in sel:
             try:self.la.selection_set(i)
@@ -2604,11 +3062,11 @@ class VideoEncoderGUI:
         except Exception:pass
         buscar()
     def _acv(self):
-        top=tk.Toplevel(self.root);top.title(T("acerca_t"));top.geometry("560x665");top.configure(bg=CF)   # (JMG, 19-11) +85 de alto: el logo de Jmg Software
+        top=tk.Toplevel(self.root);top.title(T("acerca_t"));top.geometry("560x622");top.configure(bg=CF)   # (JMG, 19-11) +85 de alto: el logo de Jmg Software
         top.transient(self.root);top.resizable(False,False)
         f=ttk.Frame(top);f.pack(fill="both",expand=True,padx=20,pady=(20,10))
         try:   # (JMG, 19-11) arriba, el logo de Jmg Software: el programa es de su autor (el de TMDB va abajo y más pequeño)
-            _jl=tk.PhotoImage(data=JMG_LOGO);top._jmg_logo=_jl;_jw=tk.Label(f,image=_jl,bg=CF,cursor="hand2");_jw.pack(anchor="w",pady=(0,12))
+            _jl=tk.PhotoImage(data=LOGO_B64);top._jmg_logo=_jl;_jw=tk.Label(f,image=_jl,bg=CF,cursor="hand2");_jw.pack(anchor="w",pady=(0,12))
             _jw.bind("<Button-1>",lambda e:self._contactar());self._ayuda_flotante(_jw,self._vt("Escríbeme: ","Write to me: ")+CONTACTO_MAIL)   # (JMG, 22-11) aquí, el correo
         except Exception:pass
         txt=tk.Text(f,wrap="word",font=("",10),bg=CF,fg=CT,relief="flat",highlightthickness=0,borderwidth=0,height=18,spacing3=2)
@@ -2739,7 +3197,7 @@ class VideoEncoderGUI:
         self.var_a_kbps=tk.StringVar(value="");self.var_a_def=tk.BooleanVar(value=False);self.var_a_incl=tk.BooleanVar(value=True)
         self.var_a_delay=tk.IntVar(value=0);self.var_a_fps_de=tk.StringVar(value="");self.var_a_fps_a=tk.StringVar(value="");self.var_a_fps_met=tk.StringVar(value="tono");self.var_a_orig=tk.BooleanVar(value=False)
         self.var_oir_sal=tk.StringVar(value=self._cfg.get("oir_sal","mc"))
-        for k in AEF_KEYS:setattr(self,"var_"+k,(tk.DoubleVar if k in VOL_CH else tk.IntVar)(value=0))   # (JMG, 18-11) el volumen, con décimas
+        for k in AEF_KEYS:setattr(self,"var_"+k,(tk.DoubleVar if (k in VOL_CH or k in FINO) else tk.IntVar)(value=0))   # (JMG, 18-11) el volumen, con décimas
     def _vars_subs(self):
         self.var_s_lang=tk.StringVar(value="");self.var_s_tit=tk.StringVar(value="")
         self.var_s_fps_de=tk.StringVar(value="");self.var_s_fps_a=tk.StringVar(value="");self.var_s_delay=tk.IntVar(value=0)
@@ -2761,7 +3219,7 @@ class VideoEncoderGUI:
         def dentro(e):cv.bind_all("<MouseWheel>",rueda)
         def fuera(e):cv.unbind_all("<MouseWheel>")
         cv.bind("<Enter>",dentro);cv.bind("<Leave>",fuera)
-        self._tab_in[str(padre)]=f
+        self._tab_in[str(padre)]=f;f.bind("<Configure>",self._ajustar_pestana_luego,add="+")   # (JMG, 21-11) altura justa
         return f
     def _dos_cols(self,f):
         """columna izquierda | raya vertical | columna derecha (igual en todas las pestañas)"""
@@ -2781,6 +3239,7 @@ class VideoEncoderGUI:
         """titulo de seccion (con su «Auto» a la derecha si lo tiene) y raya debajo"""
         fr=ttk.Frame(p);fr.grid(row=row,column=0,columnspan=cols,sticky="ew",pady=(10,2))
         ttk.Label(fr,text=txt,font=("",10,"bold")).pack(side="left",padx=5)
+        self._tit_registrar(fr)   # (JMG, 21-11) en verde si el efecto está puesto
         if ef:
             # (JMG, 8-11) en la columna de las casillas de valor, centrado sobre ellas: todos alineados
             fr_,b=self._caja_auto(p,lambda:self._auto(ef));fr_.grid(row=row,column=cols-1,padx=(1,5),pady=(10,2))   # (JMG, 14-11) del tamaño de las casillas, alineado con ellas
@@ -2816,8 +3275,8 @@ class VideoEncoderGUI:
         self.root.after(150,lambda b_=bt:self._ancho_min(b_))
         cols=tk.PanedWindow(top,orient=tk.HORIZONTAL,sashrelief="flat",sashwidth=12,bg=CF,borderwidth=0,sashcursor="sb_h_double_arrow")
         cols.pack(fill="both",expand=True,pady=(0,5))
-        ci=ttk.Frame(cols,cursor="arrow");cols.add(ci,minsize=220,stretch="always")
-        hc=ttk.Frame(ci);hc.pack(fill="x",pady=(6,4))
+        ci=ttk.Frame(cols,cursor="arrow");cols.add(ci,minsize=220,stretch="always");self._cols_v=cols;self._cols_ci=ci
+        hc=ttk.Frame(ci);hc.pack(fill="x",pady=(6,4));self._hc=hc
         ttk.Label(hc,text=self._vt("Vídeos (clic para ver su información)","Videos (click to see their information)"),font=("",9,"bold")).pack(side="left")
         self.lbl_f=ttk.Label(hc,text="",foreground=CID,font=("",9));self.lbl_f.pack(side="right",padx=4)
         lf=ttk.Frame(ci);lf.pack(fill="both",expand=True)
@@ -2830,7 +3289,7 @@ class VideoEncoderGUI:
                 self.la.drop_target_register(DND_FILES);self.la.dnd_bind("<<Drop>>",self._drop)
                 self.la.dnd_bind("<<DropEnter>>",lambda e:self.la.configure(bg=CDO));self.la.dnd_bind("<<DropLeave>>",lambda e:self.la.configure(bg=CDN))
             except Exception:pass
-        cd=ttk.Frame(cols,cursor="arrow");cols.add(cd,minsize=420,stretch="always")
+        cd=ttk.Frame(cols,cursor="arrow");cols.add(cd,minsize=420,stretch="always");self._cols_cd=cd
         ttk.Label(cd,text=self._vt("Información","Information"),font=("",9,"bold")).pack(anchor="w",pady=(6,4))
         tf=ttk.Frame(cd);tf.pack(fill="both",expand=True)
         self.txt_info=tk.Text(tf,height=8,wrap="none",font=("Consolas",9),bg=CDN,fg=CT,relief="flat",borderwidth=0,highlightthickness=1,highlightbackground=CSB,padx=6,pady=4,cursor="arrow")
@@ -2846,9 +3305,13 @@ class VideoEncoderGUI:
         self._ayuda_flotante(self.btn_comb,self._vt("Une trozos de varios vídeos en uno solo (con «Igualar color y brillo»).","Joins parts of several videos into a single one (with «Match color and brightness»)."))
         self.lbl_act=ttk.Label(row,text="",foreground=CID,font=("",9,"italic"));self.lbl_act.pack(side="left",padx=12)
         cols.bind("<Configure>",lambda e:self.root.after_idle(lambda:self._cols_aj(cols)),add="+")
+        cols.bind("<Configure>",lambda e:self.root.after_idle(self._cols_min),add="+");self.root.after(400,self._cols_min)   # (JMG, 20-11) la barra no corta los botones
         bot=ttk.Frame(self.root);bot.pack(side="bottom",fill="x",padx=10,pady=(5,10));self._fr_inf=bot
         self.btn_p=ttk.Button(bot,text=T("procesar"),command=self._conf);self.btn_p.pack(side="left",padx=4)
-        self.btn_pausa=ttk.Button(bot,text="⏸ "+self._vt("Pausa","Pause"),command=self._pausa_pulsar,state="disabled");self.btn_pausa.pack(side="left",padx=4)   # (JMG, 13-11)
+        self.btn_prev_cod=ttk.Button(bot,text=self._vt("Previsualizar","Preview"),command=self._vprev_pulsar);self.btn_prev_cod.pack(side="left",padx=4);self.btn_prev_cod.state(["disabled"])   # (JMG, 25-11) fuera, justo después de Procesar; solo codificando
+        self._ayuda_flotante(self.btn_prev_cod,self._vt("Mientras codifica, previsualiza la codificación en tiempo real: a la izquierda el original y a la derecha codificado con tus ajustes, con sonido, desde donde va la codificación. La ventana se puede maximizar (doble clic = pantalla completa). Otro clic aquí o Esc la quita.","While encoding, previews the encoding in real time: the original on the left and the video encoded with your settings on the right, with sound, from where the encoding is. The window can be maximized (double-click = full screen). Another click here or Esc closes it."))
+        self._bp_extra=getattr(self,"_bp_extra",[])+[self.btn_prev_cod];self._verde_reg(self.btn_prev_cod,lambda:getattr(self,"_vcod_on",False) and self._vp_vivo(3))   # también mientras codifica
+        self.btn_pausa=ttk.Button(bot,text="⏸ "+self._vt("Pausa","Pause"),command=self._pausa_pulsar,state="disabled");self.btn_pausa.pack(side="left",padx=4);self._verde_reg(self.btn_pausa,lambda:getattr(self,"_pausa_on",False))   # (JMG, 13-11); (26-11) en pausa, «Continuar» en verde
         self._ayuda_flotante(self.btn_pausa,self._vt("Para el procesado sin perder nada;\n«▶ Continuar» lo sigue donde estaba.","Pauses the processing without losing anything;\n«▶ Resume» carries on where it was."))
         if not getattr(self,"_pausa_tick_on",False):self._pausa_tick_on=True;self.root.after(500,self._pausa_tick)
         self.btn_c=ttk.Button(bot,text=T("cancelar"),command=self._cancel,state="disabled");self.btn_c.pack(side="left",padx=4)
@@ -2880,7 +3343,8 @@ class VideoEncoderGUI:
         self.vpan=tk.PanedWindow(self.root,orient=tk.VERTICAL,sashrelief="flat",sashwidth=10,bg=CF,borderwidth=0,sashcursor="sb_v_double_arrow")
         self.vpan.pack(side="top",fill="both",expand=True)
         self.vpan.add(top,minsize=120,stretch="never",padx=10,pady=4,height=320)
-        self.vpan.add(nbo,minsize=250,stretch="always",padx=10,pady=4)
+        self.vpan.add(nbo,minsize=120,stretch="always",padx=10,pady=4)
+        self.vpan.bind("<Configure>",self._ajustar_pestana_luego,add="+")   # (JMG, 21-11) las pestañas, a su altura justa
         self.vpan.lower();top.lift();nbo.lift();self._vp_top=top;self._vp_nb=nbo
         self.root.after(300,self._alto_inicio);self.root.after(600,self._auto_bucle)
         self._tvideo();self._taudio();self._tsubs();self._tsal();self._tlog()
@@ -2888,10 +3352,46 @@ class VideoEncoderGUI:
         self._avz=None;self._av_video();self._av_audio()   # «Opciones avanzadas»: se abren en lugar de la lista y las pestañas
         self.nb.bind("<<NotebookTabChanged>>",self._tab_cambio,add="+")
         self._pintar_trabajo()
+    _AJ_MIN_ARRIBA=200
+    def _ajustar_pestana(self,e=None):
+        """(JMG, 21-11) el panel de las pestañas, a la altura justa de lo que lleva la pestaña elegida: ni sobra hueco debajo ni falta nada.
+        La parte de arriba (archivos) se queda con el resto y no baja de _AJ_MIN_ARRIBA (si no cabe, sale la barra de la pestaña)"""
+        if getattr(self,"_aj_p",False):return
+        self._aj_p=True
+        try:
+            if hasattr(self,"_vpan_ctx") and self._vpan_ctx()=="vis":return
+            tab=self.nb.nametowidget(self.nb.select())
+            if "log" in str(self.nb.tab(tab,"text")).lower():return
+            inner=getattr(self,"_tab_in",{}).get(str(tab))
+            if inner is None or not inner.winfo_exists():return
+            cv=inner.master;self.root.update_idletasks()
+            if cv.winfo_height()<20 or self.vpan.winfo_height()<200:return
+            sobra=cv.winfo_height()-inner.winfo_reqheight()
+            if abs(sobra)<=2:return
+            y=self.vpan.sash_coord(0)[1];h=self.vpan.winfo_height()
+            nuevo=int(max(self._AJ_MIN_ARRIBA,min(h-80,y+sobra)))
+            if abs(nuevo-y)>1:self.vpan.sash_place(0,0,nuevo)
+        except Exception:pass
+        finally:self._aj_p=False
+    def _ajustar_pestana_luego(self,e=None):
+        try:
+            if getattr(self,"_aj_id",None):self.root.after_cancel(self._aj_id)
+            self._aj_id=self.root.after(60,self._ajustar_pestana)
+        except Exception:pass
     def _ajustar_alto(self):
-        """(JMG, 7-11-2026: «déjala como estaba en un principio») la parte de arriba (lista de vídeos y botones) no cambia de alto
-        sola: la pestaña larga lleva su barra de desplazamiento, y la raya entre las dos se puede arrastrar"""
-        return
+        """(JMG, 21-11: «las pestañas por abajo tienen que quedar justas») el panel de las pestañas, a la altura justa de cada una"""
+        self._ajustar_pestana_luego()
+    def _cols_min(self):
+        """(JMG, 20-11) la barra entre «Vídeos» e «Información» se para cuando los botones o el texto de una columna ya no caben;
+        y la ventana, como poco, las dos columnas enteras"""
+        try:
+            c=self._cols_v;mi=max(220,self._hc.winfo_reqwidth()+8)
+            md=max(420,self._fr_fila.winfo_reqwidth()-self.lbl_act.winfo_reqwidth()+160)
+            if getattr(self,"_cols_mins",None)==(mi,md):return
+            self._cols_mins=(mi,md);c.paneconfigure(self._cols_ci,minsize=mi);c.paneconfigure(self._cols_cd,minsize=md)
+            ax,ay,aw,ah=_area_trabajo(self.root);need=min(mi+md+12+40,aw-20);mw,mh=self.root.minsize()
+            if need>mw:self.root.minsize(need,mh)
+        except Exception:pass
     def _cols_aj(self,cols):
         try:
             w=cols.winfo_width()
@@ -2932,8 +3432,8 @@ class VideoEncoderGUI:
         self._tra(self.var_vcodec,self._vvc_def,self.cb_vcod)   # (JMG, 23-11) VVC: una pasada y «Rápida» por defecto
         fm=self._fila(L,2,V_("Codificar con:","Encode with:"))
         self.rb_motor={}
-        for k,t in (("cpu",V_("Procesador","Processor")),("nvidia","NVIDIA"),("amd","AMD")):
-            self.rb_motor[k]=ttk.Radiobutton(fm,text=t,variable=self.var_vmotor,value=k,command=lambda k=k:self._motor_elegido(k),style={"nvidia":"Nv.G.TRadiobutton","amd":"Amd.G.TRadiobutton","cpu":"Cpu.G.TRadiobutton"}.get(k,"G.TRadiobutton"));self.rb_motor[k].pack(side="left",padx=(0,6))
+        for k,t in (("cpu","CPU"),("nvidia","NVIDIA"),("amd","AMD"),("intel","INTEL"),("vulkan","Vulkan")):   # (JMG, 24-11) INTEL en mayúsculas   # (JMG, 21-11) + Intel y Vulkan
+            self.rb_motor[k]=ttk.Radiobutton(fm,text=t,variable=self.var_vmotor,value=k,command=lambda k=k:self._motor_elegido(k),style={"nvidia":"Nv.G.TRadiobutton","amd":"Amd.G.TRadiobutton","cpu":"Cpu.G.TRadiobutton","intel":"Intel.G.TRadiobutton","vulkan":"Vk.G.TRadiobutton"}.get(k,"G.TRadiobutton"));self.rb_motor[k].pack(side="left",padx=(0,6))
         self.lbl_gpu=ttk.Label(L,text="",foreground=CA,font=("",8,"italic"));self.lbl_gpu.grid(row=3,column=0,columnspan=3,sticky="w",padx=6)
         self._sec(L,4,V_("Compresión","Compression"))
         fq=ttk.Frame(L);fq.grid(row=5,column=0,columnspan=3,sticky="w",padx=2)
@@ -2996,7 +3496,7 @@ class VideoEncoderGUI:
         self.lbl_akbps=ttk.Label(ed,text="kbps:",width=5);self.lbl_akbps.pack(side="left")
         self.cb_akbps=ttk.Combobox(ed,textvariable=self.var_a_kbps,width=6,state="readonly");self.cb_akbps.pack(side="left",padx=(2,4))
         self.cb_akbps.bind("<Return>",lambda e:self._akbps_escrito());self.cb_akbps.bind("<FocusOut>",lambda e:self._akbps_escrito(),add="+")   # (JMG, 16-11) E-AC3 a mano
-        self.lbl_afvbr=ttk.Label(ed,text="",foreground=CID,font=("",9,"bold"),width=8);self.lbl_afvbr.pack(side="left",padx=(0,10))   # (JMG, 10-11) «VBR 240» con Aften en VBR
+        self.lbl_afvbr=ttk.Label(ed,text="",foreground=CID,font=("",9,"bold"),width=8);self.lbl_afvbr.pack(side="left",padx=(0,10));self._ayuda_flotante(self.lbl_afvbr,V_("Con Aften en VBR: su calidad (0-1023).","With Aften in VBR: its quality (0-1023)."))   # (JMG, 10-11) «VBR 240» con Aften en VBR
         ttk.Checkbutton(ed,text=V_("Por defecto","Default"),variable=self.var_a_def,style="G.TCheckbutton").pack(side="left")
         ex=ttk.Frame(top);ex.pack(fill="x",pady=(4,0))
         ttk.Button(ex,text="➕ "+V_("Añadir pista","Add track"),command=self._a_externa).pack(side="left")
@@ -3011,33 +3511,36 @@ class VideoEncoderGUI:
         ttk.Label(ex,text=V_("Para escuchar y ver las ondas, «Visual / Ondas».","To listen and see the waves, «Visual / Waves»."),foreground=CA,font=("",8,"italic")).pack(side="left")
         g=ttk.Frame(f);g.grid(row=1,column=0,sticky="nw")
         L,R=self._dos_cols(g)
+        g.columnconfigure(2,weight=0);g.columnconfigure(3,weight=0,minsize=30);g.columnconfigure(4,weight=1)   # (JMG, 21-11) Sincronización a la derecha del Double Bass, con raya
+        ttk.Separator(g,orient="vertical").grid(row=0,column=3,sticky="ns",pady=8)
+        S_=ttk.Frame(g);S_.grid(row=0,column=4,sticky="nw",padx=(4,12),pady=(4,6))
         self._sec(L,4,V_("Volumen por canal (dB)","Volume per channel (dB)"),"vol")
         for i,(k,t) in enumerate((("fl",V_("Frontal izq. (FL)","Front left (FL)")),("fr",V_("Frontal der. (FR)","Front right (FR)")),("fc",V_("Central (FC)","Center (FC)")),("lfe","Subwoofer (LFE)"),("bl",V_("Trasero izq. (BL/SL)","Surround left (BL/SL)")),("br",V_("Trasero der. (BR/SR)","Surround right (BR/SR)")))):
             self._sl(L,t,getattr(self,"var_"+k),-31,20,5+i,step=0.1,mute=True)   # (JMG, 19-11) hasta -30 y Mute   # (JMG, 18-11) de -20 a +20 dB y con décimas, como en Jmg AudioProcesador
-        self._sec(L,11,V_("Sincronización","Synchronization"))
-        self._fps_fila(L,12,self.var_a_fps_de,self.var_a_fps_a,self.var_a_fps_met)
-        self._sl(L,V_("Delay (ms)","Delay (ms)"),self.var_a_delay,-6000,6000,13)
-        fr=self._fila(L,14,V_("Comparar con:","Compare with:"))
-        self.cb_aref=ttk.Combobox(fr,width=34,state="readonly");self.cb_aref.pack(side="left")
-        fb=ttk.Frame(L);fb.grid(row=15,column=0,columnspan=3,sticky="w",padx=5,pady=2)
+        self._sec(S_,0,V_("Sincronización","Synchronization"))
+        self._fps_fila(S_,12,self.var_a_fps_de,self.var_a_fps_a,self.var_a_fps_met)
+        self._sl(S_,V_("Delay (ms)","Delay (ms)"),self.var_a_delay,-6000,6000,13)
+        fr=self._fila(S_,14,V_("Comparar con:","Compare with:"))
+        self.cb_aref=ttk.Combobox(fr,width=30,state="readonly");self.cb_aref.pack(side="left")
+        fb=ttk.Frame(S_);fb.grid(row=15,column=0,columnspan=3,sticky="w",padx=5,pady=2)
         self.bt_sinc=ttk.Button(fb,text="🎯 "+V_("Calcular delay","Calculate delay"),command=self._sinc_calc);self.bt_sinc.pack(side="left")
         self.bt_tramos=ttk.Button(fb,text="✂ "+V_("Corregir por tramos","Fix by parts"),command=self._sinc_tramos);self.bt_tramos.pack(side="left",padx=6)
         ttk.Button(fb,text="✖ "+V_("Quitar tramos","Remove parts"),command=self._sinc_quitar_tramos).pack(side="left")
-        fq=ttk.Frame(L);fq.grid(row=16,column=0,columnspan=3,sticky="w",padx=5)
+        fq=ttk.Frame(S_);fq.grid(row=16,column=0,columnspan=3,sticky="w",padx=5)
         self.bt_revisar=ttk.Button(fq,text="▶ "+V_("Revisar sincronización","Check synchronization"),command=self._sinc_revisar);self.bt_revisar.pack(anchor="w",pady=(2,2))
-        self.lbl_sinc=ttk.Label(fq,text="",foreground=CID,wraplength=520,justify="left");self.lbl_sinc.pack(anchor="w",padx=1)
-        self._nota(L,17,V_("Compara la pista con otra, normalmente la del idioma original, por su música y sus efectos. «Calcular delay» pone un desfase para toda la película; «Corregir por tramos» arregla los doblajes que van desfasados por partes.",
+        self.lbl_sinc=ttk.Label(fq,text="",foreground=CID,wraplength=440,justify="left");self.lbl_sinc.pack(anchor="w",padx=1)
+        self._nota(S_,17,V_("Compara la pista con otra, normalmente la del idioma original, por su música y sus efectos. «Calcular delay» pone un desfase para toda la película; «Corregir por tramos» arregla los doblajes que van desfasados por partes.",
                            "Compares the track with another one, normally the original-language one, by its music and effects. «Calculate delay» sets one offset for the whole movie; «Fix by parts» fixes dubs that are out of sync in parts."),wrap=520)
         self._sec(R,8,V_("Suavizado digital","Digital smoothing"),"suav")
         self._w_suav=list(self._sl(R,V_("Intensidad (0-5)","Amount (0-5)"),self.var_suav,0,5,9))+[self._auto_bts["suav"]]   # (JMG, 9-11) no va con el EQ
         self._nota(R,10,V_("Quita el exceso de agudos (eses y brillo metálico) de muchas películas y doblajes de los 80 y 90. No toca el subwoofer.","Removes the excess treble (harsh S sounds and metallic shine) of many movies and dubs from the 80s and 90s. The subwoofer is not touched."),wrap=420)
         self._sec(R,3,V_("Ecualizador de 3 bandas","3-band equalizer"),"eq3")
         self._nota(R,4,V_("Delanteros, central y traseros (el subwoofer no).","Fronts, center and surrounds (not the subwoofer)."),wrap=420)
-        self._w_eq3=list(self._sl(R,V_("Graves (100 Hz)","Bass (100 Hz)"),self.var_eq_bass,-10,10,5))+list(self._sl(R,V_("Medios (1 kHz)","Mids (1 kHz)"),self.var_eq_mids,-10,10,6))+\
-                    list(self._sl(R,V_("Agudos (5 kHz)","Treble (5 kHz)"),self.var_eq_treble,-10,10,7))+[self._auto_bts["eq3"]]
+        self._w_eq3=list(self._sl(R,V_("Graves (100 Hz)","Bass (100 Hz)"),self.var_eq_bass,-15,15,5))+list(self._sl(R,V_("Medios (1 kHz)","Mids (1 kHz)"),self.var_eq_mids,-15,15,6))+\
+                    list(self._sl(R,V_("Agudos (5 kHz)","Treble (5 kHz)"),self.var_eq_treble,-15,15,7))+[self._auto_bts["eq3"]]
         for v_ in (self.var_suav,self.var_eq_bass,self.var_eq_mids,self.var_eq_treble):self._tra(v_,lambda *a:self._ex_suav_eq(),o)
-        self._sec(R,0,V_("Double Bass (más graves en todos)","Double Bass (more bass everywhere)"),"db")
-        self._sl(R,V_("Intensidad (0-5)","Amount (0-5)"),self.var_db,0,5,1)
+        self._sec(R,0,V_("Double Bass","Double Bass"),"db")
+        self._sl(R,V_("Intensidad (0-6)","Amount (0-6)"),self.var_db,0,6,1,step=1)
         self._nota(R,2,V_("Copia los graves del subwoofer a los altavoces, y los de los altavoces al subwoofer, sin quitarlos de donde están. Solo en pistas con subwoofer.","Copies the subwoofer bass to the speakers, and the speakers' bass to the subwoofer, without removing it from where it is. Only on tracks with a subwoofer."),wrap=420)
         self._nota(R,11,V_("Los efectos son de la pista seleccionada arriba. Con Passthrough el audio no se toca: al poner un efecto o un delay, la pista pasa a comprimirse con su mismo códec (o E-AC3 si ese no se puede). Cada «Auto» mide la pista con los demás efectos ya puestos; pulsado otra vez sin tocar nada, lo quita.",
                            "The effects belong to the track selected above. With Passthrough the audio is not touched: when you set an effect or a delay, the track is compressed again with its own codec (or E-AC3 if that one is not possible). Each «Auto» measures the track with the other effects already applied; pressed again without touching anything, it removes them."),wrap=420)
@@ -3048,12 +3551,13 @@ class VideoEncoderGUI:
         f=self._scroll(o);V_=self._vt
         top=ttk.Frame(f);top.pack(fill="x",padx=6,pady=(6,8))
         ttk.Label(top,text=V_("Subtítulos (doble clic = incluir o no)","Subtitles (double-click = include or not)"),font=("",10,"bold")).pack(anchor="w",pady=(0,4))
-        tw=ttk.Frame(top);tw.pack(fill="x")
+        fila=ttk.Frame(top);fila.pack(fill="x")   # (JMG, 21-11) la lista más estrecha y, a su derecha, la sincronización
+        tw=ttk.Frame(fila);tw.pack(side="left",anchor="n")
         cols=("incl","n","lang","tit","fmt","def","forz")
         self.tv_s=ttk.Treeview(tw,columns=cols,show="headings",height=7,selectmode="browse")
-        for c,t,w in zip(cols,("✔","#",V_("Idioma","Language"),V_("Título","Title"),V_("Formato","Format"),V_("Por defecto","Default"),V_("Forzado","Forced")),(30,40,70,300,150,90,80)):
+        for c,t,w in zip(cols,("✔","#",V_("Idioma","Language"),V_("Título","Title"),V_("Formato","Format"),V_("Por defecto","Default"),V_("Forzado","Forced")),(30,40,70,220,110,90,80)):
             self.tv_s.heading(c,text=t);self.tv_s.column(c,width=w,minwidth=min(w,60),anchor="w" if c in ("tit","fmt") else "center",stretch=c not in ("incl","n"))
-        self.tv_s.pack(side="left",fill="x",expand=True)
+        self.tv_s.pack(side="left")
         self._tv_caber(self.tv_s,("tit","fmt"))
         self.tv_s.bind("<<TreeviewSelect>>",lambda e:self._s_sel_cambio());self.tv_s.bind("<Double-Button-1>",lambda e:self._s_incl())
         bb=ttk.Frame(tw);bb.pack(side="left",padx=6,anchor="n")
@@ -3067,7 +3571,8 @@ class VideoEncoderGUI:
         ttk.Checkbutton(ed,text=V_("Por defecto","Default"),variable=self.var_s_def,style="G.TCheckbutton").pack(side="left")
         ttk.Checkbutton(ed,text=V_("Forzado","Forced"),variable=self.var_s_forz,style="G.TCheckbutton").pack(side="left")
         ttk.Checkbutton(ed,text=V_("Grabar en la imagen","Burn into the picture"),variable=self.var_s_burn,style="G.TCheckbutton").pack(side="left",padx=(10,0))   # (JMG, 11-11)
-        sy=ttk.Frame(top);sy.pack(fill="x",pady=(8,0))
+        ttk.Separator(fila,orient="vertical").pack(side="left",fill="y",padx=14)
+        sy=ttk.Frame(fila);sy.pack(side="left",anchor="n")
         ttk.Label(sy,text=V_("Sincronización del subtítulo seleccionado","Synchronization of the selected subtitle"),font=("",9,"bold")).grid(row=0,column=0,columnspan=3,sticky="w",padx=5)
         self._fps_fila(sy,1,self.var_s_fps_de,self.var_s_fps_a,None)
         self._sl(sy,V_("Delay (ms)","Delay (ms)"),self.var_s_delay,-6000,6000,2)
@@ -3094,7 +3599,7 @@ class VideoEncoderGUI:
         ttk.Radiobutton(L,text=V_("Junto al original","Next to the original"),variable=self.var_dest_modo,value="original",command=lambda:self._dest_disco_aviso(True),style="G.TRadiobutton").grid(row=4,column=0,columnspan=3,sticky="w")
         ttk.Radiobutton(L,text=V_("Carpeta elegida:","Chosen folder:"),variable=self.var_dest_modo,value="carpeta",style="G.TRadiobutton").grid(row=5,column=0,columnspan=3,sticky="w")
         fd=ttk.Frame(L);fd.grid(row=6,column=0,columnspan=3,sticky="w",padx=6)
-        self._entry(fd,self.var_dest,40).pack(side="left",ipady=2)
+        _ed=self._entry(fd,self.var_dest,40);_ed.pack(side="left",ipady=2);self._ayuda_flotante(_ed,V_("La carpeta donde se guardan los vídeos (con «Carpeta elegida»).","The folder where the videos are saved (with «Chosen folder»)."))
         ttk.Button(fd,text="📁 "+V_("Elegir...","Choose..."),command=self._elegir_dest).pack(side="left",padx=4)
         fk=ttk.Frame(L);fk.grid(row=7,column=0,columnspan=3,sticky="w")
         ttk.Checkbutton(fk,text=V_("Abrir la carpeta al terminar","Open the folder when done"),variable=self.var_abrir,style="G.TCheckbutton").pack(anchor="w")
@@ -3103,9 +3608,9 @@ class VideoEncoderGUI:
         fx=ttk.Frame(L);fx.grid(row=9,column=0,columnspan=3,sticky="w")
         ttk.Radiobutton(fx,text=V_("Sobrescribir","Overwrite"),variable=self.var_dup,value="sobre",style="G.TRadiobutton").pack(side="left",padx=(0,40))
         ttk.Radiobutton(fx,text=V_("Renombrar (_1, _2...)","Rename (_1, _2...)"),variable=self.var_dup,value="rename",style="G.TRadiobutton").pack(side="left")
-        self._sec(L,10,V_("Portada","Cover"))
-        self.lbl_portada=ttk.Label(L,text="",foreground=CID,wraplength=440,justify="left");self.lbl_portada.grid(row=11,column=0,columnspan=3,sticky="w",padx=6)
-        fp=ttk.Frame(L);fp.grid(row=12,column=0,columnspan=3,sticky="w",padx=5,pady=2)
+        self._sec(R,10,V_("Portada","Cover"))   # (JMG, 21-11) a la derecha, debajo de «Copiar también»
+        self.lbl_portada=ttk.Label(R,text="",foreground=CID,wraplength=440,justify="left");self.lbl_portada.grid(row=11,column=0,columnspan=3,sticky="w",padx=6)
+        fp=ttk.Frame(R);fp.grid(row=12,column=0,columnspan=3,sticky="w",padx=5,pady=2)
         ttk.Button(fp,text="🖼 "+V_("Elegir imagen...","Choose image..."),command=self._portada_elegir).pack(side="left")
         ttk.Button(fp,text="↺ "+V_("La original","The original"),command=lambda:self._portada_poner(None)).pack(side="left",padx=4)
         ttk.Button(fp,text="✖ "+V_("Sin portada","No cover"),command=lambda:self._portada_poner("")).pack(side="left")
@@ -3121,7 +3626,7 @@ class VideoEncoderGUI:
         self._sec(R,4,V_("Copiar también","Also copy"))
         for i,(t,v) in enumerate(((V_("Capítulos","Chapters"),self.var_caps),(V_("Metadatos (título, año...)","Metadata (title, year...)"),self.var_meta),(V_("Adjuntos y portada (fuentes de los ASS, carátula)","Attachments and cover (ASS fonts, cover art)"),self.var_adj)),start=5):
             ttk.Checkbutton(R,text=t,variable=v,style="G.TCheckbutton").grid(row=i,column=0,columnspan=3,sticky="w")
-        self.lbl_sal=ttk.Label(R,text="",foreground=CID,wraplength=440,justify="left");self.lbl_sal.grid(row=9,column=0,columnspan=3,sticky="w",padx=6,pady=(10,0))
+        self.lbl_sal=ttk.Label(R,text="",foreground=CID,wraplength=440,justify="left");self.lbl_sal.grid(row=13,column=0,columnspan=3,sticky="w",padx=6,pady=(10,0))
         for v in (self.var_cont,self.var_dest_modo,self.var_dest,self.var_sufijo,self.var_dup,self.var_caps,self.var_meta,self.var_adj,self.var_abrir,self.var_bandeja):
             self._tra(v,lambda *a:(self._save_cfg(),self._refrescar_estado()),o)
     def _tlog(self):
@@ -3130,6 +3635,12 @@ class VideoEncoderGUI:
         ttk.Button(bf,text="📋 "+self._vt("Copiar todo el log","Copy the whole log"),command=self._copiar_log).pack(side="left")
         ttk.Button(bf,text="⌨ "+self._vt("Ver el comando de FFmpeg","Show the FFmpeg command"),command=self._ver_cmd).pack(side="left",padx=6)
         ttk.Button(bf,text="🗑 "+self._vt("Vaciar","Clear"),command=lambda:self.txt_log.delete("1.0","end")).pack(side="left")
+        af=ttk.LabelFrame(o,text=self._vt(" Lo que lleva el vídeo de las pestañas: vídeo, imagen, recorte, audio y sus efectos, subtítulos ",
+                                          " What the video in the tabs carries: video, picture, trimming, audio and its effects, subtitles "),padding=5)
+        af.pack(fill="x",padx=6,pady=(2,2))   # (JMG, 21-11) como en Jmg AudioProcesador
+        self.txt_aj=tk.Text(af,height=10,wrap="word",font=("Consolas",9),bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB)
+        self.txt_aj.pack(fill="x");self._menu_copiar(self.txt_aj)
+        self.txt_aj.bind("<Key>",lambda e:None if (e.state & 4 and e.keysym.lower() in ("c","a")) else "break")
         tf=ttk.Frame(o);tf.pack(fill="both",expand=True,padx=6,pady=(2,6))
         viejo=getattr(self,"_log_txt","");self._log_txt=""   # el log sigue al cambiar de tema o de idioma
         self.txt_log=tk.Text(tf,wrap="word",font=("Consolas",9),bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB)
@@ -3157,6 +3668,15 @@ class VideoEncoderGUI:
                     r=rh([FFMPEG,"-hide_banner","-v","error","-f","lavfi","-i","nullsrc=s=256x256:d=0.2","-frames:v","3","-c:v",e,"-b:v","2M"]+o_+["-f","null","-"],timeout=25)
                     if r.returncode==0:_AMF_2P[e]=o_;break
                 except Exception:pass
+        for d in range(4):   # (JMG, 21-11) Vulkan: la primera tarjeta que codifique (la integrada puede no saber)
+            vk=[]
+            for e in ("h264_vulkan","hevc_vulkan","av1_vulkan"):
+                try:
+                    r=rh([FFMPEG,"-hide_banner","-v","error","-init_hw_device",f"vulkan=vk:{d}","-filter_hw_device","vk","-f","lavfi","-i","nullsrc=s=256x256:d=0.2",
+                          "-vf","format=nv12,hwupload","-frames:v","3","-c:v",e,"-f","null","-"],timeout=25)
+                    if r.returncode==0:vk.append(e)
+                except Exception:pass
+            if vk:_VK["dev"]=d;ok.update(vk);break
         self._gpu=ok;self._gpu_listo=True
         self._ls("[GPU] "+(", ".join(sorted(ok)) if ok else self._vt("ninguna","none")))
         self._ui(self._estado_video)
@@ -3227,6 +3747,15 @@ class VideoEncoderGUI:
             if bd[1]>0:j.setdefault("format",{})["duration"]=str(bd[1])   # Blu-ray: la duración de su lista de reproducción
             try:   # (JMG, 13-11) los .m2ts no traen el idioma de sus pistas: se lee de la lista de reproducción
                 lg=_bd_idiomas(ruta)
+                for s_ in j.get("streams",[]):
+                    try:pid=int(str(s_.get("id")),16)
+                    except ValueError:continue
+                    tg=s_.setdefault("tags",{})
+                    if lg.get(pid) and str(tg.get("language") or "und").lower() in ("","und"):tg["language"]=lg[pid]
+            except Exception:pass
+        if dvd:   # (JMG, 22-11) DVD: el idioma de las pistas de audio y de los subtítulos, de su .IFO (los .VOB no lo traen)
+            try:
+                lg=_dvd_idiomas(self._vobs(ruta))
                 for s_ in j.get("streams",[]):
                     try:pid=int(str(s_.get("id")),16)
                     except ValueError:continue
@@ -3572,7 +4101,7 @@ class VideoEncoderGUI:
             self.var_vmotor.set("cpu")
             if j is not None:j["v"]["motor"]="cpu"
             if self._gpu_listo and j is not None:
-                g_={"nvidia":"NVIDIA","amd":"AMD"}.get(m,m);n_=dict(VCODECS).get(c,c)
+                g_={"nvidia":"NVIDIA","amd":"AMD","intel":"INTEL","vulkan":"Vulkan"}.get(m,m);n_=dict(VCODECS).get(c,c)
                 self._toast(T("info_tit"),V_(f"Con {n_}, {g_} no puede codificar en este PC: pasa a Procesador. Al volver a un códec que sí puede, vuelve a {g_}.",
                                              f"With {n_}, {g_} cannot encode on this PC: it switches to Processor. When you go back to a codec it can do, it returns to {g_}."),seg=7)
             return
@@ -3592,7 +4121,8 @@ class VideoEncoderGUI:
         elif not self._gpu:g=V_("No hay codificación por tarjeta gráfica en este PC: solo procesador.","No graphics card encoding on this PC: processor only.")
         else:
             nv=[x.split("_")[0].upper().replace("H264","H.264") for x in sorted(self._gpu) if "nvenc" in x];am=[x.split("_")[0].upper().replace("H264","H.264") for x in sorted(self._gpu) if "amf" in x]
-            g=" · ".join(p for p in (("NVIDIA: "+", ".join(nv)) if nv else "",("AMD: "+", ".join(am)) if am else "") if p)
+            it=[x.split("_")[0].upper().replace("H264","H.264") for x in sorted(self._gpu) if "qsv" in x];vk=[x.split("_")[0].upper().replace("H264","H.264") for x in sorted(self._gpu) if "vulkan" in x]
+            g=" · ".join(p for p in (("NVIDIA: "+", ".join(nv)) if nv else "",("AMD: "+", ".join(am)) if am else "",("Intel: "+", ".join(it)) if it else "",("Vulkan: "+", ".join(vk)) if vk else "") if p)
             if c in ("vvc","vp9")+INTRA:g+=V_("  (H.266, VP9, ProRes y DNxHR: solo procesador)","  (H.266, VP9, ProRes and DNxHR: processor only)")
         self.lbl_gpu.configure(text=g)
         self.lbl_vest.configure(text=self._estimacion(j))
@@ -3646,7 +4176,27 @@ class VideoEncoderGUI:
             else:self.lbl_sal.configure(text="")
         except Exception:pass
     def _tab_vis(self):return getattr(self,"_avz",None)=="v"
-    def _tab_cambio(self,e=None):self._ajustar_alto()
+    def _tab_cambio(self,e=None):self._ajustar_alto();self._aj_si_log()
+    def _aj_si_log(self):
+        try:
+            if "log" in str(self.nb.tab(self.nb.select(),"text")).lower():self._aj_pintar()
+        except Exception:pass
+    def _aj_pintar(self):
+        """(JMG, 21-11) Edit/Log: lo que lleva el vídeo de las pestañas, como en Jmg AudioProcesador: vídeo, imagen, recorte, cada pista de
+        audio con sus efectos y los subtítulos (el resumen de PROCESAR, sin las órdenes de FFmpeg)"""
+        t=getattr(self,"txt_aj",None)
+        if t is None:return
+        try:
+            r_=self.actual if self.actual in self.jobs else next((f for f in self.files if f in self.jobs),None)   # (21-11) o el primero agregado
+            if r_:
+                self._guardar_trabajo()
+                ls=self._resumen([r_])[1].split("\n")
+                k=next((i for i,l in enumerate(ls) if l.strip().startswith(("Órdenes de FFmpeg","FFmpeg commands"))),len(ls))
+                txt="\n".join(x for x in ls[:k] if x.strip())
+            else:txt=self._vt("Agrega un vídeo (selecciónalo y pulsa «Agregar») para ver aquí lo que lleva.","Add a video (select it and press «Add to queue») to see here what it carries.")
+        except Exception as e:txt=str(e)
+        try:t.delete("1.0","end");t.insert("1.0",txt)
+        except Exception:pass
     def _rst(self):
         """Resetear (JMG, 22-11): los ajustes automáticos de la PESTAÑA ABIERTA del vídeo activo (Vídeo con «Más opciones», Audio,
         Subtítulos, Salida o Edit/Log); con «Todo», todo de cero (JMG, 8-11): la lista de vídeos, la información, sus ajustes, los trozos
@@ -3719,11 +4269,9 @@ class VideoEncoderGUI:
         if mu:p.append("Mute: "+", ".join(mu))   # (JMG, 19-11)
         pr=[f"{c} {n_(ef[k])}" for k,c in (("voz",V_("voz","voice")),("amb",V_("ambiente","ambience")),("efc",V_("efectos","effects")),("sub","subwoofer")) if ef.get(k)]
         if pr:p.append(V_("Presencia: ","Presence: ")+", ".join(pr))
-        gd=[]
-        for k,c in (("gama",V_("delanteros y traseros","fronts and surrounds")),("gama_c",V_("central","center"))):
-            v=ef.get(k) or 0
-            if v:gd.append(f"{c} "+(V_("gama dinámica ","dynamic range ") if v<0 else V_("compresión ","compression "))+str(abs(int(v))))
-        if gd:p.append(", ".join(gd))
+        if int(ef.get("din_modo") or 0):   # (JMG, 22-11)
+            p.append(V_("Procesado dinámico: ","Dynamic processing: ")+self._din_nom(ef["din_modo"])+f" · F/T {int(ef.get('din_ft') or 0)} · C {int(ef.get('din_fc') or 0)} · Sub {int(ef.get('din_lfe') or 0)}"
+                     +(" · "+{1:"-2 dBFS",2:"-1 dBFS",3:"-0,5 dBFS"}[int(ef.get("din_techo") or 0)] if int(ef.get("din_techo") or 0) in (1,2,3) else ""))
         eq=[f"{c} {n_(ef[k])}" for k,c in (("eq_bass",V_("graves","bass")),("eq_mids",V_("medios","mids")),("eq_treble",V_("agudos","treble"))) if ef.get(k)]
         if eq:p.append(V_("EQ de 3 bandas: ","3-band EQ: ")+", ".join(eq))
         if ef.get("suav"):p.append(V_("Suavizado digital ","Digital smoothing ")+str(ef["suav"]))
@@ -3813,6 +4361,7 @@ class VideoEncoderGUI:
             try:
                 x_=self._raw(getattr(self,"var_"+k))
                 if k in VOL_CH:x_=round(x_,1);t["ef"][k]=int(x_) if x_==int(x_) else x_   # (JMG, 18-11) el volumen, con décimas
+                elif k in FINO:x_=round(x_*2)/2.0;t["ef"][k]=int(x_) if x_==int(x_) else x_   # (JMG, 19-11) de 0,5 en 0,5
                 else:t["ef"][k]=int(round(x_))
             except Exception:pass
         try:t["delay"]=int(round(self._raw(self.var_a_delay)))
@@ -3928,7 +4477,7 @@ class VideoEncoderGUI:
         v=j["v"];enc=self._enc(v)
         if v["codec"]=="prores":return 10
         if v["codec"]=="dnxhr":return 8
-        if enc in ("h264_nvenc","h264_amf"):return 8
+        if enc in ("h264_nvenc","h264_amf","h264_qsv","h264_vulkan"):return 8
         if v["bits"] in ("8","10"):return int(v["bits"])
         if (v["color"]=="sdr" and _hdr_tipo(_vstream(self.info[ruta]))!="SDR") or v["lut"]:return 8   # pasado a SDR: 8 bits, como cualquier video normal
         if self._hdr_keep(ruta,j):return 10
@@ -3936,6 +4485,12 @@ class VideoEncoderGUI:
     def _pasadas(self,j):
         v=j["v"]
         return 2 if (v["codec"] not in ("copy",)+INTRA and v["modo"]=="b" and v["pasadas2"] and self._enc(v) in ("libx264","libx265","libsvtav1","libvvenc","libvpx-vp9")) else 1
+    def _vk_subir(self,ruta,j):
+        """(JMG, 21-11) con Vulkan, los fotogramas se suben a la tarjeta al final de los filtros"""
+        try:
+            if str(self._enc(j["v"]) or "").endswith("_vulkan"):return ["format="+("p010le" if self._bits_sal(ruta,j)==10 else "nv12"),"hwupload"]
+        except Exception:pass
+        return []
     def _vfiltros(self,ruta,j,vista=False):
         """filtros de imagen: desentrelazar, bandas negras, color (LUT o HDR a SDR), brillo/contraste/nitidez/ruido y resolucion"""
         v=j["v"];vs=_vstream(self.info[ruta]) or {};f=[]
@@ -3969,20 +4524,24 @@ class VideoEncoderGUI:
                 if v["pasadas2"] and pase:a+=["-pass",str(pase),"-passlogfile",log2]
             return a+col+self._opc_v_args(enc,o,fps,bits)
         pr=PRESET[enc][v["vel"]]
-        a+=(["-quality",pr] if enc.endswith("_amf") else ["-preset",pr])
+        a+=(["-quality",pr] if (enc.endswith("_amf") or enc.endswith("_vulkan")) else ["-preset",pr])
         if enc.endswith("_nvenc"):a+=["-tune","hq"]
-        gpu=enc.endswith("_nvenc") or enc.endswith("_amf")
-        a+=["-pix_fmt",("p010le" if gpu else "yuv420p10le") if bits==10 else "yuv420p"]
+        gpu=enc.endswith("_nvenc") or enc.endswith("_amf") or enc.endswith("_qsv")
+        if not enc.endswith("_vulkan"):a+=["-pix_fmt",("p010le" if gpu else "yuv420p10le") if bits==10 else ("nv12" if enc.endswith("_qsv") else "yuv420p")]   # Vulkan: lo da hwupload
         if v["modo"]=="q":
             q=str(int(v["crf"]))
             if enc in ("libx264","libx265","libsvtav1"):a+=["-crf",q]
             elif enc=="libvvenc":a+=["-qp",q]
             elif enc.endswith("_nvenc"):a+=["-rc","vbr","-cq",q,"-b:v","0"]
+            elif enc.endswith("_qsv"):a+=["-global_quality",str(int(q)*4 if enc=="av1_qsv" else int(q))]   # (JMG, 21-11) AV1: su escala va hasta 255
+            elif enc.endswith("_vulkan"):a+=["-rc_mode","cqp","-qp",str(int(q)*4 if enc=="av1_vulkan" else int(q))]
             else:a+=["-rc","cqp","-qp_i",q,"-qp_p",q]+(["-qp_b",q] if enc=="h264_amf" else [])
         else:
             k=int(v["kbps"]);a+=["-b:v",f"{k}k"]
             if enc.endswith("_nvenc"):a+=["-rc","vbr","-maxrate",f"{int(k*1.5)}k","-bufsize",f"{k*2}k"]
             elif enc.endswith("_amf"):a+=["-rc","vbr_peak","-maxrate",f"{int(k*1.5)}k"]
+            elif enc.endswith("_qsv"):a+=["-maxrate",f"{int(k*1.5)}k","-bufsize",f"{k*2}k"]
+            elif enc.endswith("_vulkan"):a+=["-rc_mode","vbr","-maxrate",f"{int(k*1.5)}k"]
             if v["pasadas2"]:
                 if enc in ("libx264","libsvtav1","libvvenc") and pase:a+=["-pass",str(pase),"-passlogfile",log2]
                 elif enc=="libx265" and pase:x265+=[f"pass={pase}","stats="+log2.replace("\\","/").replace(":","\\:")+".log"]
@@ -4005,23 +4564,204 @@ class VideoEncoderGUI:
         if d>0:return f"{ent}adelay=delays={d}:all=1[{lbl}]"
         if d<0:return f"{ent}atrim=start={-d/1000.0:.3f},asetpts=PTS-STARTPTS[{lbl}]"
         return f"{ent}anull[{lbl}]" if cv else None
+    def _din_nom(self,m):
+        return {1:self._vt("Elevación","Lift"),2:self._vt("Impacto","Impact"),3:self._vt("Elevación + Impacto","Lift + Impact")}.get(int(m),self._vt("Elevación","Lift"))
+    def _dp(self,m=None,v=None,k=1.0,med=None,adv=None):
+        """Procesado dinamico (curva compand por canal):
+          1 Elevacion: sube los sonidos bajos (compresion ascendente); los fuertes no se tocan.
+          2 Impacto:   AUMENTA mucho la dinamica: los fuertes suben (picos +2 a +8 dB) y los debiles bajan.
+          3 Elevacion + Impacto.
+        v = intensidad 0-10 (0 = sin efecto). med = {"I": LUFS, "TP": pico} medidos del archivo."""
+        if m is None:m=int(self.var_din_modo.get())
+        if v is None:v=self.var_din_ft.get()
+        m=int(m)
+        try:vn=max(0,min(15,int(round(float(v)))))*2/3.0   # (JMG, 20-11) de 0 a 15, de 1 en 1: por dentro, la escala de antes (el 15 = el 10)
+        except (TypeError,ValueError):vn=0
+        if m==0 or vn==0:return {"f":None,"d":"Off","nom":"Off"}
+        u=(vn-1)/9.0
+        L=lambda a,b:a+(b-a)*u
+        med=med or {}
+        try:I=float(med.get("I",-23.0))
+        except (TypeError,ValueError):I=-23.0
+        try:TP=min(0.0,float(med.get("TP",0.0)))
+        except (TypeError,ValueError):TP=0.0
+        P=max(-32.0,min(-14.0,I-2.0))          # nivel medio del programa (por canal)
+        a_=adv or {}
+        if a_.get("umbral") is not None:P=float(a_["umbral"])   # (JMG, 25-11) «⚙»: el umbral a mano
+        # refuerzo (v.74): efecto mas notable, proporcional al nivel: +0,6 dB en el 1 ... +6 dB en el 10
+        xtra=6.0*vn/10.0
+        up55=L(2.5,13)+xtra;up40=L(2,9)+xtra;up30=L(1,4.5)+xtra
+        Pe=min(P,-24.0)
+        ex=[q for q in [(-90,-90),(-72,-72+up55*0.3),(-55,-55+up55),(-40,-40+up40),(-30,-30+up30)] if q[0]<Pe-1]+[(Pe,Pe),(0,0),(20,20)]
+        # la curva nunca se da la vuelta: un sonido mas fuerte siempre sale mas fuerte (pendiente minima 0,25)
+        for i in range(len(ex)-2,0,-1):
+            (x0,y0),(x1,y1)=ex[i],ex[i+1]
+            if y0>y1-0.25*(x1-x0):ex[i]=(x0,y1-0.25*(x1-x0))
+        def elev(x):
+            for (x0,y0),(x1,y1) in zip(ex,ex[1:]):
+                if x<=x1:return y0+(y1-y0)*(x-x0)/(x1-x0)
+            return x
+        # Impacto (estilo "inverse"): los fuertes SUBEN (picos +upk dB) y los debiles BAJAN (expansion hacia abajo).
+        # Los picos pueden pasar de 0 dBFS: el techo del limitador decide ("Sin limite" = puede saturar).
+        upk0=L(3.0,9.0)                # subida de los fuertes (dB en el pico)
+        upk=upk0+xtra                  # con el refuerzo de la v.74
+        rl=1.0+L(0.10,0.55)            # pendiente por debajo del nivel medio (>1 = los debiles bajan)
+        def imp(x):
+            if x<=P:return P-(P-x)*rl
+            # refuerzo: entra en los 8 dB por encima del nivel medio y desde ahi los fuertes llevan los +xtra enteros
+            if x<=TP:return P+(x-P)*((TP+upk0)-P)/max(0.1,(TP-P))+xtra*min(1.0,(x-P)/8.0)
+            return x+upk
+        def mix(x):   # Elevacion + Impacto: suben los debiles (Elevacion) y suben los fuertes (Impacto)
+            return elev(x) if x<=P else imp(x)
+        f={1:elev,2:imp,3:mix}.get(m,elev)
+        X=sorted(set([-90,-72,-55,-40,-30,round(P,1),round((P+TP)/2,1),round(TP,1),0,20]))
+        pts=[(a,f(a)) for a in X]
+        k=max(0.0,min(1.0,float(k)))
+        pts=[(a,a+(b-a)*k) for a,b in pts]
+        ps="|".join(f"{a:g}/{b:.1f}" for a,b in pts)
+        nom=self._din_nom(m)
+        d=[]
+        _sb=elev(-45.0)+45.0   # subida real de un sonido bajo (-45 dBFS)
+        if m in (1,3):d.append(self._vt(f"bajos +{_sb:.1f} dB",f"quiet +{_sb:.1f} dB"))
+        if m in (2,3):d.append(self._vt(f"fuertes +{upk:.1f} dB",f"loud +{upk:.1f} dB"))
+        if m==2:d.append(self._vt(f"débiles -{(rl-1)*20:.1f} dB",f"weak -{(rl-1)*20:.1f} dB"))
+        _att="0.002" if m in (2,3) else "0.008"   # Impacto: ataque rapido para que los picos suban de verdad
+        _nn=lambda x:(int(x) if float(x).is_integer() else round(float(x),4))
+        _att=str(_nn(float(a_["ataque"])/1000)) if a_.get("ataque") is not None else _att   # (JMG, 25-11) «⚙»: ataque, liberación y rodilla
+        return {"f":f"compand=attacks={_att}:decays={_nn(float(a_.get('liberacion',250))/1000)}:points={ps}:soft-knee={_nn(a_.get('rodilla',4))}:gain=0:volume=-30","nom":nom,"d":" · ".join(d)}
+
+    _ADV_PD=[("umbral","Umbral (nivel medio)","Threshold (average level)",-40,-10,0.5,("auto",-25),"dB",("Bajo","Low"),("Alto","High")),
+        ("ataque","Ataque","Attack",0.5,100,0.5,("auto",8),"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("liberacion","Liberación","Release",20,2000,10,250,"ms",("Rápida","Fast"),("Lenta","Slow")),
+        ("rodilla","Rodilla (suavidad)","Knee (softness)",0,12,0.5,4,"dB",("Dura","Hard"),("Suave","Soft")),
+        ("lim_at","Ataque del limitador","Limiter attack",1,50,1,5,"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("lim_rel","Liberación del limitador","Limiter release",10,1000,10,80,"ms",("Rápida","Fast"),("Lenta","Slow")),]
+    def _rueda_pd(self,fr):
+        """(JMG, 25-11) la «⚙» del Procesado dinámico, a la izquierda de su título"""
+        try:
+            b=ttk.Button(fr,text="⚙",width=2,style="Rueda.TButton",command=self._adv_pd)
+            b.pack(side="left",before=fr.winfo_children()[0],padx=(0,2))
+            self._ayuda_flotante(b,self._vt("Ajustes avanzados del Procesado dinámico (para afinar más)","Advanced Dynamic processing settings (for finer tuning)"))
+        except Exception:pass
+    def _adv_pd(self):
+        """(JMG, 25-11) ajustes finos del Procesado dinámico de la pista (como en Jmg AudioProcesador): deslizador, casilla, «Por defecto»"""
+        V=self._vt;j=self._job()
+        if not j or self._a_i is None:self._toast(T("info_tit"),V("Primero agrega un vídeo.","First add a video."),seg=3);return
+        t=j["a"][self._a_i];dest=t.setdefault("adv",{}).setdefault("pd",{})
+        n_=lambda x:(int(x) if float(x).is_integer() else round(float(x),4))
+        try:
+            if getattr(self,"_adv_top",None) and self._adv_top.winfo_exists():self._adv_top.destroy()
+        except Exception:pass
+        top=tk.Toplevel(self.root);self._adv_top=top;top.title("⚙ "+V("Procesado dinámico","Dynamic processing"));top.configure(bg=CF);top.transient(self.root);top.resizable(False,False)
+        f=ttk.Frame(top);f.pack(fill="both",expand=True,padx=16,pady=12)
+        ttk.Label(f,text="⚙ "+V("Procesado dinámico","Dynamic processing"),font=("",11,"bold")).grid(row=0,column=0,columnspan=5,sticky="w",pady=(0,8))
+        vs={}
+        def cambio():
+            try:self._onda_pronto(1200);self._oir_ajuste();self._cambio_a()
+            except Exception:pass
+        for r,(k,es,en,a,b_,st,d0,u,lo,hi) in enumerate(self._ADV_PD,start=1):
+            auto=isinstance(d0,tuple);dv=d0[1] if auto else d0
+            ttk.Label(f,text=V(es,en)+(f" ({u})" if u else "")+":").grid(row=r,column=0,sticky="w",padx=(0,10),pady=4)
+            ttk.Label(f,text=V(*lo),foreground=CA,font=("",8)).grid(row=r,column=1,sticky="e")
+            var=tk.DoubleVar(value=float(dest.get(k,dv)));vs[k]=(var,dv)
+            sc=ttk.Scale(f,from_=a,to=b_,variable=var,orient="horizontal",length=260);sc.grid(row=r,column=2,padx=6)
+            ttk.Label(f,text=V(*hi),foreground=CA,font=("",8)).grid(row=r,column=3,sticky="w")
+            ve=tk.StringVar();en_=tk.Entry(f,textvariable=ve,width=8,justify="center",bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB,highlightcolor=CID)
+            en_.grid(row=r,column=4,padx=(8,0))
+            def pinta(*_a,k=k,var=var,ve=ve,st=st,auto=auto):ve.set(("auto " if auto and k not in dest else "")+f"{n_(round(round(var.get()/st)*st,4))}")
+            def pon(x,k=k,var=var,st=st,a=a,b_=b_):
+                x=max(a,min(b_,round(round(x/st)*st,4)));dest[k]=n_(x);var.set(x);cambio()
+            def mueve(_e=None,var=var,sc=sc,pon=pon):
+                if getattr(sc,"_dbl",False):sc._dbl=False;return
+                pon(var.get())
+            def escribe(_e=None,ve=ve,pon=pon):
+                try:pon(float(ve.get().replace(",",".").replace("auto","").strip()))
+                except ValueError:pass
+            def doble(_e=None,k=k,var=var,dv=dv,sc=sc):
+                sc._dbl=True;dest.pop(k,None);var.set(dv);cambio();return "break"
+            var.trace_add("write",pinta);pinta()
+            sc.configure(takefocus=1);sc.bind("<Button-1>",lambda e,sc=sc:sc.focus_set(),add="+")
+            sc.bind("<ButtonRelease-1>",mueve)
+            for ky,s_ in (("<Left>",-1),("<Down>",-1),("<Right>",1),("<Up>",1)):sc.bind(ky,lambda e,s_=s_,var=var,st=st,pon=pon:(pon(var.get()+s_*st),"break")[1])
+            sc.bind("<Double-1>",doble);en_.bind("<Double-1>",doble);en_.bind("<Return>",escribe);en_.bind("<FocusOut>",escribe)
+        fb=ttk.Frame(f);fb.grid(row=len(self._ADV_PD)+2,column=0,columnspan=5,sticky="ew",pady=(12,0))
+        def defecto():
+            dest.clear()
+            for k,(var,dv) in vs.items():var.set(dv)
+            cambio()
+        ttk.Button(fb,text="↺ "+V("Por defecto","Default"),command=defecto).pack(side="left")
+        ttk.Button(fb,text=V("Cerrar","Close"),command=top.destroy).pack(side="right")
+        try:top.update_idletasks();top.geometry(f"+{self.root.winfo_rootx()+160}+{self.root.winfo_rooty()+120}")
+        except Exception:pass
+        return top
+    def _dp_f(self,ef,c,adv=None):
+        """(JMG, 22-11) el Procesado dinámico de un canal: frontales y traseros, central o subwoofer (None = nada)"""
+        m=int(ef.get("din_modo") or 0)
+        if not m:return None
+        return self._dp(m,ef.get({"FC":"din_fc","LFE":"din_lfe"}.get(c,"din_ft")) or 0,adv=adv)["f"]
+    def _dp_lim(self,ef,adv=None):
+        """(JMG, 22-11) el techo del Procesado dinámico (None = sin límite)"""
+        if not int(ef.get("din_modo") or 0):return None
+        v={1:0.794,2:0.891,3:0.944}.get(int(ef.get("din_techo") or 0))
+        a_=adv or {}
+        return f"alimiter=limit={v}:attack={a_.get('lim_at',5)}:release={a_.get('lim_rel',80)}:level=0:latency=1" if v else None
+    def _din_lbl(self):
+        """(JMG, 22-11) lo que hace el Procesado dinámico con lo puesto (como en Jmg AudioProcesador)"""
+        try:
+            m=int(self.var_din_modo.get())
+            if m==0:self.var_din_desc.set("Off\n\n\n");return
+            par=[]
+            for et,var in ((self._vt("Frontales/traseros","Front/rear"),self.var_din_ft),(self._vt("Central","Center"),self.var_din_fc),("Subwoofer",self.var_din_lfe)):
+                p=self._dp(m,var.get())
+                par.append(f"   {et} {int(var.get())}: "+(p['d'] if p["f"] else self._vt("sin efecto","no effect")))
+            self.var_din_desc.set(self._din_nom(m)+"\n"+"\n".join(par))
+        except Exception:pass
+    def _din_sync(self,de):
+        """(JMG, 26-11) Procesado dinámico sin el 0: el modo elegido (1-3, por defecto 2) está en var_din_ui; con los deslizadores a 0 no hace
+        nada (por dentro din_modo = 0); al mover un deslizador se pone el modo elegido; si algo lo apaga (din_modo = 0), los deslizadores a 0"""
+        if getattr(self,"_din_sync_on",False) or getattr(self,"_cargando",False) or getattr(self,"_cargando_pista",False) or getattr(self,"_din_dictc",False):
+            if de=="modo":
+                try:
+                    m_=int(self.var_din_modo.get() or 0);(self.var_din_ui.set(m_ or 2) if (m_ or not getattr(self,"_din_sync_on",False)) else None)   # al cargar, el modo guardado (apagado: el 2, JMG 27-11); (árbitro) al bajar los deslizadores a 0, se queda el elegido
+                except Exception:pass
+            return
+        self._din_sync_on=True
+        try:
+            sl=(self.var_din_ft,self.var_din_fc,self.var_din_lfe);hay=any(abs(float(v.get() or 0))>1e-9 for v in sl)
+            if de=="modo":
+                m=int(self.var_din_modo.get() or 0)
+                if m:self.var_din_ui.set(m)
+                else:
+                    if int(self.var_din_ui.get() or 2)!=2:self.var_din_ui.set(2)   # (JMG, 27-11) apagado: el desplegable vuelve al 2 (no se queda con el modo de otra pista)
+                    if hay:
+                        for v in sl:v.set(0)
+            else:
+                m=int(self.var_din_ui.get() or 2) if hay else 0
+                if int(self.var_din_modo.get() or 0)!=m:self.var_din_modo.set(m)
+        except Exception:pass
+        finally:self._din_sync_on=False
+    def _din_8(self):
+        """(JMG, 22-11) al elegir un modo con todo a 0, los frontales y traseros a 8 (como en Jmg AudioProcesador)"""
+        try:
+            pass   # (JMG, 26-11) ya no: los deslizadores empiezan en 0 (sin el modo 0, a 0 = no hace nada)
+        except Exception:pass
     def _a_grafo(self,t,ent,sal,sin=None,post=None,off=0.0):
         """filtros de una pista de audio: sincronizacion, y canal a canal volumen, gama dinamica / compresion, suavizado, EQ y
         Double Bass. None = no hace falta"""
         ef=dict(t["ef"])
-        for k in {"gama":("gama","gama_c"),"vol":("fl","fr","fc","lfe","bl","br"),"suav":("suav",),"eq3":("eq_bass","eq_mids","eq_treble"),"db":("db",),"pres":("voz","amb","efc","sub"),"separ":("separ",)}.get(sin,()):ef[k]=0
+        for k in {"din":("din_modo",),"vol":("fl","fr","fc","lfe","bl","br"),"suav":("suav",),"eq3":("eq_bass","eq_mids","eq_treble"),"db":("db",),"pres":("voz","amb","efc","sub"),"separ":("separ",)}.get(sin,()):ef[k]=0
         p=sal.strip("[]")
         pre=self._a_pre(t,ent,p+"pre",off)
         if pre:pre+=";";ent=f"[{p}pre]"
         else:pre=""
-        eqs=[f"equalizer=f={f}:t=o:w=1:g={ef[k]}" for f,k in zip(EQ3_F,("eq_bass","eq_mids","eq_treble")) if ef.get(k)]
+        eqs=[f"equalizer=f={f}:t=o:w=1:g={round(ef[k]*2/3.0,2):g}" for f,k in zip(EQ3_F,("eq_bass","eq_mids","eq_treble")) if ef.get(k)]
         lp=f"lowpass=f={SUAV_FC[ef['suav']-1]}:poles=2" if 1<=ef.get("suav",0)<=5 else None
         chans=LAYCH.get(t["lay"])
-        if not any(ef.values()):
+        if not _ef_on(ef):
             if post:return f"{pre}{ent}{post}{sal}"
             return f"{pre}{ent}anull{sal}" if pre else None
         if not chans:   # disposicion rara: los efectos a toda la pista
-            c=[x for x in (_compand(ef["gama"]),lp)+tuple(eqs) if x]
+            c=[x for x in (self._dp_f(ef,"FL",(t.get("adv") or {}).get("pd")),self._dp_lim(ef,(t.get("adv") or {}).get("pd")),lp)+tuple(eqs) if x]
             return f"{pre}{ent}{','.join(c+([post] if post else [])) or 'anull'}{sal}"
         g=pre+f"{ent}channelsplit=channel_layout={t['lay']}"+"".join(f"[{p}s{c}]" for c in chans)
         # Presencia (la de Jmg AudioProcesador): voz solo en el central; ambiente y efectos en frontales y traseros; subwoofer
@@ -4035,16 +4775,17 @@ class VideoEncoderGUI:
             elif c=="LFE":
                 if ps:ch.append(f"volume={ps}dB")
             else:ch+=b_ae
+            cp=self._dp_f(ef,c,(t.get("adv") or {}).get("pd"))   # (JMG, 22-11) el Procesado dinámico (el de Jmg AudioProcesador): frontales y traseros, central y subwoofer
+            if c=="LFE" and cp:ch.append(cp)
             if c!="LFE":
-                cp=_compand(ef["gama_c"] if c=="FC" else ef["gama"])
                 if cp:ch.append(cp)
                 if lp:ch.append(lp)
                 ch+=eqs
             g+=f";[{p}s{c}]{','.join(ch) or 'anull'}[{p}d{c}]"
         fin={c:f"[{p}d{c}]" for c in chans}
-        n=int(ef.get("db") or 0)
+        n=max(0,min(6,int(round(float(ef.get("db") or 0)))))   # (JMG, 19-11 noche) de 0 a 6, de 1 en 1 (el 6, como en Jmg AudioProcesador)
         if n and "LFE" in chans:   # Double Bass (el de Jmg AudioProcesador): graves del sub a los altavoces y de los altavoces al sub
-            ip=lambda a,b:a+(b-a)*(n-1)/4.0
+            ip=lambda a,b:(a+(b-a)*(n-1)/4.0) if n>=1 else a*n   # el 0,5: la mitad del 1
             dg=round(ip(0.12,0.6),3);dk=round(ip(0.4,1.6),3);ds=[c for c in chans if c!="LFE"]
             g+=f";[{p}dLFE]asplit=2[{p}L0][{p}L1];[{p}L1]lowpass=f={DB_CORTE}:poles=2,volume={dg},asplit={len(ds)}"+"".join(f"[{p}q{c}]" for c in ds)
             for c in ds:g+=f";[{p}d{c}]asplit=2[{p}m{c}][{p}g{c}]"
@@ -4058,7 +4799,8 @@ class VideoEncoderGUI:
         # al subwoofer los graves de los altavoces (a -20 dB bajaba 1,4 dB). Lo que se pone es lo que baja (o sube)
         vg=[float(ef.get(SLIDER_CH.get(c,""),0) or 0) for c in chans]
         vc=("pan="+t["lay"]+"|"+"|".join(f"c{i}={(0.0 if v<=-30.5 else 10**(v/20.0)):.6f}*c{i}" for i,v in enumerate(vg))+(",alimiter=limit=0.944:attack=5:release=80:level=0:latency=1" if any(v>0 for v in vg) else "")) if any(vg) else None   # (árbitro) si alguno sube, protección
-        return g+(","+sp_ if sp_ else "")+(","+vc if vc else "")+(","+post if post else "")+sal
+        lim_=self._dp_lim(ef,(t.get("adv") or {}).get("pd"))   # (JMG, 22-11) el techo del Procesado dinámico
+        return g+(","+lim_ if lim_ else "")+(","+sp_ if sp_ else "")+(","+vc if vc else "")+(","+post if post else "")+sal
     def _a_post(self,t):
         """conversion de canales que pide el códec de salida"""
         if t["cod"]=="opus" and t["nch"]>2:return "aformat=channel_layouts="+("7.1" if t["nch"]>=8 else "5.1")
@@ -4140,7 +4882,7 @@ class VideoEncoderGUI:
         ss0=max(0.0,ini-5.0) if (ini>0 and j["v"]["codec"]!="copy") else ini;ss1=ini-ss0
         seek=["-ss",f"{ss0:.3f}"] if ss0>0 else []
         dvd=["-analyzeduration","100M","-probesize","100M"] if inf.get("dvd") else []
-        c=[FFMPEG,"-hide_banner","-nostdin","-y","-v","error","-progress","pipe:1","-nostats"]+dvd+seek+(["-core_only","1"] if self._nucleo_dts(j) else [])+["-i",inf.get("entrada",ruta)]
+        c=[FFMPEG,"-hide_banner","-nostdin","-y","-v","error","-progress","pipe:1","-nostats"]+dvd+seek+(["-core_only","1"] if self._nucleo_dts(j) else [])+(["-hwaccel","auto"] if j["v"]["codec"]!="copy" else [])+["-i",inf.get("entrada",ruta)]   # (JMG, 25-11) decodifica la gráfica si puede: el procesador, para el códec
         ent={None:0};n_in=1;burn=None   # entradas: 0 = el video; luego los archivos de las pistas de audio añadidas, subtitulos externos y portada
         aent={(None,1.0):0};sent={}   # audio: (archivo, velocidad) -> entrada; subtitulos: n.º -> "entrada:pista"
         if pase!=1:
@@ -4176,9 +4918,11 @@ class VideoEncoderGUI:
         if burn and not burn[2]:   # (JMG, 11-11) de texto (SRT, ASS): se dibuja sobre la imagen final (ya recortada o escalada)
             vf=vf+["subtitles=filename='"+burn[1].replace("\\","/").replace(":","\\:").replace("'","\\'")+"'"]
         if burn and burn[2]:   # de imagen (PGS, DVD): encima del fotograma original y después los ajustes de imagen
+            vf=vf+self._vk_subir(ruta,j)   # (JMG, 21-11) con Vulkan, a la tarjeta al final
             vfc=f"[0:{vs['index']}][{sent[burn[0]]}]overlay=(W-w)/2:(H-h):eof_action=pass"+(","+",".join(vf) if vf else "")+"[vquema]";c+=["-map","[vquema]"]
         else:
             c+=["-map",f"0:{vs['index']}"]
+            vf=vf+self._vk_subir(ruta,j)   # (JMG, 21-11) con Vulkan, los fotogramas a la tarjeta, al final de los filtros
             if vf and j["v"]["codec"]!="copy":c+=["-filter:v:0",",".join(vf)]
         c+=self._venc(ruta,j,pase,log2)
         if cont=="avi" and j["v"]["codec"]=="copy" and str((vs or {}).get("codec_name",""))=="h264":c+=["-bsf:v","h264_mp4toannexb"]   # el H.264 de MKV/MP4 en AVI
@@ -4246,7 +4990,7 @@ class VideoEncoderGUI:
                 if t["incl"] and t.get("nucleo") and nb and o_src is not None and not _fps_q(t) and not t.get("delay") and not t.get("tramos"):
                     c+=["-map",f"{o_src}:{t['idx']}",f"-c:a:{K}","copy",f"-bsf:a:{K}",nb[0],f"-metadata:s:a:{K}","language="+(t["lang"] or "und"),
                         f"-metadata:s:a:{K}","title="+((t["tit"]+" · ") if t["tit"] else "")+nb[1],f"-disposition:a:{K}","0"];K+=1
-        if fc or vfc:c+=["-filter_complex",";".join(([vfc] if vfc else [])+fc)]
+        for g_ in ([vfc] if vfc else [])+fc:c+=["-filter_complex",g_]   # (JMG, 27-11) cada grafo aparte: FFmpeg lleva cada uno en su propio hilo
         # (JMG, 10-11) con más entradas que la película (los AC3 de Aften, pistas añadidas...), sus subtítulos se leen de otra
         # apertura del mismo archivo: si no, FFmpeg deja el principio de esas pistas de audio cientos de segundos más adelante en el
         # MKV (por los subtítulos, que van a saltos) y VLC se queda sin audio y corre el vídeo. Medido: 0,3 s y la misma memoria
@@ -4380,6 +5124,7 @@ class VideoEncoderGUI:
                              for p,f,_,_ in (self._portadas_tmp(ruta) if self._cont(j,ruta)=="mkv" and self.var_adj.get() and j.get("portada") is None else [])]})
             plan.append(w)
         self.prog.configure(value=0)
+        self._lote_on=True;self._lote_ruta=None;self._lote_vid=False   # (JMG, 25-11) codificando (no combinando): «Previsualizar»
         threading.Thread(target=self._lote,args=(plan,),daemon=True).start()
     def _cancel(self):
         if getattr(self,"_pausa_on",False):self._pausa_poner(False)   # (JMG, 13-11) en pausa: primero sigue (y así nada se queda parado)
@@ -4389,6 +5134,11 @@ class VideoEncoderGUI:
             try:p.kill()
             except Exception:pass
         self._st(self._vt("Cancelando...","Cancelling..."))
+    def _pct(self,base,peso,fr):
+        """(JMG, 27-11) con varios pasos, el % del paso que va (audio o vídeo) y el del total: el audio pesa poco en la barra y parecía
+        quedarse en el 9 %"""
+        t=base+peso*fr
+        return f"{t:.0f} %" if peso>=99.5 else f"{fr*100:.0f} % · total {t:.0f} %"
     def _peso_paso(self,cmd,d):
         """(JMG, 13-11) lo que cuesta cada paso, para que la barra vaya al ritmo real: codificar el vídeo pesa su duración; la primera de
         dos pasadas, menos; el audio (Aften) y copiar sin recomprimir (o unir tramos), casi nada"""
@@ -4401,6 +5151,11 @@ class VideoEncoderGUI:
         except Exception:pass
         return 1.0*d
     def _ejecutar(self,cmd,dur,base,peso,txt,fps=0.0):
+        """(JMG, 20-11) las salidas se escriben como «nombre.part.ext» y pasan a su nombre solo si FFmpeg acaba bien (_part_cmd)"""
+        if _VK.get("dev") is not None and "-init_hw_device" not in cmd and any(isinstance(x,str) and x.endswith("_vulkan") for x in cmd):   # (JMG, 21-11) Vulkan
+            cmd=[cmd[0],"-init_hw_device",f"vulkan=vk:{_VK['dev']}","-filter_hw_device","vk"]+list(cmd[1:])
+        cmd,pares=_part_cmd(cmd);ok,err=self._ejecutar0(cmd,dur,base,peso,txt,fps=fps);return _part_fin(pares,ok),err
+    def _ejecutar0(self,cmd,dur,base,peso,txt,fps=0.0):
         """lanza FFmpeg y va moviendo la barra; devuelve (ok, ultimas lineas de error). (JMG, 23-11) Con fps (el del vídeo), la barra va por
         los fotogramas ya escritos: el out_time de FFmpeg es el de la pista que más avanza (una pista hecha con Aften se lee enseguida y
         VVC va despacio: la barra se quedaba en el 31 % y el «quedan» no se movía)"""
@@ -4423,16 +5178,16 @@ class VideoEncoderGUI:
                 continue
             if l.startswith("progress=") and not hay_t:   # (JMG, 21-11) mientras FFmpeg no da el tiempo, al menos el paso y lo que lleva
                 el=time.time()-t0-self._pausa_desde(t0)
-                self._st(f"{txt} · {base:.0f} % · "+self._vt(f"lleva {_hms(el).split('.')[0]}",f"{_hms(el).split('.')[0]} elapsed"))
+                self._st(f"{txt} · {self._pct(base,peso,0.0)} · "+self._vt(f"lleva {_hms(el).split('.')[0]}",f"{_hms(el).split('.')[0]} elapsed"))
             if l.startswith("out_time_us=") or l.startswith("out_time_ms="):
                 try:s=int(l.split("=")[1])/1e6
                 except ValueError:continue
                 if fps>0 and nfr>0:s=min(s,nfr/fps)   # (JMG, 23-11) lo que va de vídeo, no lo que va de la pista más adelantada
-                hay_t=True
+                hay_t=True;self._lote_t=s   # (JMG, 25-11) por dónde va («Previsualizar» empieza ahí)
                 fr=max(frm,max(0.0,min(1.0,s/dur)) if dur>0 else 0.0);frm=fr   # (23-11) dentro del paso, nunca hacia atrás
                 self._set_prog(base+peso*fr)
                 el=time.time()-t0-self._pausa_desde(t0);rest=el*(1-fr)/fr if fr>0.02 else 0
-                self._st(f"{txt} · {base+peso*fr:.0f} %"+(self._vt(f" · quedan {_hms(rest).split('.')[0]}",f" · {_hms(rest).split('.')[0]} left") if rest else ""))
+                self._st(f"{txt} · {self._pct(base,peso,fr)}"+(self._vt(f" · quedan {_hms(rest).split('.')[0]}",f" · {_hms(rest).split('.')[0]} left") if rest else ""))
         p.wait();th.join(timeout=2);self._proc=None
         return p.returncode==0,err
     def _lote(self,plan):
@@ -4440,7 +5195,7 @@ class VideoEncoderGUI:
         V_=self._vt;ok=0;mal=0;hechos=[];t0=time.time();N=len(plan);self._lote_lista=[]
         for i,w in enumerate(plan):
             if self._cancelar.is_set():break
-            sal=w["sal"]
+            sal=w["sal"];self._lote_vid=False;self._lote_t=0.0;self._lote_ss=0.0;self._lote_ruta=w["ruta"]   # (JMG, 25-11) el que se codifica ahora («Previsualizar»)
             for a in w["av"]:self._ls("[!] "+a)
             try:os.makedirs(os.path.dirname(sal),exist_ok=True)
             except OSError:pass
@@ -4461,7 +5216,11 @@ class VideoEncoderGUI:
                         for pf,dt in zip(cc["partes"],cc["durs"]):fl.write("file '"+pf.replace("\\","/").replace("'","'\\''")+f"'\noutpoint {dt:.3f}\n")   # cada trozo acaba en su sitio (los subtitulos no lo alargan)
                     txt=V_(f"Vídeo {i+1}/{N} · uniendo {npar} tramos",f"Video {i+1}/{N} · joining {npar} parts")
                 else:
-                    txt=V_(f"Vídeo {i+1}/{N}",f"Video {i+1}/{N}")+(V_(f" · paso {k+1}/{len(pasos)}",f" · step {k+1}/{len(pasos)}") if len(pasos)>1 else "")+f" · {w['nom']}"
+                    txt=V_(f"Vídeo {i+1}/{N}",f"Video {i+1}/{N}")+(V_(f" · paso {k+1}/{len(pasos)}",f" · step {k+1}/{len(pasos)}")+" · "+(V_("vídeo","video") if ((not isinstance(cmd,dict)) and any(str(x).startswith("-c:v") and str(cmd[q+1])!="copy" for q,x in enumerate(cmd[:-1]))) else "audio") if len(pasos)>1 else "")+f" · {w['nom']}"
+                self._lote_vid=(not isinstance(cmd,dict)) and any(str(x).startswith("-c:v") and str(cmd[q+1])!="copy" for q,x in enumerate(cmd[:-1]))   # (JMG, 25-11) «Previsualizar»: solo codificando el vídeo
+                self._lote_t=0.0
+                try:self._lote_ss=float(next(cmd[q+1] for q,x in enumerate(cmd[:-1]) if x=="-ss" and "-i" in cmd[q+1:])) if not isinstance(cmd,dict) else 0.0
+                except Exception:self._lote_ss=0.0
                 r,err=(self._aften_tubo(cmd,d,100.0*hecho/tot,100.0*pes[k]/tot,txt) if isinstance(cmd,dict) else self._ejecutar(cmd,d,100.0*hecho/tot,100.0*pes[k]/tot,txt,fps=w.get("fps",0.0)));hecho+=pes[k]   # (JMG, 13-11) la barra es la de este vídeo: la misma cifra que el texto
                 if not r:
                     bien=False
@@ -4481,7 +5240,7 @@ class VideoEncoderGUI:
                 except OSError:pass
         self._ui(self._fin_lote,ok,mal,hechos,time.time()-t0)
     def _fin_lote(self,ok,mal,hechos,seg):
-        V_=self._vt;self.procesando=False;self._bp_poner(False);self.btn_c.state(["disabled"]);self._refrescar_estado();self._estado_general()
+        V_=self._vt;self.procesando=False;self._lote_on=False;self._lote_ruta=None;self._lote_vid=False;(self._vplay_parar() if getattr(self,"_vcod_on",False) else None);self._bp_poner(False);self.btn_c.state(["disabled"]);self._refrescar_estado();self._estado_general()
         canc=self._cancelar.is_set()
         self.prog.configure(value=0 if canc else 100);self.root.after(1500,lambda:self.prog.configure(value=0))
         self.var_progreso.set(V_(f"Terminado: {ok} bien, {mal} con error · {_hms(seg).split('.')[0]}",f"Done: {ok} OK, {mal} failed · {_hms(seg).split('.')[0]}"))
@@ -4489,8 +5248,8 @@ class VideoEncoderGUI:
         self._toast(T("info_tit") if not mal else T("warn_tit"),V_(f"{ok} vídeo(s) terminados"+(f", {mal} con error (mira Edit/Log)." if mal else "."),f"{ok} video(s) done"+(f", {mal} failed (see Edit/Log)." if mal else ".")),tipo="info" if not mal else "warning",seg=8)
         if getattr(self,"_lote_lista",None):self._addl(list(self._lote_lista))
         if self.var_abrir.get() and hechos and self.var_al_terminar.get()!="apagar":   # (JMG, 8-11) si se va a apagar el PC, no se abre nada
-            for d in dict.fromkeys(os.path.dirname(h) for h in hechos):
-                try:_abrir_externo(d)
+            for d in dict((os.path.dirname(h),h) for h in hechos).values():   # (JMG, 22-11) con el archivo ya elegido
+                try:_abrir_marcado(d)
                 except Exception:pass
         a=self.var_al_terminar.get()
         if a=="salir":self.root.after(1500,lambda:self._on_close(forzar=True))
@@ -4533,7 +5292,7 @@ class VideoEncoderGUI:
         ttk.Button(top,text=V_("Cancelar la suspensión","Cancel sleep"),command=no).pack(pady=(0,20))
         top.protocol("WM_DELETE_WINDOW",no)
     # ---------- «Auto» ----------
-    _AUTO_PROPIAS={"video":("codec","motor","modo","crf","kbps","pasadas2","vel","res","bits","deint"),"gama":("gama","gama_c"),
+    _AUTO_PROPIAS={"video":("codec","motor","modo","crf","kbps","pasadas2","vel","res","bits","deint"),"din":("din_modo","din_ft","din_fc","din_lfe"),
                    "vol":("fl","fr","fc","lfe","bl","br"),"suav":("suav",),"eq3":("eq_bass","eq_mids","eq_treble"),"db":("db",),"pres":("voz","amb","efc","sub"),"separ":("separ",)}
     def _auto(self,ef):
         j=self._job();V_=self._vt
@@ -4681,30 +5440,24 @@ class VideoEncoderGUI:
             if r.returncode!=0:wav=crudo
         m=self._medir(wav,t,ef);I=m["I"];R=m["LRA"];B=m["b"]
         ok=lambda c:I.get(c,-99.0)>-60
-        if ef=="gama":
-            ft=[R[c] for c in ("FL","FR","BL","BR","SL","SR") if ok(c) and c in R];ce=R.get("FC") if ok("FC") else None
-            if not ft and ce is None:return None,V_("la pista está casi en silencio.","the track is almost silent.")
-            aj={"gama":0,"gama_c":0};lra=med(ft) if ft else ce
-            if lra<15.5:aj["gama"]=-int(cl(round((17.0-lra)/3.0),1,2))
-            elif lra>20.0:aj["gama"]=int(cl(round((lra-17.0)/3.0),1,3))
-            # (JMG, 28-11) el central es la referencia: el «Auto» de la Gama no lo toca (a mano sí)
-            if not ft:aj["gama"]=0
-            aj={k_:2*v_ for k_,v_ in aj.items()}   # (JMG, 9-11) el deslizador va de -10 a +10
-            d=lambda x:(V_("gama dinámica ","dynamic range ")+str(-x)) if x<0 else ((V_("compresión ","compression ")+str(x)) if x>0 else V_("apagado","off"))
-            txt=V_(f"Rango dinámico: delanteros/traseros {lra:.0f} LU","Dynamic range: fronts/surrounds {0:.0f} LU".format(lra))+(f" · {V_('central','center')} {ce:.0f} LU" if ce is not None else "")
-            return aj,txt+"\n"+V_("Delanteros y traseros: ","Fronts and surrounds: ")+d(aj["gama"])+" · "+V_("Central: ","Center: ")+d(aj["gama_c"])
+        if ef=="din":   # (JMG, 22-11) el del Procesado dinámico de Jmg AudioProcesador: el contraste de los frontales Y los traseros
+            a=[R[c] for c in ("FL","FR","BL","BR","SL","SR") if ok(c) and c in R] or [R[c] for c in ("FC",) if ok(c) and c in R]
+            if not a:return None,V_("la pista está casi en silencio.","the track is almost silent.")
+            ex=med(a)-17.0
+            if ex<=3.0:return {"din_modo":0},V_(f"Rango dinámico {med(a):.0f} LU: no hace falta, apagado.",f"Dynamic range {med(a):.0f} LU: not needed, off.")
+            v=int(cl(round(ex+3),2,9));aj={"din_modo":3,"din_ft":v,"din_fc":0,"din_lfe":0}   # Elevación + Impacto; el central es la referencia: no se toca
+            return aj,V_(f"Rango dinámico {med(a):.0f} LU · ",f"Dynamic range {med(a):.0f} LU · ")+self._din_nom(3)+" · "+V_("F/T ","F/R ")+f"{v} · C 0 · Sub 0"
         if ef=="separ":   # (JMG, 28-11) la separación que le va a la película: más en las de acción, menos en las tranquilas; el central no se toca
             s_,txt=_separ_auto(_separ_medida(wav,{c:i for i,c in enumerate(LAYCH.get(t["lay"]) or [])}),I,R,V_)
             return (None,txt) if s_ is None else ({"separ":s_},txt[:1].upper()+txt[1:])
         if ef=="vol":
             if not ok("FC"):return None,V_("esta pista no tiene canal central: no hay con qué equilibrar.","this track has no center channel: nothing to balance against.")
-            fc=I["FC"];obj={"FL":-3.0,"FR":-3.0,"BL":-7.0,"BR":-7.0,"SL":-7.0,"SR":-7.0,"LFE":-6.0};aj={}
+            fc=I["FC"];obj={"FL":-1.5,"FR":-1.5,"BL":-3.0,"BR":-3.0,"SL":-3.0,"SR":-3.0};aj={k:0 for k in ("fl","fr","bl","br","lfe")};lv=[fc]   # (JMG, 19-11) los que no se miden, a 0; (27-11) más compensado
             for c,o in obj.items():
-                if ok(c):
-                    lim=3 if c=="LFE" else 6
-                    aj[SLIDER_CH[c]]=int(cl(round(o-(I[c]-fc)),-lim,lim if c=="LFE" else 0))   # (JMG, 27-11) frontales y traseros solo se bajan
+                if ok(c):k_=SLIDER_CH[c];aj[k_]=min(aj[k_],int(cl(round(o-(I[c]-fc)),-6,0)))   # (JMG, 27-11) frontales y traseros solo se bajan
+            lv=lv+[I[c]+aj[SLIDER_CH[c]] for c in obj if ok(c)];aj["lfe"]=int(cl(math.floor(min(lv)-2.0-I["LFE"]),-6,3)) if ok("LFE") else aj["lfe"]   # (JMG, 27-11) el subwoofer, siempre un poco por debajo de los demás
             aj["fc"]=0
-            return aj,V_("Equilibrio de cine (el central no se toca; frontales y traseros solo se bajan): ","Cinema balance (the center is not touched; fronts and surrounds are only lowered): ")+" · ".join(f"{k.upper()} {v:+d}" for k,v in aj.items() if k!="fc")
+            return aj,V_("Equilibrio de cine (el central no se toca; frontales y traseros solo se bajan; el subwoofer, un poco por debajo de los demás): ","Cinema balance (the center is not touched; fronts and surrounds are only lowered; the subwoofer, a little below the others): ")+" · ".join(f"{k.upper()} {v:+d}" for k,v in aj.items() if k!="fc" and (v or ok({"fl":"FL","fr":"FR","bl":"BL","br":"BR","lfe":"LFE"}.get(k,""))) and k!="fc")
         if ef=="suav":
             a=[B[f] for f in (4000,8000) if f in B];b=[B[f] for f in (500,1000,2000) if f in B]
             if not a or not b:return None,V_("no se ha podido medir el tono.","could not measure the tone.")
@@ -4714,7 +5467,7 @@ class VideoEncoderGUI:
             if not all(f in B for f in (125,1000,4000,8000)):return None,V_("no se ha podido medir el tono.","could not measure the tone.")
             dg=cl(0.5*(-2.0-(B[125]-B[1000])),-3.0,3.0)
             da=0.0 if t["ef"].get("suav") else cl(0.5*(-9.0-(med([B[4000],B[8000]])-B[1000])),-2.0,3.0)
-            aj={"eq_bass":int(round(dg)),"eq_mids":0,"eq_treble":int(round(da))}
+            aj={"eq_bass":int(round(dg*1.5)),"eq_mids":0,"eq_treble":int(round(da*1.5))}   # (JMG, 20-11) de -15 a +15
             return aj,V_("graves ","bass ")+f"{aj['eq_bass']:+d} · "+V_("medios ","mids ")+"0 · "+V_("agudos ","treble ")+f"{aj['eq_treble']:+d}"+(V_("\n(con Suavizado no se devuelven los agudos que quita)","\n(with Smoothing the treble it removes is not given back)") if t["ef"].get("suav") else "")
         if ef=="pres":   # las mismas cuentas que el «Auto» de Presencia de Jmg AudioProcesador
             fr=[I[c] for c in ("FL","FR") if ok(c)];tr=[I[c] for c in ("BL","BR","SL","SR") if ok(c)];fc=I["FC"] if ok("FC") else None
@@ -4722,9 +5475,9 @@ class VideoEncoderGUI:
             Bc=m.get("bc") or {};aj={}
             band=lambda D,fs:(med([D[f] for f in fs if f in D]) if any(f in D for f in fs) else None)
             # (JMG, 27-11) el central es la referencia: la voz no se sube; si el central va bajo frente a los frontales, se bajan los demás
-            baja=max(0.0,min(6.0,3.0-(fc-med(fr)))) if (fc is not None and fr) else 0.0
+            baja=max(0.0,min(6.0,1.5-(fc-med(fr)))) if (fc is not None and fr) else 0.0   # (26-11) con el equilibrio nuevo del «Auto» del volumen
             if fc is not None and fr:aj["voz"]=0
-            if fr:aj["amb"]=_eff_inv(cl((cl((med(fr)-med(tr)-4.0)*0.25,-1.0,1.5) if tr else 0.0)-0.6*baja,-6.0,1.5),7,14)
+            if fr:aj["amb"]=_eff_inv(cl((cl((med(fr)-med(tr)-1.5)*0.25,-1.0,1.5) if tr else 0.0)-0.6*baja,-6.0,1.5),7,14)
             a_=band(B,(4000,8000));b_=band(Bc,(4000,8000))
             if fr:aj["efc"]=_eff_inv(cl((cl((-6.0-(a_-b_))*0.2,-1.0,1.5) if (a_ is not None and b_ is not None) else 0.0)-0.6*baja,-6.0,1.5),7,14)
             if ok("LFE") and fc is not None:aj["sub"]=_eff_inv(cl(-6.0-(I["LFE"]-fc),-6.0,6.0),9,20)
@@ -4804,28 +5557,109 @@ class VideoEncoderGUI:
     def _gp(self):
         j=self._job()
         if not j:return
-        f=filedialog.asksaveasfilename(title=T("guardar_p"),initialdir=os.path.join(_data_dir(),"presets"),defaultextension=".json",filetypes=[("Preset","*.json")])
+        f=filedialog.asksaveasfilename(title=T("guardar_p"),initialdir=_presets_suite(os.path.join(_data_dir(),"presets")),defaultextension=".json",filetypes=[("Preset","*.json")])
         if not f:return
         self._guardar_trabajo()
         try:
             os.makedirs(os.path.dirname(f),exist_ok=True)
-            with open(f,"w",encoding="utf-8") as fh:json.dump({"jve":1,"v":j["v"],"salida":self._salida_cfg()},fh,indent=2,ensure_ascii=False)
+            _json_seguro(f,self._preset_comun(j),indent=2,ensure_ascii=False)   # (JMG, 25-11) todo; (26-11) común con Jmg AudioProcesador
             self._toast(T("info_tit"),self._vt("Preset guardado.","Preset saved."),seg=3)
         except Exception as e:self._toast(T("error_tit"),str(e),tipo="error")
     def _mp(self):
         j=self._job()
         if not j:return
-        try:os.makedirs(os.path.join(_data_dir(),"presets"),exist_ok=True)
+        try:os.makedirs(_presets_suite(os.path.join(_data_dir(),"presets")),exist_ok=True)
         except OSError:pass
-        f=filedialog.askopenfilename(title=T("cargar_p"),initialdir=os.path.join(_data_dir(),"presets"),filetypes=[("Preset","*.json")])
+        f=filedialog.askopenfilename(title=T("cargar_p"),initialdir=_presets_suite(os.path.join(_data_dir(),"presets")),filetypes=[("Preset","*.json")])
         if not f:return
         try:
             with open(f,encoding="utf-8") as fh:d=json.load(fh)
-            j["v"].update({k:v for k,v in d.get("v",{}).items() if k in j["v"]})
+            if "ap" in d and "ve" not in d:   # (JMG, 26-11) uno de Jmg AudioProcesador: su audio, en la pista elegida
+                self._preset_de_ap(j,d);self._pintar_trabajo();self._refrescar_estado();return
+            if not ("jve" in d or "ve" in d):
+                self._toast(T("info_tit"),self._vt("Ese preset es de una versión anterior de Jmg AudioProcesador: guárdalo otra vez allí para usarlo aquí.","That preset is from an older Jmg AudioProcesador: save it again there to use it here."),seg=6);return
+            d=d.get("ve") or d
+            self._preset_poner(j,d,self.actual)   # (JMG, 25-11) todo: vídeo, audio, subtítulos y portada
             for k,var in (("cont",self.var_cont),("dest_modo",self.var_dest_modo),("dest",self.var_dest),("sufijo",self.var_sufijo),("dup",self.var_dup),("caps",self.var_caps),("meta",self.var_meta),("adj",self.var_adj),("abrir",self.var_abrir)):
                 if k in d.get("salida",{}):var.set(d["salida"][k])
-            self._pintar_trabajo()
+            self._pintar_trabajo();self._pintar_portada();self._refrescar_estado()
         except Exception as e:self._toast(T("error_tit"),str(e),tipo="error")
+    _PR_A_FUERA=("idx","ext","lang","tit","codec_in","perfil","nch","lay","bits_in","start","orig","kbps_in","delay","tramos","fps_de","fps_a","_src")
+    _PR_S_FUERA=("idx","ext","lang","tit","fmt","delay","tramos","fps_de","fps_a")
+    def _preset_de(self,j):
+        """(JMG, 25-11) el preset guarda todo: vídeo, audio (cada pista, con su códec y sus efectos), subtítulos, portada y salida; no lo que
+        es de cada película (el recorte por tramos, el de las bandas negras, los delays, la sincronización por tramos y el nombre)"""
+        import copy
+        v={k:x for k,x in j["v"].items() if k!="crop"}
+        def lista(L,fuera):   # (JMG, 25-11) en su orden; «_n» = cuál del original es (1.ª, 2.ª... de su tipo)
+            ords=sorted(t["idx"] for t in L if not t.get("ext"))
+            return [dict({k:copy.deepcopy(x) for k,x in t.items() if k not in fuera},_n=ords.index(t["idx"])) for t in L if not t.get("ext")]
+        a=lista(j["a"],self._PR_A_FUERA);s=lista(j["s"],self._PR_S_FUERA)
+        return {"jve":2,"v":v,"a":a,"s":s,"portada":self._preset_portada(j),"salida":self._salida_cfg()}
+    def _preset_portada(self,j):
+        """la portada del preset: «sin portada», «la del vídeo» o una imagen elegida a mano; el cover.jpg de su carpeta o un póster bajado
+        son de esa película: en el preset, «la del vídeo»"""
+        p=j.get("portada")
+        if not p:return p
+        try:
+            n_=lambda x:os.path.normcase(os.path.abspath(x))
+            pj=_portada_junto(self.actual)
+            if (pj and n_(p)==n_(pj)) or n_(p).startswith(n_(tempfile.gettempdir())):return None
+        except Exception:pass
+        return p
+    def _preset_poner(self,j,d,ruta):
+        """(JMG, 25-11) pone un preset en el trabajo: las pistas del vídeo, por orden (las añadidas de fuera no se tocan)"""
+        import copy
+        j["v"].update({k:x for k,x in (d.get("v") or {}).items() if k in j["v"] and k!="crop"})
+        for clave,fuera in (("a",self._PR_A_FUERA),("s",self._PR_S_FUERA)):
+            mias=[t for t in j[clave] if not t.get("ext")];ords=sorted(t["idx"] for t in mias);por_n={ords.index(t["idx"]):t for t in mias}
+            orden=[]
+            for q,p in enumerate(p_ for p_ in (d.get(clave) or []) if isinstance(p_,dict)):
+                t=por_n.get(p.get("_n",q))
+                if t is None or any(t is o for o in orden):continue
+                t.update({k:copy.deepcopy(x) for k,x in p.items() if k not in fuera and k!="_n"});orden.append(t)
+            if orden:   # (JMG, 25-11) el orden del preset; las que no venían, detrás; las añadidas de fuera, al final
+                j[clave][:]=orden+[t for t in mias if not any(t is o for o in orden)]+[t for t in j[clave] if t.get("ext")]
+        for t in j["a"]:   # lo que no vale para esta pista, a lo suyo
+            if t.get("nucleo") and not self._nucleo_de(t):t["nucleo"]=False
+            try:
+                vals=[str(x) for x in _akbps_lista(t["cod"],t["nch"])]
+                if vals:
+                    vale=lambda k:str(k) in vals or (t["cod"]=="eac3" and _eac3_ok(k,t["nch"]))
+                    if not t["kbps"] or not vale(t["kbps"]):t["kbps"]=(t.get("bits_in",24) if t["cod"] in ABITS else _akbps_def(t["cod"],t["nch"]))
+                    if not vale(t["kbps"]):t["kbps"]=int(vals[-1])
+            except Exception:pass
+        for clave,k in (("a","def"),("s","def"),("s","burn")):   # uno solo «Por defecto» / «en la imagen»
+            if any(t.get(k) for t in j[clave] if not t.get("ext")):
+                for t in j[clave]:
+                    if t.get("ext"):t[k]=False
+        if "portada" in d:
+            p=d["portada"]
+            if p is None:   # la del vídeo (o el cover.jpg de su carpeta), como al agregarlo
+                try:j["portada"]=None if _portadas(self.info[ruta]) else _portada_junto(ruta)
+                except Exception:j["portada"]=None
+            elif p=="" or (isinstance(p,str) and os.path.isfile(p)):j["portada"]=p
+    def _preset_comun(self,j):
+        """(JMG, 26-11) preset común con Jmg AudioProcesador: lo de este programa («ve») y el audio que entienden los dos («comun», de la
+        pista elegida o la primera)"""
+        d={"jmg_preset":1,"de":"ve","ve":self._preset_de(j)}
+        try:
+            i=self._a_i if (self._a_i is not None and self._a_i<len(j["a"])) else 0
+            if j["a"]:
+                c=self._traspaso_comun(j["a"][i])
+                for k in ("delay","fps_de","fps_a","fps_met"):c.pop(k,None)
+                d["comun"]=c
+        except Exception:pass
+        return d
+    def _preset_de_ap(self,j,d):
+        """(JMG, 26-11) preset de Jmg AudioProcesador: su audio (lo que entienden los dos) en la pista elegida (o la primera), sin tocar
+        su sincronía"""
+        if not j["a"]:return
+        c=dict(d.get("comun") or {})
+        for k in ("delay","fps_de","fps_a","fps_met"):c.pop(k,None)
+        i=self._a_i if (self._a_i is not None and self._a_i<len(j["a"])) else 0
+        t=j["a"][i];keep=(t.get("delay",0),t.get("fps_de",""),t.get("fps_a",""),t.get("fps_met","tono"))
+        self._traspaso_a_pista(t,c);t["delay"],t["fps_de"],t["fps_a"],t["fps_met"]=keep
     def _salida_cfg(self):
         return {"cont":self.var_cont.get(),"dest_modo":self.var_dest_modo.get(),"dest":self.var_dest.get(),"sufijo":self.var_sufijo.get(),"dup":self.var_dup.get(),
                 "caps":bool(self.var_caps.get()),"meta":bool(self.var_meta.get()),"adj":bool(self.var_adj.get()),"abrir":bool(self.var_abrir.get()),"bandeja":bool(self.var_bandeja.get()),"aften":dict(getattr(self,"_aften",AFTEN_DEF))}
@@ -4837,7 +5671,7 @@ class VideoEncoderGUI:
                 if y>=120 and not self._tab_vis():d["panel_alto4"]=y   # en Visualizacion el panel de arriba esta recogido
             except Exception:pass
             d["oir_sal"]=self.var_oir_sal.get()
-            with open(os.path.join(_data_dir(),"config.json"),"w",encoding="utf-8") as f:json.dump(d,f,indent=2,ensure_ascii=False)
+            _json_seguro(os.path.join(_data_dir(),"config.json"),d,indent=2,ensure_ascii=False)
             self._cfg=d
         except Exception as e:self._log(f"[CFG] {e}")
     def _copiar_log(self):
@@ -4849,6 +5683,10 @@ class VideoEncoderGUI:
             self._cancel()
             self.root.after(1500,lambda:self._on_close(forzar=True));return
         self._oir_parar();self._save_cfg();self._iso_soltar_todo()
+        try:   # (25-11) que nada siga escribiendo en la carpeta temporal (ondas, previa)
+            self._onda_cancelar();self._vplay_parar();p_=getattr(self,"_onda_p",None)
+            if p_ is not None and p_.poll() is None:p_.kill()
+        except Exception:pass
         shutil.rmtree(self._tmp,ignore_errors=True)
         try:self.root.destroy()
         except Exception:pass
@@ -4922,6 +5760,10 @@ class VideoEncoderGUI:
         w,h=self._prev_tam(vs)
         fit=f"scale=iw*sar:ih,scale=w={w}:h={h}:force_original_aspect_ratio=decrease"
         self._prev_de=ruta;self._st(self._vt("Sacando el fotograma...","Grabbing the frame..."))
+        penc=None   # (JMG, 25-11) con «Con la codificación»: los filtros y el códec del trabajo
+        if getattr(self,"var_prev_cod",None) is not None and self.var_prev_cod.get() and j["v"]["codec"]!="copy":
+            try:penc=(self._vfiltros(ruta,j)+self._vk_subir(ruta,j),self._venc(ruta,j));self._st(self._vt("Codificando un trozo con los ajustes...","Encoding a short piece with the settings..."))
+            except Exception as e:self._log(f"[VIS] {e}")
         def hilo():
             out=[]
             for chain in ([fit],vf+[fit]):
@@ -4930,8 +5772,26 @@ class VideoEncoderGUI:
                     out.append(base64.b64encode(r.stdout).decode("ascii") if r.returncode==0 and r.stdout else None)
                     if r.returncode!=0:self._ls("[VIS] "+(r.stderr or b"").decode("utf-8","ignore")[-300:])
                 except Exception as e:out.append(None);self._ls(f"[VIS] {e}")
+            if penc:out[1]=self._prev_codificado(ent,vs,dvd,t,fit,penc)
             self._ui(self._preview_fin,ruta,out)
         threading.Thread(target=hilo,daemon=True).start()
+    def _prev_codificado(self,ent,vs,dvd,t,fit,penc):
+        """(JMG, 25-11) codifica 1,5 s alrededor del punto con el códec y la calidad del trabajo y devuelve ese fotograma (PNG en base64)"""
+        fd,tmpv=tempfile.mkstemp(suffix=".mkv",prefix="jmg_prev_");os.close(fd);t0=max(0.0,t-1.0)
+        try:
+            c=[FFMPEG,"-hide_banner","-v","error","-y"]+dvd+["-ss",f"{t0:.3f}","-i",ent,"-map",f"0:{vs['index']}","-t","1.5"]
+            c+=(["-filter:v:0",",".join(penc[0])] if penc[0] else [])+list(penc[1])+["-an","-sn","-dn","-f","matroska",tmpv]
+            if _VK.get("dev") is not None and any(isinstance(x,str) and x.endswith("_vulkan") for x in c):
+                c=[c[0],"-init_hw_device",f"vulkan=vk:{_VK['dev']}","-filter_hw_device","vk"]+c[1:]
+            r=subprocess.run(c,capture_output=True,timeout=300,creationflags=CNW)
+            if r.returncode!=0:self._ls("[VIS] "+(r.stderr or b"").decode("utf-8","ignore")[-300:]);return None
+            r=subprocess.run([FFMPEG,"-hide_banner","-v","error","-ss",f"{t-t0:.3f}","-i",tmpv,"-frames:v","1","-vf",fit,"-f","image2pipe","-c:v","png","-"],
+                             capture_output=True,timeout=60,creationflags=CNW)
+            return base64.b64encode(r.stdout).decode("ascii") if r.returncode==0 and r.stdout else None
+        except Exception as e:self._ls(f"[VIS] {e}");return None
+        finally:
+            try:os.remove(tmpv)
+            except OSError:pass
     def _preview_fin(self,ruta,out):
         self._st("")
         if ruta!=self.actual:return
@@ -4940,6 +5800,79 @@ class VideoEncoderGUI:
                 img=tk.PhotoImage(data=d) if d else None
                 setattr(self,"_img%d"%i,img);getattr(self,"lbl_img%d"%i).configure(image=img or "")
             except Exception as e:self._log(f"[VIS] {e}")
+    def _prev_grande(self,_e=None):
+        """(JMG, 25-11) el antes y el después a tamaño real (1:1), uno al lado del otro: arrastrar = mover los dos a la vez; rueda = zoom x1-x4"""
+        j=self._job()
+        if not j or not self.actual:return
+        V_=self._vt;ruta=self.actual;inf=self.info[ruta];vs=_vstream(inf);t=float(self.var_pos.get() or 0)
+        ent=inf.get("entrada",ruta);dvd=["-analyzeduration","100M","-probesize","100M"] if inf.get("dvd") else []
+        vf=self._vfiltros(ruta,j,vista=True);fit="scale=iw*sar:ih";penc=None
+        if getattr(self,"var_prev_cod",None) is not None and self.var_prev_cod.get() and j["v"]["codec"]!="copy":
+            try:penc=(self._vfiltros(ruta,j)+self._vk_subir(ruta,j),self._venc(ruta,j))
+            except Exception as e:self._log(f"[VIS] {e}")
+        top=tk.Toplevel(self.root);top.title(V_("Antes y después, a tamaño real","Before and after, actual size"));top.configure(bg=CF)
+        try:top.state("zoomed")
+        except Exception:top.geometry("1400x900")
+        top.bind("<Escape>",lambda e:top.destroy())
+        cab=ttk.Frame(top);cab.pack(fill="x")
+        ttk.Label(cab,text=V_("Arrastra para moverte (los dos a la vez) · rueda del ratón = zoom (x1-x4) · Esc = cerrar",
+                              "Drag to move (both at once) · mouse wheel = zoom (x1-x4) · Esc = close")).pack(side="left",padx=8,pady=4)
+        lz=ttk.Label(cab,text="x1",font=("",10,"bold"));lz.pack(side="right",padx=10)
+        cu=ttk.Frame(top);cu.pack(fill="both",expand=True);cu.rowconfigure(1,weight=1);cvs=[]
+        for i,tt in enumerate((V_("Antes (original)","Before (original)"),
+                               V_("Después (codificado con los ajustes)","After (encoded with the settings)") if penc else V_("Después (con los ajustes de imagen)","After (with the picture settings)"))):
+            cu.columnconfigure(i,weight=1,uniform="g")
+            ttk.Label(cu,text=tt,font=("",9,"bold")).grid(row=0,column=i,sticky="w",padx=4)
+            cv=tk.Canvas(cu,bg="#000000",highlightthickness=0,cursor="fleur");cv.grid(row=1,column=i,sticky="nsew",padx=2,pady=(0,2));cvs.append(cv)
+            cv.create_text(300,200,text=V_("Sacando el fotograma...","Grabbing the frame..."),fill="#c0c0c0")
+        st={"z":1,"img":[None,None],"ver":[None,None]}
+        def centra(fx,fy):
+            for cv in cvs:
+                try:
+                    x0,x1=cv.xview();y0,y1=cv.yview()
+                    cv.xview_moveto(max(0.0,fx-(x1-x0)/2));cv.yview_moveto(max(0.0,fy-(y1-y0)/2))
+                except Exception:pass
+        def pinta(fx=0.5,fy=0.5):
+            for i,cv in enumerate(cvs):
+                cv.delete("all");im=st["img"][i]
+                if im is None:
+                    cv.create_text(max(200,cv.winfo_width()//2),max(100,cv.winfo_height()//2),text=V_("No se ha podido sacar el fotograma (mira Edit/Log).","Could not grab the frame (see Edit/Log)."),fill="#c0c0c0");continue
+                v=im.zoom(st["z"]) if st["z"]>1 else im;st["ver"][i]=v
+                cv.create_image(0,0,image=v,anchor="nw");cv.configure(scrollregion=(0,0,v.width(),v.height()))
+            lz.configure(text=f"x{st['z']}");top.update_idletasks();centra(fx,fy)
+        def pulsa(e):
+            for cv in cvs:cv.scan_mark(e.x,e.y)
+        def arrastra(e):
+            e.widget.scan_dragto(e.x,e.y,gain=1)
+            for cv in cvs:
+                if cv is not e.widget:cv.xview_moveto(e.widget.xview()[0]);cv.yview_moveto(e.widget.yview()[0])
+        def rueda(e):
+            ims=[im for im in st["img"] if im is not None]
+            if not ims:return
+            zmax=max(1,min(4,int(8000/max(im.width() for im in ims))))
+            z=max(1,min(zmax,st["z"]+(1 if e.delta>0 else -1)))
+            if z==st["z"]:return
+            x0,x1=e.widget.xview();y0,y1=e.widget.yview();st["z"]=z;pinta((x0+x1)/2,(y0+y1)/2)
+        for cv in cvs:cv.bind("<ButtonPress-1>",pulsa);cv.bind("<B1-Motion>",arrastra);cv.bind("<MouseWheel>",rueda)
+        def hilo():
+            out=[]
+            for chain in ([fit],vf+[fit]):
+                try:
+                    r=subprocess.run([FFMPEG,"-hide_banner","-v","error"]+dvd+["-ss",f"{t:.3f}","-i",ent,"-map",f"0:{vs['index']}","-frames:v","1","-vf",",".join(chain),"-f","image2pipe","-c:v","png","-"],capture_output=True,timeout=120,creationflags=CNW)
+                    out.append(base64.b64encode(r.stdout).decode("ascii") if r.returncode==0 and r.stdout else None)
+                except Exception as e:out.append(None);self._ls(f"[VIS] {e}")
+            if penc:out[1]=self._prev_codificado(ent,vs,dvd,t,fit,penc)
+            self._ui(fin,out)
+        def fin(out):
+            try:
+                if not top.winfo_exists():return
+                for i,d in enumerate(out):
+                    try:st["img"][i]=tk.PhotoImage(data=d) if d else None
+                    except Exception as e:self._log(f"[VIS] {e}")
+                pinta()
+            except Exception:pass
+        threading.Thread(target=hilo,daemon=True).start()
+        return top
     def _pintar_crop(self):
         j=self._job();V_=self._vt
         try:
@@ -4992,6 +5925,7 @@ class VideoEncoderGUI:
             self._pintar_crop();self._prev_pronto(100)
     # ---------- escuchar la pista con los ajustes ----------
     def _oir(self,proc,desde=None):
+        self._oir_proc=proc   # (JMG, 25-11) en verde el que suena
         j=self._job();V_=self._vt
         if not j or self._a_i is None:return
         self._oir_parar()
@@ -5016,11 +5950,17 @@ class VideoEncoderGUI:
         if getattr(r,"err",None):self.lbl_oir.configure(text="⚠ "+str(r.err)[:120]);self._repro=None;return
         self.root.after(1500,self._oir_vigila)
     def _oir_ajuste(self):
-        """(JMG, 16-11) en «Visual / Ondas», al mover Presencia o Gama dinámica lo que suena se para (sonaba con los ajustes de antes)"""
+        """(JMG, 27-11) en «Visual / Ondas», al tocar un efecto lo que suena se para (las ondas se rehacen solas)"""
         if getattr(self,"_repro",None) is None:return
-        self._oir_parar()
+        self._oir_parar()   # (JMG, 27-11) al tocar un efecto, lo que suena se para (lo pide JMG; _oir_re queda sin usar)
         try:self.lbl_oir.configure(text=self._vt("Parado: has cambiado un ajuste. Pulsa ▶ para oírlo con el cambio.","Stopped: you changed a setting. Press ▶ to hear it with the change."))
         except Exception:pass
+    def _oir_re(self):
+        self._oir_re_id=None
+        if getattr(self,"_repro",None) is None:return
+        if getattr(self,"_raton_abajo",False) and _boton_abajo():self._oir_re_id=self.root.after(300,self._oir_re);return
+        try:self._oir(self._oir_proc,desde=self._oir_desde+max(0.0,time.time()-self._oir_t0))
+        except Exception as e:self._log(f"[OIR] {e}")
     def _oir_parar(self):
         r=getattr(self,"_repro",None);self._repro=None
         if r:
@@ -5798,7 +6738,7 @@ class VideoEncoderGUI:
             self._log("[OK] "+sal);self._toast(T("info_tit"),V_("Vídeo combinado:\n","Combined video:\n")+sal,seg=8)
             self._addl([sal])   # (JMG, 8-11) el combinado entra en la lista de vídeos
             if self.var_abrir.get() and self.var_al_terminar.get()!="apagar":
-                try:_abrir_externo(os.path.dirname(sal))
+                try:_abrir_marcado(sal)
                 except Exception:pass
         else:
             try:
@@ -5809,7 +6749,8 @@ class VideoEncoderGUI:
     # ---------- «Opciones avanzadas»: Visualización dentro de la ventana (vídeo y audio), con «Volver» ----------
     def _av_cab(self,p,titulo):
         cab=ttk.Frame(p);cab.pack(fill="x",padx=10,pady=(8,4))
-        ttk.Button(cab,text="⬅ "+self._vt("Volver","Back"),command=self._avz_volver).pack(side="left")
+        _bv=ttk.Button(cab,text="⬅ "+self._vt("Volver","Back"),command=self._avz_volver);_bv.pack(side="left")   # (JMG, 27-11) también procesando
+        self._bp_extra=[w for w in getattr(self,"_bp_extra",[]) if w.winfo_exists()]+[_bv]
         # (JMG, 18-11) sin los ↶ ↷ pequeños: deshacen y rehacen los de abajo
         l=ttk.Label(cab,text=titulo,font=("",11,"bold"));l.pack(side="left",padx=12)
         return l
@@ -5822,9 +6763,11 @@ class VideoEncoderGUI:
         self.fr_imgs.columnconfigure(0,weight=1);self.fr_imgs.columnconfigure(1,weight=1)
         for i,t in enumerate((V_("Antes (original)","Before (original)"),V_("Después (con los ajustes de imagen)","After (with the picture settings)"))):
             c=ttk.Frame(self.fr_imgs);c.grid(row=0,column=i,sticky="n",padx=4)
-            ttk.Label(c,text=t,font=("",9,"bold")).pack(anchor="w")
+            cab_=ttk.Frame(c);cab_.pack(anchor="w")
+            ttk.Label(cab_,text=t,font=("",9,"bold")).pack(side="left")
             im=tk.Label(c,bg="#000000");im.pack()
             setattr(self,"lbl_img%d"%i,im)
+            im.configure(cursor="hand2");im.bind("<Double-1>",self._prev_grande)   # (JMG, 25-11) doble clic = en grande
         self.fr_imgs.bind("<Configure>",lambda e:self._prev_pronto(500),add="+")
         bar=ttk.Frame(f);bar.pack(fill="x",padx=10,pady=(4,0))
         self.var_pos=tk.DoubleVar(value=0.0)
@@ -5832,9 +6775,9 @@ class VideoEncoderGUI:
         self.sc_pos=ttk.Scale(bar,from_=0,to=100,variable=self.var_pos,orient="horizontal");self.sc_pos.pack(side="left",fill="x",expand=True,padx=4)
         ttk.Button(bar,text="▶",width=3,command=lambda:self._paso(1)).pack(side="left")
         self.lbl_pos=ttk.Label(bar,text="0:00:00.000",font=("Consolas",10));self.lbl_pos.pack(side="left",padx=(8,12))
-        ttk.Label(bar,text="🎬 "+V_("Reproducir:","Play:"),font=("",9,"bold")).pack(side="left")
-        ttk.Button(bar,text="▶ "+V_("Original","Original"),command=lambda:self._vplay(False)).pack(side="left",padx=(4,2))
-        ttk.Button(bar,text="▶ "+V_("Con los ajustes","With the settings"),command=lambda:self._vplay(True)).pack(side="left",padx=2)
+        ttk.Button(bar,text="🔍 "+V_("Ver en grande","View large"),command=self._prev_grande).pack(side="left",padx=(0,12))   # (JMG, 25-11)
+        _vb=ttk.Button(bar,text="▶ "+V_("Original","Original"),command=lambda:self._vplay(False));_vb.pack(side="left",padx=(4,2));self._verde_reg(_vb,lambda:self._vp_vivo(2) and getattr(self,"_vplay_proc",None) is False)
+        _vb=ttk.Button(bar,text="▶ "+V_("Con los ajustes","With the settings"),command=lambda:self._vplay(True));_vb.pack(side="left",padx=2);self._verde_reg(_vb,lambda:self._vp_vivo(2) and getattr(self,"_vplay_proc",None) is True)
         ttk.Button(bar,text="⏹",width=3,command=self._vplay_parar).pack(side="left",padx=(2,6))
         self._combo(bar,[("mc",V_("Multicanal","Multichannel")),("st",V_("Estéreo","Stereo"))],self.var_oir_sal,12).pack(side="left")
         self.sc_pos.bind("<ButtonRelease-1>",lambda e:self._prev_pronto(50),add="+")
@@ -5842,8 +6785,8 @@ class VideoEncoderGUI:
         for k,s in (("<Left>",-1),("<Right>",1),("<Down>",-1),("<Up>",1)):self.sc_pos.bind(k,lambda e,s=s:(self._paso(s),"break")[1])
         for k,s in (("<Shift-Left>",-1),("<Shift-Right>",1)):self.sc_pos.bind(k,lambda e,s=s:(self._paso(s,seg=True),"break")[1])
         self._tra(self.var_pos,lambda *a:self.lbl_pos.configure(text=_hms(self.var_pos.get())),self.sc_pos)
-        ttk.Label(f,text=V_("Clic en la barra: las flechas ← → la mueven fotograma a fotograma (con Mayúsculas, de segundo en segundo). «Reproducir» abre una ventana de vídeo con sonido desde ese punto (con la primera pista de audio incluida); se cierra con ⏹ o con su X.",
-                            "Click the bar: the ← → arrows move it frame by frame (with Shift, second by second). «Play» opens a video window with sound from that point (with the first included audio track); close it with ⏹ or its X."),
+        ttk.Label(f,text=V_("Clic en la barra: las flechas ← → la mueven fotograma a fotograma (con Mayúsculas, de segundo en segundo). «▶ Original» o «▶ Con los ajustes» abre una ventana de vídeo con sonido desde ese punto (con la primera pista de audio incluida); se cierra con ⏹ o con su X.",
+                            "Click the bar: the ← → arrows move it frame by frame (with Shift, second by second). «▶ Original» or «▶ With the settings» opens a video window with sound from that point (with the first included audio track); close it with ⏹ or its X."),
                   foreground=CA,font=("",8,"italic"),wraplength=1200,justify="left").pack(anchor="w",padx=10)
         ttk.Separator(f,orient="horizontal").pack(fill="x",padx=10,pady=4)
         ops=ttk.Frame(f);ops.pack(fill="x",padx=10,pady=(0,6))
@@ -5883,28 +6826,30 @@ class VideoEncoderGUI:
         self.lbl_ava=self._av_cab(f,V_("Audio · Visual / Ondas","Audio · Visual / Waves"))
         self.cv_onda=tk.Canvas(f,bg="#1e1e1e",highlightthickness=1,highlightbackground=CSB,cursor="hand2")
         self.cv_onda.pack(fill="both",expand=True,padx=10)
-        self.sb_onda=ttk.Scrollbar(f,orient="horizontal",command=self._onda_scroll);self.sb_onda.pack(fill="x",padx=10)
+        _fsb=ttk.Frame(f,height=16);_fsb.pack(fill="x",padx=10);_fsb.pack_propagate(False)   # (JMG, 25-11) su sitio, siempre: al hacer zoom no se mueven las letras
+        self.sb_onda=ttk.Scrollbar(_fsb,orient="horizontal",command=self._onda_scroll);self.sb_onda.pack(fill="x")
         self.cv_onda.bind("<Configure>",lambda e:self._onda_pintar(),add="+")
         self.cv_onda.bind("<Button-1>",self._onda_clic)
-        self.cv_onda.bind("<MouseWheel>",lambda e:self._onda_scroll("scroll",-1 if e.delta>0 else 1,"units"))
+        self.cv_onda.bind("<MouseWheel>",self._onda_rueda)   # (JMG, 19-11 noche) la rueda: el zoom marcado; Mayús + rueda: a los lados
         bar=ttk.Frame(f);bar.pack(fill="x",padx=10,pady=(4,2))
         ttk.Label(bar,text=V_("Tramo:","Segment:")).pack(side="left")
         self.var_onda_tr=tk.StringVar(value="300")
         self._combo(bar,[("300",V_("Primeros 5 min","First 5 min")),("600",V_("Primeros 10 min","First 10 min")),("1800",V_("Primeros 30 min","First 30 min")),("0",V_("Todo el archivo","The whole file"))],self.var_onda_tr,16).pack(side="left",padx=(2,6))
-        ttk.Button(bar,text="🔄 "+V_("Generar visualización","Generate visualization"),command=self._onda_generar).pack(side="left",padx=(0,8))
-        ttk.Label(bar,text="Zoom:").pack(side="left")
-        self.var_onda_zoom=tk.StringVar(value="2")
+        _vb=ttk.Button(bar,text="🔄 "+V_("Generar visualización","Generate visualization"),command=self._onda_generar);_vb.pack(side="left",padx=(0,8));self._verde_reg(_vb,lambda:getattr(self,"_onda_calc",False))
+        self.var_onda_ztipo=tk.StringVar(value="v")   # el zoom que mueve la rueda: v = ↕ altura (Zoom), h = ↔ tiempo (Detalle)
+        ttk.Radiobutton(bar,text="↕ Zoom:",variable=self.var_onda_ztipo,value="v").pack(side="left")
+        self.var_onda_zoom=tk.StringVar(value="1")   # (JMG, 25-11) x1 de entrada
         self._combo(bar,[("1","x1"),("2","x2"),("4","x4"),("8","x8"),("16","x16")],self.var_onda_zoom,5).pack(side="left",padx=(2,8))
-        self._tra(self.var_onda_zoom,lambda *a:self._onda_pintar(),bar)
-        ttk.Label(bar,text=V_("Detalle:","Detail:")).pack(side="left")
+        self._tra(self.var_onda_zoom,lambda *a:(self.var_onda_ztipo.set("v"),self._onda_pintar()),bar)
+        ttk.Radiobutton(bar,text="↔ "+V_("Detalle:","Detail:"),variable=self.var_onda_ztipo,value="h").pack(side="left")
         self.var_onda_det=tk.StringVar(value="1")
-        self._combo(bar,[("1","x1"),("2","x2"),("4","x4"),("8","x8")],self.var_onda_det,5).pack(side="left",padx=(2,12))
-        self._tra(self.var_onda_det,lambda *a:self._onda_detalle(),bar)
+        self._combo(bar,[("1","x1"),("2","x2"),("4","x4"),("8","x8"),("16","x16"),("32","x32"),("64","x64"),("128","x128"),("256","x256"),("512","x512"),("1024","x1024")],self.var_onda_det,5).pack(side="left",padx=(2,12))
+        self._tra(self.var_onda_det,lambda *a:(self.var_onda_ztipo.set("h"),self._onda_detalle()),bar)
         self._tra(self.var_onda_tr,lambda *a:self._onda_pronto(300),bar)
         ttk.Label(bar,text="🔊",font=("",10)).pack(side="left")
-        ttk.Button(bar,text="▶ "+V_("Antes","Before"),command=lambda:self._oir(False,desde=self._onda_pos)).pack(side="left",padx=(4,2))
-        ttk.Button(bar,text="▶ "+V_("Después","After"),command=lambda:self._oir(True,desde=self._onda_pos)).pack(side="left",padx=2)
-        ttk.Button(bar,text="⏸",width=3,command=self._onda_pausa).pack(side="left",padx=(2,2))
+        _vb=ttk.Button(bar,text="▶ "+V_("Antes","Before"),command=lambda:self._oir(False,desde=self._onda_pos));_vb.pack(side="left",padx=(4,2));self._verde_reg(_vb,lambda:getattr(self,"_repro",None) is not None and getattr(self,"_oir_proc",None) is False)
+        _vb=ttk.Button(bar,text="▶ "+V_("Después","After"),command=lambda:self._oir(True,desde=self._onda_pos));_vb.pack(side="left",padx=2);self._verde_reg(_vb,lambda:getattr(self,"_repro",None) is not None and getattr(self,"_oir_proc",None) is True)
+        _vb=ttk.Button(bar,text="⏸",width=3,command=self._onda_pausa);_vb.pack(side="left",padx=(2,2));self._verde_reg(_vb,lambda:getattr(self,"_onda_pausado",False) and getattr(self,"_repro",None) is None)   # (JMG, 26-11) en pausa, en verde
         ttk.Button(bar,text="⏹",width=3,command=self._onda_parar).pack(side="left",padx=(2,6))
         self._combo(bar,[("mc",V_("Multicanal (5.1 / 7.1)","Multichannel (5.1 / 7.1)")),("st",V_("Estéreo","Stereo"))],self.var_oir_sal,20).pack(side="left")
         self.lbl_onda=ttk.Label(bar,text="",foreground=CID,font=("",9,"italic"));self.lbl_onda.pack(side="left",padx=10)
@@ -5917,24 +6862,39 @@ class VideoEncoderGUI:
         P_=ttk.Frame(ops);P_.grid(row=0,column=0,sticky="nsew")   # (JMG, 18-11) las tres secciones simétricas
         self._sec(P_,0,V_("Presencia","Presence"),"pres")
         for i,(k,t) in enumerate((("voz",V_("Voz (solo central)","Voice (center only)")),("amb",V_("Música / ambiente (no central)","Music / ambience (not center)")),("efc",V_("Efectos (no central)","Effects (not center)")),("sub","Subwoofer")),start=1):
-            self._sl(P_,t,getattr(self,"var_"+k),-10,10,i)
+            self._sl(P_,t,getattr(self,"var_"+k),-15,15,i)   # (JMG, 19-11)
         self._nota(P_,5,V_("Realza o baja las voces, el ambiente, los efectos y el subwoofer (la Presencia de Jmg AudioProcesador). «Auto» la coloca según la película; pulsado otra vez sin tocar nada, vuelve a 0.",
                            "Raises or lowers the voices, the ambience, the effects and the subwoofer (the Presence of Jmg AudioProcesador). «Auto» sets it for the movie; pressed again without touching anything, it goes back to 0."),wrap=300)   # (JMG, 28-11) más estrecha: caben las tres columnas
         for k in ("voz","amb","efc","sub"):self._tra(getattr(self,"var_"+k),lambda *a:(self._cambio_a(),self._onda_pronto(1200),self._oir_ajuste()),f)
         # Gama dinamica / Compresion, a la derecha de Presencia (las mismas de la pestaña Audio: se mueven en los dos sitios)
         ttk.Separator(ops,orient="vertical").grid(row=0,column=1,sticky="ns",padx=10)
         G_=ttk.Frame(ops);G_.grid(row=0,column=2,sticky="nsew")
-        self._sec(G_,0,V_("Gama dinámica / Compresión","Dynamic range / Compression"))
-        fg_,bg_=self._caja_auto(G_,lambda:self._auto("gama"));fg_.grid(row=0,column=2,padx=(1,5),pady=(10,2));self._auto_bts["gama"]=bg_
-        self._sl(G_,V_("Delanteros y traseros","Fronts and surrounds"),self.var_gama,-10,10,1)
-        self._sl(G_,V_("Central","Center"),self.var_gama_c,-10,10,2)
-        self._nota(G_,3,V_("En el centro, apagado. A la izquierda, gama dinámica: más contraste. A la derecha, compresión: suben los sonidos flojos (de noche). Con ella no hace falta subir tanto la Presencia.",
-                           "In the middle, off. To the left, dynamic range: more contrast. To the right, compression: quiet sounds go up (at night). With it there is no need to raise Presence so much."),wrap=300)
-        for k in ("gama","gama_c"):self._tra(getattr(self,"var_"+k),lambda *a:(self._onda_pronto(1200),self._oir_ajuste()),f)
+        self._rueda_pd(self._sec(G_,0,V_("Procesado dinámico","Dynamic processing"),"din"))   # (JMG, 22-11) el de Jmg AudioProcesador (sin Azid), en lugar de la Gama dinámica / Compresión
+        fm_=ttk.Frame(G_);fm_.grid(row=1,column=0,columnspan=3,sticky="w",padx=5,pady=3)
+        ttk.Label(fm_,text=V_("Modo:","Mode:")).pack(side="left")
+        if not hasattr(self,"var_din_ui"):self.var_din_ui=tk.IntVar(value=2)   # (JMG, 26-11) sin el 0: por defecto el 2 (a 0 lo dejan los deslizadores)
+        cm_=ttk.Combobox(fm_,textvariable=self.var_din_ui,values=[1,2,3],width=4,state="readonly");cm_.pack(side="left",padx=(6,14))
+        self._tra(self.var_din_ui,lambda *a:self._din_sync("ui"),f);self._tra(self.var_din_modo,lambda *a:self._din_sync("modo"),f)
+        for _v in (self.var_din_ft,self.var_din_fc,self.var_din_lfe):self._tra(_v,lambda *a:self._din_sync("sl"),f)
+        try:
+            if int(self.var_din_modo.get() or 0):self.var_din_ui.set(int(self.var_din_modo.get()))
+        except Exception:pass
+        self._ayuda_flotante(cm_,V_("1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas","1 Lift: raises quiet sounds · 2 Impact: loud sounds stand out · 3 both"))
+        ttk.Label(fm_,text=V_("Techo limitador:","Limiter ceiling:")).pack(side="left")
+        ct_=self._combo(fm_,[(0,V_("Sin límite","No limit")),(1,"-2 dBFS"),(2,"-1 dBFS"),(3,"-0,5 dBFS")],self.var_din_techo,10);ct_.pack(side="left",padx=(6,0))
+        self._ayuda_flotante(ct_,V_("Ningún pico pasará de este nivel. «Sin límite» puede saturar si subes mucho el efecto.","No peak will go above this level. «No limit» can clip if you raise the effect a lot."))
+        self._sl(G_,V_("Front./traseros 0-15:","Front/rear 0-15:"),self.var_din_ft,0,15,2)
+        self._sl(G_,V_("Central 0-15:","Center 0-15:"),self.var_din_fc,0,15,3)
+        self._sl(G_,V_("Subwoofer 0-15:","Subwoofer 0-15:"),self.var_din_lfe,0,15,4)
+        self._nota(G_,5,V_("Modo: 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas. Cada grupo por separado: 0 = sin efecto. El subwoofer mejor a 0 si usas Double Bass.",
+                           "Mode: 1 Lift: raises quiet sounds · 2 Impact: loud sounds stand out · 3 both. Each group separately: 0 = no effect. Keep the subwoofer at 0 if you use Double Bass."),wrap=300)
+        self.var_din_desc=tk.StringVar(value="Off\n\n\n")
+        for k in ("din_modo","din_ft","din_fc","din_lfe","din_techo"):self._tra(getattr(self,"var_"+k),lambda *a:(self._din_lbl(),self._onda_pronto(1200),self._oir_ajuste()),f)
+        self._tra(self.var_din_modo,lambda *a:self._din_8(),f);self._din_lbl()
         ttk.Separator(ops,orient="vertical").grid(row=0,column=3,sticky="ns",padx=10)   # (JMG, 27-11) a la derecha de la Gama dinámica
         S_=ttk.Frame(ops);S_.grid(row=0,column=4,sticky="nsew")
         self._sec(S_,0,V_("Separación de canales","Channel separation"),"separ")   # (JMG, 28-11) con su «Auto»
-        self._sl(S_,V_("Separación","Separation"),self.var_separ,-10,10,1)
+        self._sl(S_,V_("Separación","Separation"),self.var_separ,-15,15,1)
         self._nota(S_,2,V_("Más o menos separación entre izquierda y derecha (delanteros y traseros) y entre delante y detrás. No sube el volumen. 0 = sin cambio; a la izquierda, más junto.","More or less separation between left and right (fronts and surrounds) and between front and back. It does not raise the volume. 0 = no change; to the left, closer together."),wrap=250)
         self._tra(self.var_separ,lambda *a:(self._onda_pronto(1200),self._oir_ajuste()),f)
         for c_ in (0,2,4):ops.columnconfigure(c_,weight=1,uniform="efx")   # (JMG, 18-11) tres columnas iguales, todo el ancho
@@ -5978,7 +6938,98 @@ class VideoEncoderGUI:
         except Exception:W=0
         if getattr(self,"_onda",None) is not None and getattr(self,"_onda_clave",None) is not None and self._onda_clave==self._onda_clave_de() and W<=getattr(self,"_onda_W",0)*1.25:
             T_=self._onda[1];self.lbl_onda.configure(text=self._vt(f"Tramo de {_hms(T_).split('.')[0]}",f"Segment of {_hms(T_).split('.')[0]}"));self._onda_pintar()   # (árbitro) sin «Calculando...» colgado
-        else:self._onda_generar()
+        elif (self.actual,self._a_i) not in self.__dict__.setdefault("_onda_hechas",set()) and not getattr(self,"_onda_calc",False):self._onda_generar()   # (JMG, 27-11) la primera vez con esa pista, se generan solas
+        else:   # (JMG, 25-11) después, solo con «🔄 Generar visualización»
+            if self._onda:T_=self._onda[1];self.lbl_onda.configure(text=self._vt(f"Tramo de {_hms(T_).split('.')[0]}",f"Segment of {_hms(T_).split('.')[0]}"));self._onda_pintar()
+            self._onda_aviso()
+    def _onda_aviso(self):
+        """(JMG, 25-11) las ondas ya no se rehacen solas: si lo que hay no corresponde a los ajustes de ahora, se dice"""
+        try:
+            if getattr(self,"_onda_calc",False):return
+            V_=self._vt
+            if not self._onda:
+                self._onda_pintar();self.lbl_onda.configure(text=V_("Pulsa «🔄 Generar visualización»","Press «🔄 Generate visualization»"));return
+            if getattr(self,"_onda_clave",None)!=self._onda_clave_de():
+                self.lbl_onda.configure(text=V_("Has cambiado algo: pulsa «🔄 Generar visualización» para verlo","You changed something: press «🔄 Generate visualization» to see it"))
+        except Exception:pass
+    def _onda_dd_de(self,cual,k,p0,tot,T_,ancho):
+        """(JMG, 25-11) la onda con todas sus muestras de lo que se ve (si está leída y lo cubre): mins, maxs, primera columna y paso"""
+        dd=getattr(self,"_onda_dd",None)
+        try:
+            if not dd or dd[3]!=getattr(self,"_onda_n",0) or not dd[2][cual] or k>=len(dd[2][cual]) or not dd[2][cual][k]:return None
+            a,b=dd[0],dd[1];v0=p0/tot*T_;v1=min(T_,(p0+ancho)/tot*T_)
+            if a>v0+1e-6 or b<v1-1e-6 or b-a<=0:return None
+            mins,maxs=dd[2][cual][k][0],dd[2][cual][k][1];m2=len(maxs)
+            return mins,maxs,p0-a*tot/T_,T_*m2/(tot*(b-a))
+        except Exception:return None
+    def _onda_dfs_nuevos(self,n):
+        """(JMG, 25-11) los dos FLAC (antes, después) de este cálculo, en la carpeta temporal del programa; los del anterior se borran"""
+        try:
+            p=(os.path.join(self._tmp,f"ondas_antes_{n}.flac"),os.path.join(self._tmp,f"ondas_despues_{n}.flac"));self._onda_dfs_pend=(n,p)
+            return p
+        except Exception:return None
+    def _onda_dfs_fijar(self,n):
+        """(25-11) al terminar bien un cálculo, sus FLAC pasan a ser los del detalle; los del anterior se borran"""
+        p=getattr(self,"_onda_dfs_pend",None)
+        if not p or p[0]!=n:return
+        for f in getattr(self,"_onda_dfs",()) or ():
+            if f not in p[1]:
+                try:os.remove(f)
+                except OSError:pass
+        self._onda_dfs=p[1];self._onda_dfs_pend=None
+    def _onda_pide_dd(self):
+        if getattr(self,"_onda_dd_id",None) and getattr(self,"_repro",None) is not None:return   # sonando: que la espera no vuelva a empezar
+        try:
+            if getattr(self,"_onda_dd_id",None):self.root.after_cancel(self._onda_dd_id)
+        except Exception:pass
+        self._onda_dd_id=self.root.after(300,self._onda_carga_dd)
+    def _onda_carga_dd(self):
+        """(JMG, 25-11) con mucho «Detalle» (x64 o más), lo que se ve se lee con todas sus muestras, como en Sound Forge: el ANTES del archivo y
+        el DESPUÉS con los efectos, empezando 30 s antes para que los efectos lleguen igual que en el cálculo entero"""
+        self._onda_dd_id=None
+        try:
+            if not self._onda or getattr(self,"_onda_ddrun",False) or getattr(self,"_onda_calc",False) or getattr(self,"_avz",None)!="a":return
+            g=getattr(self,"_onda_geo",None);det=self._onda_det()
+            if not g or det<=32:return   # hasta x32 lo calculado ya trae una columna por píxel
+            izq,ancho,n_,fila,T_=g;tot=ancho*det;nn=getattr(self,"_onda_n",0)
+            if getattr(self,"_onda_ddno",None)==nn:return
+            v0=self._onda_x0*T_;vw=T_/det;v1=min(T_,v0+vw)
+            dd=getattr(self,"_onda_dd",None)
+            if dd and dd[3]==nn and dd[0]<=v0+1e-6 and dd[1]>=v1-1e-6 and dd[1]-dd[0]<=5*vw:return
+            dfs=getattr(self,"_onda_dfs",None);t=self._onda[0]   # (25-11) de las copias FLAC enteras de este cálculo: el salto es exacto
+            if not dfs or not all(os.path.exists(f) for f in dfs):self._onda_ddno=nn;return
+            if getattr(self,"_repro",None) is not None:a=max(0.0,v0-0.1*vw);b=min(T_,v1+3*vw)   # sonando, la vista avanza: más por delante
+            else:a=max(0.0,v0-vw/2);b=min(T_,v1+vw/2)
+            N=max(2000,int(3*ancho*(b-a)/vw));K=max(1,int(48000*(b-a)/N))
+            rs=[]   # lo general reparte sus bloques en T_: el detalle, en la misma escala
+            for x in self._onda[2]:
+                try:r_=len(x[0][1])*getattr(self,"_onda_K",1)/48000.0/T_
+                except Exception:r_=1.0
+                rs.append(r_ if 0.9<r_<1.1 else 1.0)
+            env=(f"aresample=48000,aformat=sample_fmts=fltp,asetnsamples=n={K}:p=0,astats=metadata=1:reset=1:measure_perchannel=Min_level+Max_level:"
+                 "measure_overall=none,ametadata=mode=print:file=-")
+            c_a,c_d=[[FFMPEG,"-hide_banner","-nostats","-v","error","-ss",f"{a*r_:.6f}","-t",f"{(b-a)*r_:.6f}","-i",f,"-af",env,"-f","null","-"] for f,r_ in zip(dfs,rs)]
+            self._onda_ddrun=True;nch=t["nch"]
+            def hilo():
+                r=[None,None]
+                for i,c in enumerate((c_a,c_d)):
+                    if nn!=getattr(self,"_onda_n",0):break
+                    try:
+                        p=subprocess.run(c,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=CNW,timeout=180)
+                        r[i]=self._onda_env(p.stdout.decode("utf-8","ignore"),nch)
+                    except Exception as e:
+                        try:self._ls(f"[ONDAS] detalle: {e}")
+                        except Exception:pass
+                self._ui(self._onda_dd_ok,nn,a,b,r)
+            threading.Thread(target=hilo,daemon=True).start()
+        except Exception as e:
+            try:self._ls(f"[ONDAS] detalle: {e}")
+            except Exception:pass
+    def _onda_dd_ok(self,nn,a,b,r):
+        self._onda_ddrun=False
+        if nn!=getattr(self,"_onda_n",0):return
+        if not any(r):self._onda_ddno=nn;return
+        self._onda_dd=(a,b,r,nn);self._onda_pintar()
     def _onda_clave_de(self):
         """(JMG, 18-11) todo lo que cambia las ondas de la pista actual (archivo, pista, efectos, delay, framerate, tramos, tramo de las
         ondas): si es igual que la de las ondas que hay, no hace falta volver a calcularlas"""
@@ -5991,7 +7042,12 @@ class VideoEncoderGUI:
         except Exception:return None
     def _onda_cancelar(self):
         """(JMG, 18-11) «cuando salgo de visualización ondas tiene que dejar de calcularlas»: se anula el cálculo y se para su FFmpeg"""
-        self._onda_n=getattr(self,"_onda_n",0)+1
+        self._onda_n=getattr(self,"_onda_n",0)+1;self._onda_calc=False;self._onda_pausado=False
+        p_=getattr(self,"_onda_dfs_pend",None);self._onda_dfs_pend=None   # (árbitro, 26-11) los FLAC de un cálculo a medias, fuera
+        for f_ in (p_[1] if p_ else ()):
+            if f_ not in (getattr(self,"_onda_dfs",()) or ()):
+                try:os.remove(f_)
+                except OSError:pass
         try:
             if getattr(self,"_onda_id",None):self.root.after_cancel(self._onda_id)
         except Exception:pass
@@ -6002,7 +7058,7 @@ class VideoEncoderGUI:
         if not getattr(self,"procesando",False):self._set_prog(0);self._st("")   # (árbitro) sin «Calculando las ondas · 46 %» colgado (por la cola: tras lo pendiente)
     def _avz_volver(self,pintar=True):
         if not getattr(self,"_avz",None):return
-        self._vplay_parar();self._oir_parar();self._onda_cancelar()   # (no _onda_parar: ese es el ⏹)
+        (None if getattr(self,"_vcod_on",False) else self._vplay_parar());self._oir_parar();self._onda_cancelar();self._onda_pausado=False   # (no _onda_parar: ese es el ⏹; la previa de «Previsualizar» sigue)
         for w in (self._avv,self._ava):w.pack_forget()
         self._avz=None
         if getattr(self,"_avz_bloq",False):self._avz_bloq=False;self._bloquear_principal(False)
@@ -6010,6 +7066,7 @@ class VideoEncoderGUI:
         if pintar:self._pintar_trabajo()
     # ---------- reproducir el vídeo (ventana de ffplay) ----------
     def _vplay(self,proc):
+        self._vplay_proc=proc   # (JMG, 25-11) en verde el que suena
         """FFmpeg prepara la imagen (con o sin los ajustes) y la primera pista de audio incluida, y ffplay lo enseña en su ventana"""
         j=self._job();V_=self._vt
         if not j:return
@@ -6038,12 +7095,92 @@ class VideoEncoderGUI:
         except FileNotFoundError:
             self._toast(T("warn_tit"),V_("No se encuentra ffplay (tiene que estar en la carpeta «bin», junto a ffmpeg).","ffplay not found (it must be in the «bin» folder, next to ffmpeg)."),tipo="warning",seg=6)
         except Exception as e:self._toast(T("error_tit"),str(e),tipo="error")
+    def _vplay_cod(self):
+        """(JMG, 27-11) previa de la codificación en tiempo real: a la izquierda el original y a la derecha codificado con los ajustes de
+        verdad (mismo tamaño, con el recorte de las bandas en los dos), con el sonido de la primera pista; ffplay se puede maximizar
+        (doble clic = pantalla completa). Si los ajustes son lentos, va tan rápido como codifique el procesador"""
+        V_=self._vt;ruta=self.actual   # (JMG, 25-11) codificando: el vídeo que se está codificando
+        if getattr(self,"_lote_on",False) and getattr(self,"_lote_ruta",None) in self.jobs:ruta=self._lote_ruta
+        j=self.jobs.get(ruta) if ruta else None
+        if not j:return
+        self._vplay_parar();self._oir_parar();self._guardar_trabajo()
+        if j["v"]["codec"]=="copy":
+            self._toast(T("info_tit"),V_("El vídeo va tal cual (Passthrough): no se recodifica, así que se ve igual que el original.","The video is passed through: it is not re-encoded, so it looks the same as the original."),seg=6);return
+        inf=self.info[ruta];vs=_vstream(inf);pos=(float(getattr(self,"_lote_ss",0.0) or 0)+float(getattr(self,"_lote_t",0.0) or 0)) if getattr(self,"_lote_on",False) else (float(self.var_pos.get() or 0) if getattr(self,"var_pos",None) is not None else 0.0);ent=inf.get("entrada",ruta)   # (JMG, 25-11) la previa, por donde va la codificación
+        dvd=["-analyzeduration","100M","-probesize","100M"] if inf.get("dvd") else []
+        try:vf=self._vfiltros(ruta,j)+self._vk_subir(ruta,j);venc=self._venc(ruta,j)
+        except Exception as e:self._toast(T("error_tit"),str(e),tipo="error");return
+        c1=[FFMPEG,"-hide_banner","-v","error"]+dvd+["-ss",f"{pos:.3f}","-i",ent,"-map",f"0:{vs['index']}"]+(["-filter:v:0",",".join(vf)] if vf else [])+list(venc)+["-an","-sn","-dn","-f","matroska","-"]
+        if _VK.get("dev") is not None and any(isinstance(x,str) and x.endswith("_vulkan") for x in c1):
+            c1=[c1[0],"-init_hw_device",f"vulkan=vk:{_VK['dev']}","-filter_hw_device","vk"]+c1[1:]
+        try:
+            a_,b_=str(vs.get("sample_aspect_ratio","1:1")).split(":");sar=float(a_)/float(b_) if float(b_) and float(a_) else 1.0
+        except Exception:sar=1.0
+        W=int(_num(vs.get("width"),1920));H=int(_num(vs.get("height"),1080));cr=""
+        cp=j["v"].get("crop","")
+        if j["v"].get("crop_on") and cp not in ("","no",None):
+            try:cw,ch,cx,cy=[int(q) for q in cp.split(":")];W,H=cw,ch;cr=f"crop={cp},"
+            except Exception:cr=""
+        W=int(W*sar)//2*2;H=H//2*2
+        if W>1920:H=int(H*1920/W)//2*2;W=1920   # cada mitad, como mucho 1920 de ancho
+        t=next((x for x in j["a"] if x["incl"]),None)
+        g=f"[0:{vs['index']}]{cr}scale={W}:{H},setsar=1,format=yuv420p[ia];[1:v]scale={W}:{H}:flags=lanczos,setsar=1,format=yuv420p[ib];[ia][ib]hstack=inputs=2:shortest=1[v]"
+        c2=[FFMPEG,"-hide_banner","-v","error"]+dvd+["-ss",f"{pos:.3f}","-i",ent,"-f","matroska","-i","pipe:0","-filter_complex",g,"-map","[v]"]
+        if t and not t["ext"]:c2+=["-map",f"0:{t['idx']}","-c:a","pcm_s16le","-ac","2"]
+        c2+=["-c:v","rawvideo","-f","nut","-"]
+        tit="Jmg VideoEncoder · "+V_("previa: original (izquierda) · codificado con los ajustes (derecha)","preview: original (left) · encoded with the settings (right)")+" · "+self._nombre(ruta)
+        ff=[FFPLAY,"-hide_banner","-loglevel","error","-autoexit","-window_title",tit,"-x","1600","-y",str(max(300,int(1600*H/(2*W)))),"-i","-"]
+        try:
+            p1=subprocess.Popen(c1,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=CNW)
+            p2=subprocess.Popen(c2,stdin=p1.stdout,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=CNW);p1.stdout.close()
+            p3=subprocess.Popen(ff,stdin=p2.stdout,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,creationflags=CNW);p2.stdout.close()
+            self._vproc=(p1,p2,p3);self._vcod_on=True;self._vcod_ruta=ruta
+            self._log("[PREVIA] "+subprocess.list2cmdline(c1))
+            self._st(V_("Previa: original a la izquierda, codificado a la derecha (doble clic en su ventana = pantalla completa).","Preview: original on the left, encoded on the right (double-click its window = full screen)."))
+        except FileNotFoundError:
+            self._toast(T("warn_tit"),V_("No se encuentra ffplay (tiene que estar en la carpeta «bin», junto a ffmpeg).","ffplay not found (it must be in the «bin» folder, next to ffmpeg)."),tipo="warning",seg=6)
+        except Exception as e:self._toast(T("error_tit"),str(e),tipo="error")
+    def _verde_reg(self,b,activo):
+        """(JMG, 25-11) lo que está en marcha, en verde (generar, escuchar, reproducir, previsualizar): b, mientras activo() sea verdad"""
+        if not hasattr(self,"_verdes"):self._verdes=[];self.root.after(300,self._verde_tick)
+        self._verdes.append((b,activo))
+    def _verde_tick(self):
+        if getattr(self,"_verde_c",None)!=VERDE_JMG:   # (árbitro, 26-11) solo si cambia el color: configurar un estilo redibuja toda la ventana
+            try:ttk.Style().configure("Act.TButton",foreground=VERDE_JMG);ttk.Style().map("Act.TButton",foreground=[("disabled",VERDE_JMG),("active",VERDE_JMG),("!disabled",VERDE_JMG)]);self._verde_c=VERDE_JMG
+            except Exception:pass
+        vivos=[]
+        for b,f in getattr(self,"_verdes",[]):
+            try:
+                if not b.winfo_exists():continue
+                vivos.append((b,f))
+                try:on=bool(f())
+                except Exception:on=False
+                s=str(b.cget("style"))
+                if on and s!="Act.TButton":b._jmg_st0=s;b.configure(style="Act.TButton");getattr(b,"_ico_verde",lambda o:None)(True)
+                elif not on and s=="Act.TButton":b.configure(style=getattr(b,"_jmg_st0","") or "TButton");getattr(b,"_ico_verde",lambda o:None)(False)
+            except Exception:pass
+        self._verdes=vivos
+        try:self.root.after(300,self._verde_tick)
+        except Exception:pass
+    def _vp_vivo(self,n):
+        vp=getattr(self,"_vproc",()) or ()
+        try:return len(vp)==n and vp[-1].poll() is None
+        except Exception:return False
+    def _vprev_pulsar(self):
+        """(JMG, 25-11) «Previsualizar» (abajo, justo después de Procesar): abre la previa codificada en tiempo real; otro clic (o Esc en su
+        ventana) la quita. También mientras codifica"""
+        vp=getattr(self,"_vproc",()) or ()
+        if getattr(self,"_vcod_on",False) and len(vp)==3 and vp[2].poll() is None:
+            self._vplay_parar();self._st(self._vt("Previa quitada.","Preview closed."));return
+        if not (getattr(self,"_lote_on",False) and getattr(self,"_lote_vid",False)):   # (JMG, 25-11) es para ver la codificación del vídeo en marcha (no al combinar ni en los pasos del audio)
+            self._toast(T("info_tit"),self._vt("«Previsualizar» funciona mientras se codifica el vídeo (pulsa PROCESAR; en los pasos del audio no).","«Preview» works while the video is being encoded (press PROCESS; not in the audio steps)."),seg=5);return
+        self._vplay_cod()
     def _vplay_parar(self):
         for p in getattr(self,"_vproc",()) or ():
             try:
                 if p.poll() is None:p.kill()
             except Exception:pass
-        self._vproc=()
+        self._vproc=();self._vcod_on=False
     # ---------- ondas de cada canal (antes y después) ----------
     def _onda_generar(self):
         j=self._job()
@@ -6056,16 +7193,20 @@ class VideoEncoderGUI:
         dvd=["-analyzeduration","100M","-probesize","100M"] if inf.get("dvd") else []
         try:W=max(400,self.cv_onda.winfo_width()-112)
         except Exception:W=1100
-        K=max(1,int(round(48000.0*T_/(W*8))))   # 8 columnas por pixel: el «Detalle» x8 sigue siendo de la señal entera
+        K=max(1,int(round(48000.0*T_/(W*32))));self._onda_K=K   # (JMG, 25-11) más resolución: 32 columnas por píxel (el «Detalle» x32, de la señal entera)
         env=(f"aresample=48000,aformat=sample_fmts=fltp,asetnsamples=n={K}:p=0,astats=metadata=1:reset=1:measure_perchannel=Min_level+Max_level:"
              "measure_overall=none,ametadata=mode=print:file=-")
-        self.lbl_onda.configure(text=V_("Calculando las ondas...","Computing the waves..."));self._onda_n=getattr(self,"_onda_n",0)+1;n=self._onda_n
+        self._onda_calc=True;self.lbl_onda.configure(text=V_("Calculando las ondas...","Computing the waves..."));self._onda_n=getattr(self,"_onda_n",0)+1;n=self._onda_n
         clave=(self._onda_clave_de(),W)   # (JMG, 18-11) para no volver a calcularlas si no cambia nada (y el ancho con que se calcularon)
+        dfs=self._onda_dfs_nuevos(n) if int(t.get("nch") or 0)<=8 else None   # (FLAC: 8 canales como mucho) (JMG, 25-11) copias con todas las muestras (antes, después): el detalle exacto al hacer zoom
         def hilo():
             res=[]
             for proc in (False,True):
                 if n!=getattr(self,"_onda_n",0):return   # (JMG, 18-11) salió de «Visual / Ondas» (o se pidió otro cálculo): no se sigue
-                if proc and g:i_=g.rfind("[o]");arg=["-filter_complex",g[:i_]+"[o0];[o0]"+env+g[i_:],"-map","[o]"]
+                fd=["-map","[dd]","-c:a","flac","-compression_level","0",dfs[int(proc)]] if dfs else []
+                sp="asplit=2[o1][d0];[d0]aresample=48000,aformat=sample_fmts=s16[dd];[o1]" if dfs else ""
+                if proc and g:i_=g.rfind("[o]");arg=["-filter_complex",g[:i_]+"[o0];[o0]"+sp+env+g[i_:]]+fd+["-map","[o]"]
+                elif dfs:arg=["-filter_complex",f"[0:{t['idx']}]"+sp+env+"[o]"]+fd+["-map","[o]"]
                 else:arg=["-map",f"0:{t['idx']}","-af",env]
                 c=[FFMPEG,"-hide_banner","-nostats","-v","error"]+dvd+["-t",f"{T_*(_fps_f(t) if proc else 1.0):.3f}","-i",src]+arg+["-f","null","-"]
                 try:res.append(self._onda_env(self._onda_ff(c,T_*(_fps_f(t) if proc else 1.0),0.5 if proc else 0.0,n),t["nch"]))
@@ -6088,12 +7229,17 @@ class VideoEncoderGUI:
             if n<2:return None
             a=a[:n];b=b[:n];out.append((a,b,max(max(b),-min(a))))
         return out
+    def _onda_al_soltar(self):
+        """(JMG, 22-11) la onda se rehace cuando se suelta el ratón (no a mitad de mover un ajuste)"""
+        if getattr(self,"_raton_abajo",False) and _boton_abajo():self._onda_id=self.root.after(300,self._onda_al_soltar);return   # (JMG, 26-11) de verdad
+        self._raton_abajo=False
+        self._onda_generar()
     def _onda_pronto(self,ms=800):
         """se rehacen las ondas cuando paran los cambios (Presencia, tramo)"""
         try:
             if getattr(self,"_avz",None)!="a":return
             if getattr(self,"_onda_id",None):self.root.after_cancel(self._onda_id)
-            self._onda_id=self.root.after(ms,self._onda_generar)
+            self._onda_id=self.root.after(ms,self._onda_aviso)   # (JMG, 25-11) ya no se rehacen solas: se avisa
         except Exception:pass
     def _onda_ff(self,c,tot,base,n):
         """(JMG, 10-11) el FFmpeg de las ondas con su avance en la barra de abajo (antes 0-50 %, después 50-100 %): así se ve que trabaja"""
@@ -6114,7 +7260,8 @@ class VideoEncoderGUI:
         return (out[0] if out else b"").decode("utf-8","ignore")
     def _onda_fin(self,n,de,t,T_,res,clave=None):
         if n!=getattr(self,"_onda_n",0):return
-        self._onda_clave=clave[0] if (clave and res and all(x is not None for x in res)) else None;self._onda_W=clave[1] if clave else 0
+        if res and all(x is not None for x in res):self.__dict__.setdefault("_onda_hechas",set()).add(de)   # (árbitro) hechas cuando acaban bien (salir antes no cuenta)
+        self._onda_calc=False;(self._onda_dfs_fijar(n) if (res and all(x is not None for x in res)) else None);self._onda_clave=clave[0] if (clave and res and all(x is not None for x in res)) else None;self._onda_W=clave[1] if clave else 0
         if not getattr(self,"procesando",False):self.prog.configure(value=0);self._st("")
         if getattr(self,"_onda_de",None)!=de:self._onda_x0=0.0
         self._onda=(t,T_,res);self._onda_de=de;self._onda_pos=min(self._onda_pos,T_)
@@ -6128,11 +7275,11 @@ class VideoEncoderGUI:
         W=cv.winfo_width();H=cv.winfo_height()
         if W<50 or H<50:return
         if not self._onda:
-            cv.create_text(W//2,H//2,text=self._vt("Calculando las ondas de cada canal, antes y después de los efectos...","Computing the waves of each channel, before and after the effects..."),fill="#c0c0c0",font=("",10));return
+            cv.create_text(W//2,H//2,text=self._vt("Calculando las ondas de cada canal, antes y después de los efectos...","Computing the waves of each channel, before and after the effects...") if getattr(self,"_onda_calc",False) else self._vt("Pulsa «🔄 Generar visualización» para ver las ondas de cada canal, antes y después de los efectos.","Press «🔄 Generate visualization» to see the waves of each channel, before and after the effects."),fill="#c0c0c0",font=("",10));return
         t,T_,res=self._onda;chans=LAYCH.get(t["lay"]) or [f"c{i}" for i in range(t["nch"])]
         try:zoom=float(self.var_onda_zoom.get() or 1)
         except Exception:zoom=1.0
-        izq=110;n=len(chans);fila=(H-44)/(2*max(1,n));ancho=W-izq-2
+        izq=110;n=len(chans);fila=(H-44)/(2*max(1,n));ancho=W-izq-1   # (JMG, 19-11 noche) hasta el borde (1 px de marco)
         det=self._onda_det();x0=self._onda_x0;tot=ancho*det;p0=int(x0*tot)
         try:self.sb_onda.set(x0,min(1.0,x0+1.0/det))
         except Exception:pass
@@ -6151,10 +7298,13 @@ class VideoEncoderGUI:
                 cv.create_rectangle(2,y+4,5,y+fila-4,fill=col,outline="")
                 cv.create_text(10,yc-7,text=c,anchor="w",fill="#e0e0e0",font=("",9,"bold"))
                 if datos and k<len(datos) and datos[k]:
-                    mins,maxs,pk=datos[k];m=len(maxs);paso=m/float(tot)
+                    mins,maxs,pk=datos[k];m=len(maxs);paso=m/float(tot);q0=p0
+                    dd=self._onda_dd_de(1 if despues else 0,k,p0,tot,T_,ancho)   # (JMG, 25-11) con mucho «Detalle», lo que se ve con todas sus muestras
+                    if dd:mins,maxs,q0,paso=dd;m=len(maxs)
                     sup=[];inf_=[]
                     for i in range(int(ancho)):
-                        a_=int((p0+i)*paso);b_=max(a_+1,int((p0+i+1)*paso))
+                        a_=int((q0+i)*paso);b_=max(a_+1,int((q0+i+1)*paso))
+                        if a_<0:continue
                         if a_>=m:break
                         x=izq+i;hi=max(maxs[a_:b_]);lo=min(mins[a_:b_])
                         y1=yc-max(-1.0,min(1.0,hi*zoom))*mitad;y2=yc-max(-1.0,min(1.0,lo*zoom))*mitad
@@ -6168,6 +7318,7 @@ class VideoEncoderGUI:
                 cv.create_line(0,y+fila,W,y+fila,fill="#404040")
         self._onda_geo=(izq,ancho,n,fila,T_)
         self._onda_cursor()
+        self._onda_pide_dd()   # (JMG, 25-11)
     def _onda_det(self):
         try:return max(1,int(self.var_onda_det.get() or 1))
         except Exception:return 1
@@ -6184,6 +7335,15 @@ class VideoEncoderGUI:
         if 0<=xv<=ancho:
             for b_ in (0,1):
                 y0=22+b_*(n*fila+22);cv.create_line(izq+xv,y0,izq+xv,y0+n*fila,fill="#ff4040",width=2,tags="cur")
+    def _onda_rueda(self,e):
+        """(JMG, 19-11 noche) la rueda sube o baja el zoom marcado (↕ Zoom o ↔ Detalle); Mayús + rueda = mover la onda a los lados"""
+        d=1 if e.delta>0 else -1
+        if e.state&1:return self._onda_scroll("scroll",-d,"units")
+        v,L=(self.var_onda_zoom,[1,2,4,8,16]) if self.var_onda_ztipo.get()=="v" else (self.var_onda_det,[1,2,4,8,16,32,64,128,256,512,1024])
+        try:z=float(v.get() or 1)
+        except Exception:z=1.0
+        i=min(range(len(L)),key=lambda j:abs(L[j]-z));i=max(0,min(len(L)-1,i+d))
+        if str(L[i])!=v.get():v.set(str(L[i]))
     def _onda_scroll(self,*a):
         det=self._onda_det();x0=self._onda_x0
         if a and a[0]=="moveto":x0=float(a[1])
@@ -6244,7 +7404,7 @@ class VideoEncoderGUI:
         if not Y or not R:return None,V_("No se ha podido medir la imagen.","Could not measure the picture.")
         av=lambda L:sum(L)/len(L);cl=lambda x,a,b:max(a,min(b,x))
         y=av(Y);rg=av(R);sa=av(S) if S else 10.0;n_=av(pn) if pn else 50.0;s_=av(ps) if ps else 40.0
-        aj={k:0 for k in VIMG_KEYS if k!="tono"}   # (JMG, 20-11) el tono no se mide: el Auto no lo toca
+        aj={k:0 for k in VIMG_KEYS}   # (JMG, 26-11) el tono no se mide: el Auto lo deja en 0 (y al quitar el Auto vuelve a 0, como los demás)
         if y<45:aj["brillo"]=int(cl(round((55-y)/6),1,3))
         elif y>120:aj["brillo"]=-int(cl(round((y-110)/6),1,3))
         if rg<65:aj["contraste"]=int(cl(round((75.0/max(1.0,rg)-1)/0.05),1,3))
@@ -6522,8 +7682,8 @@ class VideoEncoderGUI:
     def _traspaso_comun(self,t):
         """(JMG, 18-11) los ajustes de audio de una pista que entiende Jmg AudioProcesador"""
         ef=t.get("ef") or {};c={"ef":{k:ef[k] for k in _TR_EF if ef.get(k)}}
-        if (ef.get("gama") or 0)<0:c["ef"]["gama"]=ef["gama"]   # la compresión (a la derecha) no tiene igual en el AP
-        if (ef.get("gama_c") or 0)<0:c["ef"]["gama_c"]=ef["gama_c"]
+        if int(ef.get("din_modo") or 0):   # (JMG, 22-11) el Procesado dinámico, igual en los dos programas
+            c["ef"].update({k:ef.get(k) or 0 for k in ("din_modo","din_ft","din_fc","din_lfe")});c["ef"]["techo_pd"]={1:"-2 dBFS",2:"-1 dBFS",3:"-0,5 dBFS"}.get(int(ef.get("din_techo") or 0),"Sin límite")
         if t.get("delay"):c["delay"]=int(t["delay"])
         if t.get("fps_de") and t.get("fps_a") and t["fps_de"]!=t["fps_a"]:c.update(fps_de=t["fps_de"],fps_a=t["fps_a"],fps_met=t.get("fps_met") or "tono")
         if t.get("cod") and t["cod"]!="copy":c["cod"]=t["cod"];c["aften"]=bool(t.get("aften",True)) if t["cod"]=="ac3" else False   # (árbitro) el Passthrough de partida no va
@@ -6541,16 +7701,17 @@ class VideoEncoderGUI:
     def _traspaso_a_pista(self,t,c):
         """(JMG, 18-11) los ajustes que vienen de Jmg AudioProcesador, en una pista del trabajo"""
         for k in _TR_EF:t["ef"][k]=0   # (árbitro) lo que se traspasa empieza de cero: sin mezclas
-        for k in ("gama","gama_c"):
-            if (t["ef"].get(k) or 0)<0:t["ef"][k]=0   # la gama dinámica (la compresión, a la derecha, no la tiene el AP: se queda)
+        for k in ("din_modo","din_ft","din_fc","din_lfe","din_techo"):t["ef"][k]=0   # (JMG, 22-11) el Procesado dinámico también empieza de cero
         t["delay"]=0
         for k,v in (c.get("ef") or {}).items():
             if k not in AEF_KEYS:continue
-            a,b={"suav":(0,5),"db":(0,5)}.get(k,(-31,20) if k in VOL_CH else (-10,10))   # (JMG, 18-11) el volumen, de -20 a +20 con décimas
+            a,b={"suav":(0,5),"db":(0,6),"din_modo":(0,3),"din_techo":(0,3),"din_ft":(0,15),"din_fc":(0,15),"din_lfe":(0,15)}.get(k,(-31,20) if k in VOL_CH else (-15,15))   # (JMG, 18-11) el volumen, de -20 a +20 con décimas
             try:
-                x_=max(a,min(b,round(float(v),1) if k in VOL_CH else int(round(float(v)))))
+                x_=max(a,min(b,round(float(v),1) if k in VOL_CH else (round(float(v)*2)/2.0 if k in FINO else int(round(float(v))))))
                 t["ef"][k]=int(x_) if x_==int(x_) else x_
             except (TypeError,ValueError):pass
+        _tp={"-2 dBFS":1,"-1 dBFS":2,"-0,5 dBFS":3}.get(str((c.get("ef") or {}).get("techo_pd") or ""))   # (JMG, 22-11) el techo del Procesado dinámico
+        if _tp:t["ef"]["din_techo"]=_tp
         if "delay" in c:t["delay"]=int(c["delay"])
         if c.get("fps_de") and c.get("fps_a"):t["fps_de"],t["fps_a"],t["fps_met"]=str(c["fps_de"]),str(c["fps_a"]),c.get("fps_met") or "tono"
         cod=c.get("cod")
@@ -6565,6 +7726,7 @@ class VideoEncoderGUI:
         if not d_:return
         if not hasattr(self,"_tr_pend"):self._tr_pend={}
         self._tr_pend.update(d_);n_=0
+        self._agr_auto=set(getattr(self,"_agr_auto",set()) or set())|set(d_.keys());self.root.after(300,self._agr_auto_tick)   # (JMG, 26-11) llegan agregados
         for r_ in list(self.jobs):
             q=self._tr_pend.pop(os.path.normcase(os.path.abspath(r_)),None)
             if q:n_+=self._traspaso_trabajo(self.jobs[r_]["a"],q)
@@ -6572,8 +7734,26 @@ class VideoEncoderGUI:
             try:self._pintar_trabajo();self._refrescar_estado()
             except Exception:pass
         V_=self._vt
-        self._toast(T("info_tit"),V_(f"Llegan con sus ajustes de audio de {OTRO_NOMBRE}: se ponen en cada pista al «Agregar» el vídeo.",
-                                     f"They come with their audio settings from {OTRO_NOMBRE}: they are set on each track when you «Add to queue» the video."),seg=6)
+        self._toast(T("info_tit"),V_(f"Llegan con sus ajustes de audio de {OTRO_NOMBRE}: se agregan solos, con sus ajustes en cada pista.",
+                                     f"They come with their audio settings from {OTRO_NOMBRE}: they are added by themselves, with their settings on each track."),seg=6)
+    def _agr_auto_tick(self,n=0):
+        """(JMG, 26-11) lo que llega agregado de Jmg AudioProcesador se agrega solo, en cuanto está analizado (con sus ajustes de audio)"""
+        pend=getattr(self,"_agr_auto",set())
+        if not pend:return
+        hechos=[]
+        for f in list(self.files):
+            k=os.path.normcase(os.path.abspath(f))
+            if k in pend and f in self.info:
+                pend.discard(k)
+                if f not in self.jobs:
+                    if not hechos:self._guardar_trabajo()
+                    self.jobs[f]=self._nuevo_trabajo(f);self._crop_detectar(f,callado=True);self._medir_kbps_pedir(f);hechos.append(f)
+        if hechos:
+            if not self.actual or self.actual not in self.jobs:self.actual=hechos[0]
+            self._pintar_lista();self._pintar_trabajo();self._sarch();self._refrescar_estado()
+            self._log("[+] "+", ".join(self._nombre(f) for f in hechos))
+        if pend and n<240:self.root.after(500,lambda:self._agr_auto_tick(n+1))
+        else:self._agr_auto=set()
     def _traspaso_trabajo(self,a,q):
         n_=0
         for t in a:
@@ -6637,6 +7817,7 @@ class VideoEncoderGUI:
         se reparten el sitio que sobra, o ceden si no cabe todo"""
         import tkinter.font as tkf
         tag=f"fija{id(tv)}"
+        base={c:int(tv.column(c,"width")) or 1 for c in flex}   # (JMG, 25-11) las proporciones de inicio de las de texto largo
         def sep(e):
             try:
                 if tv.identify_region(e.x,e.y)=="separator":return "break"
@@ -6665,9 +7846,16 @@ class VideoEncoderGUI:
                 fx=[c for c in cs if c not in flex];fl=[c for c in cs if c in flex]
                 resto=W-sum(nat[c] for c in fx);hace=sum(nat[c] for c in fl) or 1
                 for c in fx:tv.column(c,width=nat[c],minwidth=20,stretch=False)
-                for c in fl:
-                    w=nat[c]+(resto-hace)*nat[c]/hace if resto>=hace else max(70,resto*nat[c]/hace)
-                    tv.column(c,width=int(w),minwidth=20,stretch=False)
+                if resto>=hace:   # (JMG, 25-11) con sitio, en proporciones fijas: las rayas no se mueven al cambiar un texto (p. ej. el códec)
+                    pb=lambda c:base.get(c,1);gr=set();ws={c:resto*pb(c)/(sum(pb(x) for x in fl) or 1) for c in fl}
+                    for _ in fl:   # la que no quepa en su parte toma lo suyo y las demás se reparten el resto
+                        big=[c for c in fl if c not in gr and nat[c]>ws[c]]
+                        if not big:break
+                        gr|=set(big);r_=resto-sum(nat[c] for c in gr);sb=sum(pb(x) for x in fl if x not in gr) or 1
+                        ws={c:(nat[c] if c in gr else r_*pb(c)/sb) for c in fl}
+                    for c in fl:tv.column(c,width=int(ws[c]),minwidth=20,stretch=False)
+                else:
+                    for c in fl:tv.column(c,width=int(max(70,resto*nat[c]/hace)),minwidth=20,stretch=False)
                 firma[0]=fi[:3]+(tuple(int(tv.column(c,"width")) for c in cs),)   # si algo cambia un ancho, se vuelve a poner
             except Exception:pass
         def bucle():
@@ -6714,8 +7902,9 @@ class VideoEncoderGUI:
     # ---------- (JMG, 13-11) «⏸ Pausa»: para el procesado y lo sigue donde estaba ----------
     def _pausa_raices(self):
         """los procesos del procesado en marcha (los que «Cancelar» pararía)"""
-        p=getattr(self,"_proc",None)
-        return [p.pid] if p is not None and p.poll() is None else []
+        p=getattr(self,"_proc",None);r=[p.pid] if p is not None and p.poll() is None else []
+        if getattr(self,"_vcod_on",False):r+=[q.pid for q in (getattr(self,"_vproc",()) or ())[:2] if q.poll() is None]   # (árbitro, 26-11) la previa también se para
+        return r
     def _pausa_pulsar(self):
         if getattr(self,"_pausa_on",False):self._pausa_poner(False)
         elif getattr(self,"procesando",False) and not self._cancelar.is_set():self._pausa_poner(True)
@@ -6753,6 +7942,15 @@ class VideoEncoderGUI:
             if str(b.cget("text"))!=t:b.configure(text=t)
             q=bool(getattr(self,"procesando",False)) and not self._cancelar.is_set()
             if q==b.instate(["disabled"]):b.state(["!disabled"] if q else ["disabled"])
+            bp=getattr(self,"btn_prev_cod",None)   # (JMG, 25-11) «Previsualizar», solo codificando (o con su ventana abierta, para quitarla)
+            if bp is not None:
+                vp=getattr(self,"_vproc",()) or ()
+                abierta=getattr(self,"_vcod_on",False) and len(vp)==3 and vp[2].poll() is None
+                lo=bool(getattr(self,"_lote_on",False)) and bool(getattr(self,"_lote_vid",False)) and not self._cancelar.is_set();q2=lo or abierta
+                if abierta and getattr(self,"_lote_on",False) and not getattr(self,"_lote_vid",False):self.root.after_idle(self._vplay_parar)   # pasos del audio: sin previa
+                if q2==bp.instate(["disabled"]):bp.state(["!disabled"] if q2 else ["disabled"])
+                lr=getattr(self,"_lote_ruta",None)
+                if abierta and lo and lr and getattr(self,"_vcod_ruta",None)!=lr:self._vcod_ruta=lr;self.root.after_idle(self._vplay_cod)   # tanda: al vídeo siguiente
         except Exception:pass
     def _trabajando(self):
         """(JMG, 13-11) hay algo largo en marcha (procesar, combinar, extraer, copiar un disco a ISO, ripear): el PC no debe suspenderse"""
@@ -6772,7 +7970,7 @@ class VideoEncoderGUI:
         except Exception:pass
     def _bp_libres(self):
         """lo que sigue funcionando mientras codifica (además de las pestañas y las barras de desplazamiento)"""
-        return [w for w in (getattr(self,"btn_c",None),getattr(self,"btn_pausa",None),getattr(self,"cmb_fin",None)) if w is not None]   # (JMG, 13-11) y «Pausa» y «Al terminar»
+        return [w for w in (getattr(self,"btn_c",None),getattr(self,"btn_pausa",None),getattr(self,"cmb_fin",None))+tuple(getattr(self,"_bp_extra",[])) if w is not None]   # (JMG, 27-11) + «⬅ Volver»   # (JMG, 13-11) y «Pausa» y «Al terminar»
     def _bp_aplicar(self):
         """recorre la ventana principal: desactiva lo que esté activo y pone el freno de clics, teclas y rueda donde no esté
         (también lo que el programa haya vuelto a activar o haya creado después de empezar)"""
@@ -7028,13 +8226,13 @@ class VideoEncoderGUI:
             def hilo():
                 err=[];ok=False
                 try:
-                    p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",creationflags=CNW);corre["p"]=p
+                    c_,pares=_part_cmd(cmd);p=subprocess.Popen(c_,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",creationflags=CNW);corre["p"]=p
                     threading.Thread(target=lambda:err.extend(p.stderr.read().splitlines()),daemon=True).start()
                     for lin in p.stdout:
                         if lin.startswith("out_time_us=") and dur>0:
                             try:self._ui(pb.configure,{"value":min(99.0,int(lin.split("=")[1])/1e4/dur)})
                             except Exception:pass
-                    p.wait();hay=[o for e,o in sal if e["tipo"]!="c"]
+                    p.wait();_part_fin(pares,p.returncode==0 and not corre.get("canc"));hay=[o for e,o in sal if e["tipo"]!="c"]
                     ok=(p.returncode==0 or (not any(e["tipo"] in ("v","a","s","img") for e,o in sal) and all(os.path.isfile(o) for o in hay)))
                     if ok and not corre.get("canc"):
                         for e,o in sal:
@@ -7042,6 +8240,8 @@ class VideoEncoderGUI:
                 except Exception as ex:err.append(str(ex))
                 canc=bool(corre.get("canc"))
                 if canc or not ok:   # lo de a medias, fuera (solo lo que ha creado esta extracción)
+                    try:_part_fin(pares,False)   # (JMG, 20-11) también si algo saltó a mitad
+                    except Exception:pass
                     for e,o in sal:
                         try:
                             if os.path.normcase(os.path.basename(o)) not in antes and os.path.isfile(o):os.remove(o)
@@ -7170,7 +8370,7 @@ class VideoEncoderGUI:
                         w=pila.pop()
                         try:pila+=w.winfo_children()
                         except Exception:continue
-                        if w.winfo_class() in ("TButton","TCheckbutton","TCombobox","TRadiobutton"):
+                        if w is not getattr(self,"btn_prev_cod",None) and w.winfo_class() in ("TButton","TCheckbutton","TCombobox","TRadiobutton"):   # (JMG, 25-11) «Previsualizar», siempre
                             try:self._bloq_prev.append((w,w.instate(["disabled"])));w.state(["disabled"])
                             except Exception:pass
         else:
@@ -7462,8 +8662,12 @@ Write-Output "OK"
         def prog(x,txt=""):self._ui(self._isoc_prog,x,txt)
         def hilo():
             t0=time.time()
-            try:ok,msg=(self._isoc_disco(r_,sal,prog,tam) if disco else self._isoc_carpeta(r_,sal,vol,bd,prog))
+            pares=[(sal,_part_de(sal))] if _es_final(sal) else []   # (JMG, 20-11) la imagen, a «.part» hasta que acaba bien
+            for a_,p_ in pares:_a_medias(p_,True)
+            sp=pares[0][1] if pares else sal
+            try:ok,msg=(self._isoc_disco(r_,sp,prog,tam) if disco else self._isoc_carpeta(r_,sp,vol,bd,prog))
             except Exception as e:ok,msg=False,str(e)
+            ok=_part_fin(pares,ok)
             self._ui(self._isoc_fin,ok,msg,sal,time.time()-t0)
         threading.Thread(target=hilo,daemon=True).start()
     def _isoc_prog(self,x,txt=""):
@@ -7831,7 +9035,7 @@ Write-Output "OK"
                         except ValueError:continue
                         fr=max(0.0,min(1.0,s/dur)) if dur>0 else 0.0;self._set_prog(base+peso*fr)
                         el=time.time()-t0-self._pausa_desde(t0);rest=el*(1-fr)/fr if fr>0.02 else 0
-                        self._st(f"{txt} · Aften · {base+peso*fr:.0f} %"+(self._vt(f" · quedan {_hms(rest).split('.')[0]}",f" · {_hms(rest).split('.')[0]} left") if rest else ""))
+                        self._st(f"{txt} · Aften · {self._pct(base,peso,fr)}"+(self._vt(f" · quedan {_hms(rest).split('.')[0]}",f" · {_hms(rest).split('.')[0]} left") if rest else ""))
                     elif l and "=" not in l:err.append(l);del err[:-40]
             except Exception:pass
         def lee_af():
@@ -8090,9 +9294,9 @@ VÍDEO
 AUDIO
 • Todas las pistas del vídeo: puedes cambiar el orden (⬆ ⬇), el idioma, el título, la pista por defecto y quitar las que no quieras (doble clic).
 • Códecs: Passthrough (sin tocar), AC3, E-AC3, DTS, AAC, MP3 (solo estéreo: el 5.1 se baja a estéreo), FLAC y Opus. «Aften Dolby Digital» (por defecto, en el desplegable del códec) hace el AC3 con Aften, que da mejor gama dinámica en las películas que tienen mucha; «AC3 · FFmpeg», con FFmpeg. Sus ajustes, con «⚙ Aften...» como los de los demás formatos (por defecto, conmutación de bloques y ancho de banda fijo completo): CBR o VBR, ancho de banda, precisión, filtros, gama dinámica (DRC y nivel de diálogo) y la información del flujo para el amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Estándar o HDCD, downmix preferido y sus niveles). Un AC3 VBR no lo leen todos los aparatos.
-• Gama dinámica / Compresión: deslizador con el centro apagado. A la izquierda (1-10) gama dinámica: más contraste. A la derecha (1-10) compresión: suben los sonidos flojos (para ver la película de noche). Uno para delanteros y traseros, otro para el central. El subwoofer no se toca. Está en «Visual / Ondas» (pestaña Audio), a la derecha de la Presencia, donde se ve en las ondas. A su derecha, «Separación de canales» (-10 a +10): más o menos separación entre izquierda y derecha y entre delante y detrás, sin subir el volumen. Su «Auto» mide la separación de la película y pone la que le va según lo movida que sea (más en las de acción, menos en las tranquilas); el central nunca se toca. El «Auto» de la Gama dinámica / Compresión no toca el central: es la referencia (a mano sí se puede). El «Auto» de Presencia toma el central como referencia (no sube la voz: si el central va bajo, baja los demás) y el del volumen por canal solo baja los frontales y los surrounds, nunca los sube. Se recomienda que el penúltimo ajuste sea la Separación de canales y el último, el Volumen por canal.
+• Procesado dinámico (el de Jmg AudioProcesador, sin Azid; sustituye a la antigua Gama dinámica / Compresión): está en «Visual / Ondas» (pestaña Audio), a la derecha de la Presencia, donde se ve en las ondas. Modo: 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas. Tres grupos, cada uno de 0 a 15 (0 = sin efecto): frontales y traseros, central y subwoofer (el subwoofer mejor a 0 si usas Double Bass). «Techo limitador»: ningún pico pasa de ese nivel; «Sin límite» puede saturar si subes mucho el efecto. Su «Auto» mide el rango dinámico de la película: si no hace falta, lo deja apagado; si no, pone Elevación + Impacto en frontales y traseros (el central es la referencia y no se toca). Pasa igual a Jmg AudioProcesador y vuelve igual. A su derecha, «Separación de canales» (-15 a +15): más o menos separación entre izquierda y derecha y entre delante y detrás, sin subir el volumen. Su «Auto» mide la separación de la película y pone la que le va según lo movida que sea (más en las de acción, menos en las tranquilas); el central nunca se toca. El «Auto» de Presencia toma el central como referencia (no sube la voz: si el central va bajo, baja los demás) y el del volumen por canal solo baja los frontales y los surrounds, nunca los sube. Se recomienda que el penúltimo ajuste sea la Separación de canales y el último, el Volumen por canal. Ajustes finos, de 1 en 1: Presencia, Separación de canales y ecualizador de -15 a +15; Procesado dinámico de 0 a 15; Double Bass de 0 a 6.
 • Volumen por canal, Suavizado digital (exceso de agudos de las películas de los 80 y 90) y Ecualizador de 3 bandas (delanteros, central y traseros).
-• Orden recomendado: primero Presencia y/o Gama dinámica, después los demás efectos y siempre al final el Volumen por canal: así el volumen de cada canal se ajusta sobre el resultado de todo lo demás y se controla mejor y más fino.
+• Orden recomendado: primero Presencia y/o Procesado dinámico, después los demás efectos y siempre al final el Volumen por canal: así el volumen de cada canal se ajusta sobre el resultado de todo lo demás y se controla mejor y más fino.
 • Cada «Auto» mide la pista con los demás efectos ya puestos y coloca sus controles; pulsado otra vez sin tocar nada, vuelve a 0. Los efectos son de la pista seleccionada; con Passthrough la pista pasa a comprimirse con su mismo códec.
 • TrueHD y FLAC son sin pérdidas: en vez de kbps eliges 16 o 24 bits.
 • Double Bass: copia los graves del subwoofer a los altavoces y los de los altavoces al subwoofer (solo en pistas con subwoofer), con su «Auto». Su «Auto» pone el Double Bass (1-3) si a los altavoces les faltan graves profundos o si el subwoofer va flojo; si están equilibrados, 0. Corte por defecto: 90 Hz.
@@ -8100,7 +9304,7 @@ AUDIO
 • «▶ Revisar sincronización» (en Sincronización): el vídeo en su ventana con la pista tal como saldrá (delay, tramos y efectos), desde el punto que elijas o desde cada tramo, para ver con tus ojos si los labios van con la voz. En el mismo momento también puedes oír la pista sin corregir o la de referencia. Es la misma ventana que en Jmg AudioProcesador.
 • Framerate (en Sincronización): para una pista de una edición de 25 fps en una película de 23,976 (o al revés), como en Jmg AudioProcesador: cambia su velocidad exacta, con o sin cambio de tono, antes del delay y los tramos. Al añadir una pista de otro archivo que dura un 4 % menos (o más) que el vídeo, el programa lo detecta y lo pone solo, y avisa. Después calcula el delay.
 • Escuchar: en «Visual / Ondas» de Audio, «▶ Antes» o «▶ Después» (o clic en las ondas); ⏸ pausa (pulsado otra vez, sigue) y ⏹ para y vuelve al principio. Por multicanal (para un amplificador AV) o en estéreo.
-• Pistas de audio, como en Jmg AudioProcesador: la pista procesada (con efectos; cambiar solo el códec o el bitrate no cuenta) sale la primera y por defecto, con el título «Jmg procesada» (se puede cambiar), y la original se conserva detrás. «🚫 Eliminar original» la quita (la fila se pone en rojo suave; otra vez, vuelve); en una pista sin procesar, la quita del vídeo. «➕ Añadir pista» trae una pista de otro archivo y «➖ Eliminar pista» la quita de la lista (el archivo original no se toca). (18-11) Volumen por canal: de -30 a +20 dB y con décimas, como en Jmg AudioProcesador. Si hay dos o más pistas procesadas, al procesar se pregunta cuál sale la primera y por defecto. «🔍 Ver todo» (antes de procesar) y Edit/Log dicen los efectos de audio de cada pista. «Visual / Ondas» no vuelve a calcular las ondas si no ha cambiado nada. Una posición por debajo de -30 es «Mute» (en rojo): ese canal en silencio. El volumen por canal se aplica el último (tras Double Bass y Separación de canales): lo que pones es exactamente lo que sube o baja ese canal.
+• Pistas de audio, como en Jmg AudioProcesador: la pista procesada (con efectos; cambiar solo el códec o el bitrate no cuenta) sale la primera y por defecto, con el título «Jmg procesada» (se puede cambiar), y la original se conserva detrás. «🚫 Eliminar original» la quita (la fila se pone en rojo suave; otra vez, vuelve); en una pista sin procesar, la quita del vídeo. «➕ Añadir pista» trae una pista de otro archivo y «➖ Eliminar pista» la quita de la lista (el archivo original no se toca). (18-11) Volumen por canal: de -30 a +20 dB y con décimas, como en Jmg AudioProcesador. Si hay dos o más pistas procesadas, al procesar se pregunta cuál sale la primera y por defecto. «🔍 Ver todo» (antes de procesar) y Edit/Log dicen los efectos de audio de cada pista. «Visual / Ondas» no vuelve a calcular las ondas si no ha cambiado nada. Una posición por debajo de -30 es «Mute» (en rojo): ese canal en silencio. El volumen por canal se aplica el último (tras Double Bass y Separación de canales): lo que pones es exactamente lo que sube o baja ese canal. AAC, FLAC y Opus conservan el 7.1 (el AAC, hasta 768 kbps); AC3, E-AC3, DTS y TrueHD lo bajan a 5.1.
 • «➕ Núcleo» (pestaña Audio; solo se activa en las pistas que lo llevan): una DTS-HD (Master Audio o High Resolution) lleva dentro un DTS normal para los aparatos que no entienden el HD, y una Dolby Atmos (TrueHD) lleva un TrueHD sin Atmos; esto lo saca también como pista aparte (en MKV), sin recomprimir. Otra vez: se quita.
 • En «Información», el botón derecho del ratón: «Copiar» y «Seleccionar todo» (también en el Log). Al abrir el programa, la pestaña Vídeo se ve entera; la raya de en medio se puede arrastrar y se recuerda.
 • Al pulsar PROCESAR sale una ventana con lo esencial (cada vídeo y el archivo que va a salir, y los avisos); «🔍 Ver todo» enseña todo (vídeo, imagen, recorte, cada pista, subtítulos y las órdenes de FFmpeg) y se puede copiar con «📋 Copiar todo». «Sí» para empezar.
@@ -8112,8 +9316,8 @@ SUBTÍTULOS
 
 OPCIONES AVANZADAS
 • Vídeo · «Más opciones» (pestaña Vídeo): se abre dentro de la ventana, con «Volver». Arriba el fotograma antes y después; debajo, la barra (clic y flechas ← → = fotograma a fotograma; con Mayúsculas, de segundo en segundo), el recorte por tramos (varios tramos se unen en un solo vídeo), la imagen (brillo, contraste, saturación, tono, nitidez y quitar ruido) y las bandas negras (se buscan solas al agregar el vídeo). «Auto» de Imagen mide la película y propone los valores (pulsarlo otra vez = todo a 0); si no te gusta cómo queda, retócalo a mano.
-• «Reproducir» abre una ventana de vídeo con sonido desde el punto de la barra: el original o con los ajustes, con la primera pista de audio incluida, en multicanal o estéreo.
-• Audio · «Visual / Ondas» (pestaña Audio): las ondas de cada canal antes y después del tramo que elijas (primeros 5, 10 o 30 minutos o el archivo entero), como en Jmg AudioProcesador. Clic en las ondas = escuchar desde ahí. Las ondas se generan solas al entrar y se rehacen al cambiar la Presencia o el tramo; cada canal sale relleno, con su pico en dBFS, y «Zoom» agranda las ondas flojas. A la derecha de la Presencia, la Gama dinámica / Compresión: con ella no hace falta subir tanto la Presencia. «Detalle» (x1-x8) enseña las ondas con más resolución; se mueven con la rueda o con la barra de debajo, y mientras suena la vista sigue a la raya roja.
+• «▶ Original» o «▶ Con los ajustes» abre una ventana de vídeo con sonido desde el punto de la barra: el original o con los ajustes, con la primera pista de audio incluida, en multicanal o estéreo.
+• Audio · «Visual / Ondas» (pestaña Audio): las ondas de cada canal antes y después del tramo que elijas (primeros 5, 10 o 30 minutos o el archivo entero), como en Jmg AudioProcesador. Clic en las ondas = escuchar desde ahí. La primera vez que entras con una pista las ondas se generan solas; después, al pulsar «🔄 Generar visualización»; cada canal sale relleno, con su pico en dBFS, y «Zoom» agranda las ondas flojas. «Detalle» (x1-x1024) enseña las ondas con más resolución; se mueven con Mayús + rueda o con la barra de debajo, y mientras suena la vista sigue a la raya roja. Dos zooms: ↕ «Zoom» (la altura de las ondas, x1-x16) y ↔ «Detalle» (el tiempo, x1-x1024); marca el que quieras y la rueda del ratón lo sube o lo baja.
 • Los efectos se suman: el «Después» lleva todos los de la pista. Ahí está también la Presencia (voz, ambiente, efectos y subwoofer) con su «Auto». Deshacer y Rehacer siguen abajo.
 
 SALIDA
@@ -8124,7 +9328,33 @@ SALIDA
 • «🔍 Buscar en internet...» (Salida → Portada): busca la película en TMDB, enseña sus pósters para elegir uno y lo pone de portada con el nombre «Título (Año)». Si junto al vídeo hay un cover.jpg o folder.jpg (los que dejan muchos programas de ripeo, Kodi o Plex) y el vídeo no trae portada, se usa solo. Necesita tu propia clave de TMDB, gratuita: la primera vez el programa explica cómo conseguirla (cuenta en themoviedb.org → Ajustes → API). Sin conexión, simplemente no busca.
 
 A TENER EN CUENTA
+• Los ajustes se guardan de forma segura: primero en un archivo temporal, que luego sustituye al bueno de una sola vez; si se va la luz o el programa se cierra a mitad, queda el de antes entero, nunca uno a medias.
+• Lo que sale del programa se escribe primero como «nombre.part.ext» y solo cuando termina bien pasa a su nombre: si se va la luz a mitad, nunca queda un archivo cortado con nombre de terminado. Al abrir, el programa avisa de los «.part» que quedaron de la última vez (se pueden borrar).
+• Las pistas AC3 y E-AC3 se decodifican tal cual, sin la compresión que llevan dentro (FFmpeg la aplicaba por su cuenta y bajaba los picos): llega el sonido original.
 • «↶ Deshacer» y «↷ Rehacer» (abajo; también Ctrl+Z y Ctrl+Y): deshacen y rehacen, una a una, las últimas 50 acciones (ajustes, agregar o quitar vídeos...). «Resetear» vuelve a los ajustes automáticos de la pestaña abierta (Vídeo, Audio, Subtítulos o Salida) del vídeo activo; con «Todo», todo de cero: la lista de vídeos, su información, sus ajustes y la Salida por defecto (↶ lo recupera). Mientras está abierta una ventana como «Combinar vídeos» o «Revisar sincronización», los botones de la ventana principal no funcionan: esas ventanas llevan sus propios ↶ ↷. En las opciones avanzadas («Más opciones» y «Visual / Ondas») funcionan los de abajo.
+• La barra que separa las dos columnas de arriba se para cuando los botones o el texto de una columna ya no caben: nunca se cortan.
+• Las barras de desplazamiento solo salen cuando hacen falta, y la explicación de cada ajuste sale al pasar el ratón por encima (las pestañas no llevan textos de explicación).
+• El panel de las pestañas toma la altura justa de lo que lleva cada pestaña (ni sobra hueco ni falta nada); la lista de archivos de arriba se queda con el resto.
+• El título de cada efecto se pone en verde cuando está puesto (con cualquier ajuste cambiado: intensidad, corte, techo, frecuencias...).
+• En verde se ve de un vistazo todo lo que está haciendo algo: el título de cada efecto o apartado con algún ajuste hecho (también imagen, recorte, bandas negras, color) y los botones que ya han corregido algo (📏 Ajustar Master, ▶ Normalizar, 🎯 Calcular delay, ✂ Corregir por tramos, 🔧 Más opciones...). Al pasar el ratón por encima de un botón, sus letras se ponen en verde.
+• Las pestañas también se ponen en verde: la que está abierta y aquella sobre la que pasas el ratón. Al terminar, la carpeta de destino se abre con el archivo ya seleccionado.
+• DVD (carpeta VIDEO_TS o imagen .iso): el idioma de las pistas de audio y de los subtítulos se lee del archivo .IFO del disco (los .VOB no lo traen).
+• «Visual / Ondas»: el Procesado dinámico tiene su «⚙» (umbral, ataque, liberación, rodilla y el limitador), con «Por defecto»; doble clic en un deslizador = valor inicial, flechas = paso a paso. Ya no lleva la descripción debajo (más alto para las ondas), y al hacer zoom con la rueda ya no se mueven los nombres de los canales. Al pasar el ratón por un botón, solo sus letras se ponen en verde.
+• «Visual / Ondas» con más resolución: cuatro veces más detalle y «Detalle» hasta x1024 (también con la rueda del ratón).
+• «🔍 Ver en grande» (o doble clic en una de las dos imágenes): el antes y el después a tamaño real, uno al lado del otro, para ver los detalles. Arrastra para moverte (los dos se mueven a la vez); la rueda del ratón hace zoom (x1-x4); Esc cierra.
+• «Codificar con»: «CPU» (el procesador). En «Visual / Ondas», al tocar un efecto lo que suena se para; pulsa «🔄 Generar visualización» para ver las ondas con el cambio y ▶ para oírlo. Mientras codifica, «⬅ Volver» sigue funcionando. «Auto» de Imagen deja el Tono en 0 y al quitarlo vuelve todo a 0. Las descripciones flotantes se van solas a los pocos segundos.
+• Toda la potencia del procesador: cada pista de audio que se recodifica va en su propio hilo de FFmpeg (antes, todas en uno), así varias pistas se procesan a la vez.
+• «Previsualizar» (abajo, justo después de Procesar): enseña en tiempo real, con sonido, el original a la izquierda y lo codificado con tus ajustes (códec, calidad, resolución, imagen) a la derecha, del mismo tamaño, desde donde va la codificación. Su ventana se puede maximizar (doble clic = pantalla completa) para ver los detalles; se quita con Esc o con otro clic en «Previsualizar». Solo se activa mientras se codifica el vídeo (no en los pasos del audio) y enseña el vídeo que se está codificando. Con ajustes lentos va tan rápido como codifique el procesador.
+• «Guardar preset» guarda todos los ajustes del vídeo elegido: vídeo, audio (cada pista, con su códec y sus efectos), subtítulos, portada y salida. «Cargar preset» los pone en el vídeo elegido, pista a pista y por orden. No se guarda lo que es de cada película: el recorte por tramos, el recorte de las bandas negras, los delays, la sincronización por tramos y el nombre.
+• Los presets son comunes a Jmg AudioProcesador y Jmg VideoEncoder (la misma carpeta): cada programa pone lo suyo; el audio pasa de uno a otro y, en Jmg AudioProcesador, el vídeo y los subtítulos no afectan.
+• Al pasar archivos de un programa al otro, los que estaban agregados llegan agregados (con sus ajustes de audio).
+• Lo que está en marcha (generar, escuchar, reproducir, previsualizar) se pone en verde. En pausa, «Continuar» (en Jmg VideoEncoder, ⏸) se queda en verde.
+• Al codificar, el vídeo se decodifica con la tarjeta gráfica si se puede (deja el procesador libre para el códec); los códecs por procesador usan todos sus núcleos.
+• «Visual / Ondas»: la primera vez que entras con una pista las ondas se generan solas; después, al pulsar «🔄 Generar visualización» (si cambias algo, lo que suena se para y se avisa). Empiezan con «Zoom» x1. Detalle como en Sound Forge: «Detalle» llega a x1024 y, desde x64, lo que se ve se lee con todas sus muestras (antes, del archivo; después, con los efectos).
+• Procesado dinámico: ya no tiene el modo 0. Por defecto, el modo 2 y los deslizadores a 0: a 0 no hace nada; al subir un deslizador se aplica el modo elegido.
+• «Edit/Log»: arriba, lo que lleva el vídeo de las pestañas (vídeo, imagen, recorte, cada pista de audio con sus efectos y los subtítulos), como en Jmg AudioProcesador; debajo, el registro.
+• «Codificar con»: además de Procesador, NVIDIA y AMD, «INTEL» (Quick Sync, las gráficas Intel Arc e integradas) y «Vulkan» (cualquier tarjeta con drivers recientes; en NVIDIA y AMD dan más calidad sus propios botones). Cada uno solo se activa si el PC lo puede usar.
+• En «Audio», la Sincronización está a la derecha del Double Bass; en «Subtítulos», la sincronización del subtítulo está a la derecha de la lista; en «Salida», la Portada está a la derecha, debajo de «Copiar también».
 • Al minimizar, el programa queda como un icono junto al reloj (la bandeja del sistema), que dice cómo va el proceso: clic izquierdo = vuelve la ventana; clic derecho = menú (cancelar el proceso, qué hacer al terminar —nada, salir o apagar el PC—, abrir la carpeta al terminar, salir). En Salida se puede quitar, para minimizar a la barra de tareas como siempre. Al dejar el ratón sobre un botón, una casilla o un deslizador sale una descripción, que se va sola a los pocos segundos.
 • Opciones avanzadas («⚙» al lado del códec, en Vídeo y en cada pista de Audio): lo más importante de cada códec, para quien lo quiera afinar. Vídeo: ajuste (tune: cine, animación, grano...), perfil y nivel, fotograma clave cada X segundos, fotogramas B y de referencia, cuantización adaptativa, grano de película sintético en AV1, dos pasadas y AQ de NVIDIA, máxima calidad y preanálisis de AMD, perfil de ProRes (Proxy a 4444 XQ) y de DNxHR (LB a 444). Audio: la información del flujo de AC3 y E-AC3 (nivel de diálogo, Dolby Surround EX, auriculares, HDCD, downmix) y el corte de agudos, VBR de MP3 y de Opus, compresión de FLAC. Lo que no se toca queda en automático; cada vídeo y cada pista con lo suyo. En la lista de pistas, «⚙» = con opciones avanzadas. En AC3 y E-AC3 también el tipo de sala (grande o pequeña) con su nivel de mezcla; en DTS, la predicción ADPCM. El DTS de FFmpeg es siempre de bitrate fijo: 768 o 1536 kbps, los estándar (con menos, los reproductores solo dan ruido). AC3 (Aften y FFmpeg): en 5.1, de 224 a 640 kbps; en estéreo, de 96 a 640 (por defecto 192). E-AC3: cualquier bitrate, escrito a mano, desde 192 kbps en 5.1 (en estéreo desde 64; por defecto 192). Dolby TrueHD va detrás de los Dolby.
 • Subtítulos · «Grabar en la imagen»: el subtítulo seleccionado queda dibujado en el vídeo; se ve en cualquier aparato, pero ya no se puede quitar. Solo uno, y obliga a recomprimir el vídeo (si estaba en Passthrough, pasa a H.265). Los de texto (SRT, ASS) se dibujan sobre la imagen final; los de imagen (PGS, DVD), sobre la original (con «Bandas negras» → «Quitarlas», lo que esté en las bandas se corta).
@@ -8144,7 +9374,7 @@ Usa FFmpeg (ffmpeg.org, compilación de BtbN) con licencia GNU GPL v3.
 Jmg VideoEncoder es software libre bajo la licencia GNU GPL v3.
 Contacto: jmgsoftwaremultimedia@gmail.com
 Apoya el proyecto: https://www.paypal.com/paypalme/JmgSoftware
-Realizar Jmg SuiteMultimedia (este programa y Jmg AudioProcesador 5.1) ha costado un trabajo enorme: unos 45 días, con pruebas en películas reales. Desarrollado con la ayuda de Claude, la inteligencia artificial de Anthropic.
+Realizar Jmg SuiteMultimedia (este programa y Jmg AudioProcesador 5.1) ha sido un enorme trabajo y dedicación, con pruebas en películas reales. Desarrollado con la ayuda de Claude, la inteligencia artificial de Anthropic.
 """
 AYUDA["en"]="""JMG VIDEOENCODER · HELP
 
@@ -8167,9 +9397,9 @@ VIDEO
 AUDIO
 • All the video's tracks: you can change the order (⬆ ⬇), the language, the title, the default track and remove the ones you don't want (double-click).
 • Codecs: Passthrough (untouched), AC3, E-AC3, DTS, AAC, MP3 (stereo only: 5.1 is downmixed), FLAC and Opus. «Aften Dolby Digital» (default, in the codec list) makes the AC3 with Aften, which gives better dynamic range in movies that have a lot; «AC3 · FFmpeg», with FFmpeg. Its settings, with «⚙ Aften...» like the other formats' ones (by default, block switching and fixed full bandwidth): CBR or VBR, bandwidth, accuracy, filters, dynamic range (DRC and dialogue level) and the bitstream information for the amplifier (Dolby Surround EX, Dolby Headphone, Standard or HDCD A/D converter, preferred downmix and its levels). Not every device reads a VBR AC3.
-• Dynamic range / Compression: slider with the middle off. To the left (1-10) dynamic range: more contrast. To the right (1-10) compression: quiet sounds go up (to watch the movie at night). One for fronts and surrounds, another for the center. The subwoofer is not touched. It is in «Visual / Waves» (Audio tab), to the right of Presence, where you see it on the waves. To its right, «Channel separation» (-10 to +10): more or less separation between left and right and between front and back, without raising the volume. Its «Auto» measures the movie's separation and sets the right amount for how busy it is (more for action, less for calm movies); the center is never touched. The Dynamic range / Compression «Auto» does not touch the center: it is the reference (by hand you can). The Presence «Auto» takes the center as the reference (it does not raise the voice: if the center is low, it lowers the others) and the volume-per-channel one only lowers the fronts and surrounds, never raises them. It is recommended that the second-to-last adjustment be Channel separation and the last one, the Volume per channel.
+• Dynamic processing (the one from Jmg AudioProcesador, without Azid; it replaces the old Dynamic range / Compression): it is in «Visual / Waves» (Audio tab), to the right of Presence, where you see it on the waves. Mode: 1 Lift: raises quiet sounds · 2 Impact: loud sounds stand out · 3 both. Three groups, each from 0 to 15 (0 = no effect): fronts and surrounds, center and subwoofer (keep the subwoofer at 0 if you use Double Bass). «Limiter ceiling»: no peak goes above that level; «No limit» can clip if you raise the effect a lot. Its «Auto» measures the movie's dynamic range: if it is not needed, it stays off; otherwise it sets Lift + Impact on the fronts and surrounds (the center is the reference and is not touched). It goes to Jmg AudioProcesador and comes back the same. To its right, «Channel separation» (-15 to +15): more or less separation between left and right and between front and back, without raising the volume. Its «Auto» measures the movie's separation and sets the right amount for how busy it is (more for action, less for calm movies); the center is never touched. The Presence «Auto» takes the center as the reference (it does not raise the voice: if the center is low, it lowers the others) and the volume-per-channel one only lowers the fronts and surrounds, never raises them. It is recommended that the second-to-last adjustment be Channel separation and the last one, the Volume per channel. Fine adjustments, in steps of 1: Presence, Channel separation and equalizer from -15 to +15; Dynamic processing from 0 to 15; Double Bass from 0 to 6.
 • Volume per channel, Digital smoothing (excess treble of 80s and 90s movies) and 3-band equalizer (fronts, center and surrounds).
-• Recommended order: first Presence and/or Dynamic range, then the other effects, and always last the Volume per channel: that way each channel's volume is set on the result of everything else and is easier to control finely.
+• Recommended order: first Presence and/or Dynamic processing, then the other effects, and always last the Volume per channel: that way each channel's volume is set on the result of everything else and is easier to control finely.
 • Each «Auto» measures the track with the other effects already applied and sets its controls; pressed again without touching anything, it goes back to 0. The effects belong to the selected track; with Passthrough the track is compressed again with its own codec.
 • TrueHD and FLAC are lossless: instead of kbps you choose 16 or 24 bits.
 • Double Bass: copies the subwoofer bass to the speakers and the speakers' bass to the subwoofer (only on tracks with a subwoofer), with its «Auto». Its «Auto» sets Double Bass (1-3) if the speakers lack deep bass or the subwoofer is weak; if they are balanced, 0. Default cut: 90 Hz.
@@ -8177,7 +9407,7 @@ AUDIO
 • «▶ Check synchronization» (in Synchronization): the video in its window with the track as it will come out (delay, parts and effects), from the point you choose or from each part, so you can see with your own eyes whether the lips match the voice. At the same moment you can also hear the uncorrected track or the reference one. It is the same window as in Jmg AudioProcesador.
 • Framerate (in Synchronization): for a track from a 25 fps edition in a 23.976 movie (or the other way round), as in Jmg AudioProcesador: it changes its exact speed, with or without pitch change, before the delay and the parts. When you add a track from another file that is 4 % shorter (or longer) than the video, the program detects it, sets it by itself and tells you. Then calculate the delay.
 • Listen: in Audio «Visual / Waves», «▶ Before» or «▶ After» (or click on the waves); ⏸ pause (pressed again, it goes on) and ⏹ stops and goes back to the start. Through multichannel (for an AV receiver) or in stereo.
-• Audio tracks, as in Jmg AudioProcesador: the processed track (with effects; changing only the codec or the bitrate does not count) comes first and by default, titled «Jmg procesada» (it can be changed), and the original is kept after it. «🚫 Remove original» removes it (the row turns soft red; again, it comes back); on an unprocessed track, it removes it from the video. «➕ Add track» brings a track from another file and «➖ Delete track» removes it from the list (the original file is not touched). Volume per channel: from -30 to +20 dB, with decimals, as in Jmg AudioProcesador. If there are two or more processed tracks, when processing you are asked which one goes first and by default. «🔍 See everything» (before processing) and Edit/Log list the audio effects of each track. «Visual / Waves» does not compute the waves again if nothing has changed. One step below -30 is «Mute» (in red): that channel is silent. Volume per channel is applied last (after Double Bass and Channel separation): what you set is exactly how much that channel goes up or down.
+• Audio tracks, as in Jmg AudioProcesador: the processed track (with effects; changing only the codec or the bitrate does not count) comes first and by default, titled «Jmg procesada» (it can be changed), and the original is kept after it. «🚫 Remove original» removes it (the row turns soft red; again, it comes back); on an unprocessed track, it removes it from the video. «➕ Add track» brings a track from another file and «➖ Delete track» removes it from the list (the original file is not touched). Volume per channel: from -30 to +20 dB, with decimals, as in Jmg AudioProcesador. If there are two or more processed tracks, when processing you are asked which one goes first and by default. «🔍 See everything» (before processing) and Edit/Log list the audio effects of each track. «Visual / Waves» does not compute the waves again if nothing has changed. One step below -30 is «Mute» (in red): that channel is silent. Volume per channel is applied last (after Double Bass and Channel separation): what you set is exactly how much that channel goes up or down. AAC, FLAC and Opus keep 7.1 (AAC up to 768 kbps); AC3, E-AC3, DTS and TrueHD bring it down to 5.1.
 • «➕ Core» (Audio tab; only enabled on tracks that have one): a DTS-HD track (Master Audio or High Resolution) carries a regular DTS inside for devices that do not understand HD, and a Dolby Atmos (TrueHD) track carries a TrueHD without Atmos; this also takes it out as a separate track (in MKV), not re-encoded. Again: it is removed.
 • In «Information», the right mouse button: «Copy» and «Select all» (also in the Log). When the program opens, the Video tab is fully visible; the line in the middle can be dragged and it is remembered.
 • When you press PROCESS a window shows the essentials (each video and the file that will come out, and the warnings); «🔍 See everything» shows it all (video, picture, trimming, each track, subtitles and the FFmpeg commands) and it can be copied with «📋 Copy all». «Yes» to start.
@@ -8189,8 +9419,8 @@ SUBTITLES
 
 ADVANCED OPTIONS
 • Video · «More options» (Video tab): it opens inside the window, with «Back». At the top the frame before and after; below, the bar (click and ← → arrows = frame by frame; with Shift, second by second), trimming by parts (several parts are joined into one video), the picture (brightness, contrast, saturation, hue, sharpness and denoise) and the black bars (looked for by themselves when the video is added). «Auto» in Picture measures the movie and suggests the values (press it again = all back to 0); if you don't like the result, touch it up by hand.
-• «Play» opens a video window with sound from the point of the bar: the original or with the settings, with the first included audio track, in multichannel or stereo.
-• Audio · «Visual / Waves» (Audio tab): the waves of each channel before and after, for the segment you choose (first 5, 10 or 30 minutes or the whole file), as in Jmg AudioProcesador. Click on the waves = listen from there. The waves are generated by themselves when you enter and redone when you change Presence or the segment; each channel is drawn filled, with its peak in dBFS, and «Zoom» enlarges quiet waves. To the right of Presence, Dynamic range / Compression: with it there is no need to raise Presence so much. «Detail» (x1-x8) shows the waves with more resolution; move with the wheel or the bar below, and while it plays the view follows the red line.
+• «▶ Original» or «▶ With the settings» opens a video window with sound from the point of the bar: the original or with the settings, with the first included audio track, in multichannel or stereo.
+• Audio · «Visual / Waves» (Audio tab): the waves of each channel before and after, for the segment you choose (first 5, 10 or 30 minutes or the whole file), as in Jmg AudioProcesador. Click on the waves = listen from there. The first time you come in with a track the waves are generated by themselves; after that, when you press «🔄 Generate visualization»; each channel is drawn filled, with its peak in dBFS, and «Zoom» enlarges quiet waves. «Detail» (x1-x1024) shows the waves with more resolution; move with Shift + wheel or the bar below, and while it plays the view follows the red line. Two zooms: ↕ «Zoom» (wave height, x1-x16) and ↔ «Detail» (time, x1-x1024); tick the one you want and the mouse wheel raises or lowers it.
 • The effects add up: «After» carries all those of the track. Presence (voice, ambience, effects and subwoofer) with its «Auto» is there too. Undo and Redo are still at the bottom.
 
 OUTPUT
@@ -8201,7 +9431,33 @@ OUTPUT
 • «🔍 Search online...» (Output → Cover): looks the movie up on TMDB, shows its posters to choose one and sets it as the cover with the name «Title (Year)». If there is a cover.jpg or folder.jpg next to the video (left by many ripping programs, Kodi or Plex) and the video has no cover, it is used by itself. It needs your own TMDB key, which is free: the first time, the program explains how to get it (account at themoviedb.org → Settings → API). Without a connection, it simply does not search.
 
 KEEP IN MIND
+• Settings are saved safely: first to a temporary file, which then replaces the real one in a single step; if the power goes out or the program closes halfway, the previous file stays whole, never a half-written one.
+• What the program creates is first written as «name.part.ext» and only gets its real name when it finishes well: if the power goes out halfway, a cut file never keeps the name of a finished one. On opening, the program warns about the «.part» files left from last time (they can be deleted).
+• AC3 and E-AC3 tracks are decoded as they are, without the compression they carry inside (FFmpeg used to apply it on its own and lowered the peaks): you get the original sound.
 • «↶ Undo» and «↷ Redo» (at the bottom; also Ctrl+Z and Ctrl+Y): undo and redo, one by one, the last 50 actions (settings, adding or removing videos...). «Reset» puts back the automatic settings of the open tab (Video, Audio, Subtitles or Output) of the active video; with «All», everything from scratch: the video list, its information, its settings and the default Output (↶ brings it back). While a window such as «Combine videos» or «Check synchronization» is open, the main window buttons do not work: those windows have their own ↶ ↷. In the advanced options («More options» and «Visual / Waves») the ones at the bottom work.
+• The bar between the two top columns stops when a column's buttons or text no longer fit: they are never cut off.
+• Scroll bars only appear when needed, and each setting's explanation appears when you hover the mouse over it (the tabs carry no explanation texts).
+• The tabs panel takes just the height of what each tab holds (no empty space, nothing missing); the file list at the top gets the rest.
+• Each effect's title turns green when it is on (with any setting changed: amount, crossover, ceiling, frequencies...).
+• Green shows at a glance everything that is doing something: the title of each effect or section with some setting made (also picture, trimming, black bars, color) and the buttons that have already corrected something (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). When you hover the mouse over a button, its letters turn green.
+• Tabs also turn green: the open one and the one you hover over. When processing ends, the destination folder opens with the file already selected.
+• DVD (VIDEO_TS folder or .iso image): the language of the audio tracks and subtitles is read from the disc's .IFO file (the .VOB files do not carry it).
+• «Visual / Waves»: Dynamic processing has its «⚙» (threshold, attack, release, knee and the limiter), with «Default»; double-click a slider = initial value, arrows = step by step. The description below it is gone (more height for the waves), and zooming with the wheel no longer moves the channel names. When you hover over a button, only its letters turn green.
+• Higher-resolution «Visual / Waves»: four times more detail and «Detail» up to x1024 (also with the mouse wheel).
+• «🔍 View large» (or double-click one of the two pictures): before and after at actual size, side by side, to see the details. Drag to move (both move together); the mouse wheel zooms (x1-x4); Esc closes.
+• «Encode with»: «CPU» (the processor). In «Visual / Waves», touching an effect stops playback; press «🔄 Generate visualization» to see the waves with the change and ▶ to hear it. While encoding, «⬅ Back» still works. Picture «Auto» leaves Hue at 0 and turning it off puts everything back to 0. Tooltips go away by themselves after a few seconds.
+• Full processor power: each audio track being re-encoded runs in its own FFmpeg thread (before, all in one), so several tracks are processed at once.
+• «Preview» (at the bottom, right after Process): shows in real time, with sound, the original on the left and the video encoded with your settings (codec, quality, resolution, picture) on the right, at the same size, from where the encoding is. Its window can be maximized (double-click = full screen) to see the details; Esc or another click on «Preview» closes it. It is only active while the video is being encoded (not in the audio steps) and shows the video being encoded. With slow settings it plays as fast as the processor encodes.
+• «Save preset» saves all the settings of the chosen video: video, audio (each track, with its codec and effects), subtitles, cover and output. «Load preset» applies them to the chosen video, track by track in order. What belongs to each movie is not saved: the cut by parts, the black bar crop, the delays, the sync by parts and the name.
+• Presets are shared by Jmg AudioProcesador and Jmg VideoEncoder (the same folder): each program applies its own part; the audio goes from one to the other and, in Jmg AudioProcesador, the video and subtitles have no effect.
+• When passing files from one program to the other, the ones that were added arrive added (with their audio settings).
+• Whatever is running (generating, listening, playing, previewing) turns green. When paused, «Resume» (in Jmg VideoEncoder, ⏸) stays green.
+• When encoding, the video is decoded on the graphics card if possible (leaving the processor free for the codec); the processor codecs use all its cores.
+• «Visual / Waves»: the first time you come in with a track the waves are generated by themselves; after that, when you press «🔄 Generate visualization» (if you change something, playback stops and you are told). They start with «Zoom» x1. Detail as in Sound Forge: «Detail» reaches x1024 and, from x64, what you see is read with all its samples (before, from the file; after, with the effects).
+• Dynamic processing: there is no mode 0 any more. By default, mode 2 with the sliders at 0: at 0 it does nothing; raising a slider applies the chosen mode.
+• «Edit/Log»: at the top, what the video in the tabs carries (video, picture, trimming, each audio track with its effects and the subtitles), as in Jmg AudioProcesador; below, the log.
+• «Encode with»: besides Processor, NVIDIA and AMD, «INTEL» (Quick Sync, Intel Arc and integrated graphics) and «Vulkan» (any card with recent drivers; on NVIDIA and AMD their own buttons give more quality). Each one is only enabled if the PC can use it.
+• In «Audio», Synchronization is to the right of Double Bass; in «Subtitles», the subtitle synchronization is to the right of the list; in «Output», the Cover is on the right, below «Also copy».
 • When minimized, the program stays as an icon next to the clock (the system tray), which shows how the process is going: left click = the window comes back; right click = menu (cancel the process, what to do when done —nothing, exit or shut down the PC—, open the folder when done, exit). In Output it can be turned off, to minimize to the taskbar as usual. Leaving the mouse over a button, box or slider shows a description, which goes away by itself after a few seconds.
 • Advanced options («⚙» next to the codec, in Video and on each Audio track): the most important settings of each codec, for whoever wants to fine-tune. Video: tune (film, animation, grain...), profile and level, a keyframe every X seconds, B-frames and reference frames, adaptive quantization, synthetic film grain in AV1, NVIDIA two-pass and AQ, AMD highest quality and pre-analysis, ProRes profile (Proxy to 4444 XQ) and DNxHR profile (LB to 444). Audio: the AC3 and E-AC3 bitstream information (dialogue level, Dolby Surround EX, headphones, HDCD, downmix) and the treble cut-off, MP3 and Opus VBR, FLAC compression. Whatever is not touched stays automatic; each video and each track keeps its own. In the track list, «⚙» = with advanced options. AC3 and E-AC3 also have the room type (large or small) with its mixing level; DTS has ADPCM prediction. FFmpeg's DTS is always constant bitrate: 768 or 1536 kbps, the standard ones (with less, players only give noise). AC3 (Aften and FFmpeg): in 5.1, from 224 to 640 kbps; in stereo, from 96 to 640 (default 192). E-AC3: any bitrate, typed by hand, from 192 kbps in 5.1 (in stereo from 64; default 192). Dolby TrueHD comes after the Dolby ones.
 • Subtitles · «Burn into the picture»: the selected subtitle is drawn into the video; it shows on any device, but it can no longer be removed. Only one, and the video must be re-encoded (if it was in Passthrough, it becomes H.265). Text ones (SRT, ASS) are drawn on the final picture; image ones (PGS, DVD), on the original (with «Black bars» → «Remove them», whatever is in the bars is cut).
@@ -8221,7 +9477,7 @@ Uses FFmpeg (ffmpeg.org, BtbN build) under the GNU GPL v3 license.
 Jmg VideoEncoder is free software under the GNU GPL v3 license.
 Contact: jmgsoftwaremultimedia@gmail.com
 Support the project: https://www.paypal.com/paypalme/JmgSoftware
-Making Jmg SuiteMultimedia (this program and Jmg AudioProcesador 5.1) has taken a huge amount of work: about 45 days, with tests on real movies. Developed with the help of Claude, Anthropic's AI.
+Making Jmg SuiteMultimedia (this program and Jmg AudioProcesador 5.1) has been a huge amount of work and dedication, with tests on real movies. Developed with the help of Claude, Anthropic's AI.
 """
 AYUDA["fr"]="""JMG VIDEOENCODER · AIDE
 
@@ -8244,9 +9500,9 @@ VIDÉO
 AUDIO
 • Toutes les pistes de la vidéo : vous pouvez changer l'ordre (⬆ ⬇), la langue, le titre, la piste par défaut et retirer celles que vous ne voulez pas (double-clic).
 • Codecs : Passthrough (sans toucher), AC3, E-AC3, DTS, AAC, MP3 (stéréo seulement : le 5.1 est réduit en stéréo), FLAC et Opus. «Aften Dolby Digital» (par défaut) fait l'AC3 avec Aften, qui donne une meilleure dynamique dans les films qui en ont beaucoup ; «AC3 · FFmpeg», avec FFmpeg. Ses réglages, avec «⚙ Aften...» comme ceux des autres formats (par défaut, commutation de blocs et bande passante fixe complète) : CBR ou VBR, bande passante, précision, filtres, dynamique (DRC et niveau de dialogue) et les informations du flux pour l'amplificateur (Dolby Surround EX, Dolby Headphone, convertisseur A/D Standard ou HDCD, downmix préféré et ses niveaux). Tous les appareils ne lisent pas un AC3 VBR.
-• Plage dynamique / Compression : curseur avec le centre éteint. À gauche (1-10) plage dynamique : plus de contraste. À droite (1-10) compression : les sons faibles montent (pour regarder le film la nuit). Un pour les avant et les arrière, un autre pour le central. Le caisson de basses n'est pas modifié. Elle se trouve dans «Visual / Waves» (onglet Audio), à droite de Presence, où on la voit sur les ondes. À sa droite, «Channel separation» (-10 à +10) : plus ou moins de séparation entre gauche et droite et entre l'avant et l'arrière, sans monter le volume. Son «Auto» mesure la séparation du film et met celle qui lui convient selon son rythme (plus pour l'action, moins pour les films calmes) ; le central n'est jamais touché. L'«Auto» de la plage dynamique / compression ne touche pas au central : c'est la référence (à la main, c'est possible). L'«Auto» de Presence prend le central comme référence (il ne monte pas la voix : si le central est faible, il baisse les autres) et celui du volume par canal ne fait que baisser les frontaux et les surrounds, jamais les monter. Il est conseillé de régler en avant-dernier la Channel separation et en dernier le Volume per channel.
+• «Dynamic processing» (celui de Jmg AudioProcesador, sans Azid ; il remplace l'ancien «Dynamic range / Compression») : il se trouve dans «Visual / Waves» (onglet Audio), à droite de «Presence», où l'on voit son effet sur les ondes. Mode : 0 = éteint · 1 Lift : remonte les sons faibles · 2 Impact : les sons forts ressortent · 3 les deux. Trois groupes, chacun de 0 à 15 (0 = sans effet) : avant et arrière, centre et caisson de basses (mieux vaut laisser le caisson à 0 si vous utilisez Double Bass). «Limiter ceiling» : aucun pic ne dépasse ce niveau ; «No limit» peut saturer si vous poussez beaucoup l'effet. Son «Auto» mesure la plage dynamique du film : si ce n'est pas nécessaire, il reste éteint ; sinon il met Lift + Impact sur les avant et les arrière (le centre est la référence et n'est pas touché). Il passe tel quel à Jmg AudioProcesador et revient tel quel. À sa droite, «Channel separation» (-15 à +15) : plus ou moins de séparation entre gauche et droite et entre avant et arrière, sans monter le volume. Son «Auto» mesure la séparation du film et règle celle qui lui convient selon son agitation (plus pour l'action, moins pour les films calmes) ; le centre n'est jamais touché. L'«Auto» de Presence prend le centre comme référence (il ne monte pas la voix : si le centre est bas, il baisse les autres) et celui du volume par canal ne fait que baisser les avant et les surrounds, jamais les monter. Il est conseillé de faire en avant-dernier la Channel separation et en dernier le volume par canal. Réglages fins, de 1 en 1 : Presence, Channel separation et égaliseur de -15 à +15 ; Dynamic processing de 0 à 15 ; Double Bass de 0 à 6.
 • Volume par canal, Lissage numérique (excès d'aigus des films des années 80 et 90) et Égaliseur 3 bandes (avant, central et arrière).
-• Ordre conseillé : d'abord Presence et/ou Dynamic range, puis les autres effets, et toujours en dernier Volume per channel : ainsi le volume de chaque canal se règle sur le résultat de tout le reste, plus finement.
+• Ordre conseillé : d'abord Presence et/ou Dynamic processing, puis les autres effets, et toujours en dernier Volume per channel : ainsi le volume de chaque canal se règle sur le résultat de tout le reste, plus finement.
 • Chaque «Auto» mesure la piste avec les autres effets déjà appliqués et place ses réglages ; appuyé de nouveau sans rien toucher, il revient à 0. Les effets sont ceux de la piste sélectionnée ; en Passthrough la piste est recompressée avec son propre codec.
 • TrueHD et FLAC sont sans perte : au lieu des kbps, vous choisissez 16 ou 24 bits.
 • Double Bass : copie les graves du caisson vers les enceintes et ceux des enceintes vers le caisson (seulement sur les pistes avec caisson), avec son «Auto». Son «Auto» règle le Double Bass (1-3) si les enceintes manquent de graves profonds ou si le caisson est faible ; s'ils sont équilibrés, 0. Coupure par défaut : 90 Hz.
@@ -8254,7 +9510,7 @@ AUDIO
 • «▶ Check synchronization» (dans Synchronization) : la vidéo dans sa fenêtre avec la piste telle qu'elle sortira (delay, parties et effets), depuis le point choisi ou depuis chaque partie, pour vérifier de vos propres yeux si les lèvres suivent la voix. Au même moment, vous pouvez aussi écouter la piste non corrigée ou celle de référence. C'est la même fenêtre que dans Jmg AudioProcesador.
 • Framerate (dans Synchronization) : pour une piste d'une édition à 25 fps dans un film à 23,976 (ou l'inverse), comme dans Jmg AudioProcesador : change sa vitesse exacte, avec ou sans changement de tonalité, avant le delay et les parties. Quand vous ajoutez une piste d'un autre fichier qui dure 4 % de moins (ou de plus) que la vidéo, le programme le détecte, le règle tout seul et vous prévient. Calculez ensuite le delay.
 • Écouter : dans «Visual / Waves» de Audio, «▶ Before» ou «▶ After» (ou clic sur les ondes) ; ⏸ pause (pressé à nouveau, ça continue) et ⏹ arrête et revient au début. En multicanal (pour un amplificateur AV) ou en stéréo.
-• Pistes audio, comme dans Jmg AudioProcesador : la piste traitée (avec des effets ; changer seulement le codec ou le bitrate ne compte pas) sort en premier et par défaut, avec le titre «Jmg procesada» (modifiable), et l'originale est conservée derrière. «🚫 Remove original» la retire (la ligne passe en rouge pâle ; à nouveau, elle revient) ; sur une piste non traitée, elle la retire de la vidéo. «➕ Add track» apporte une piste d'un autre fichier et «➖ Delete track» la retire de la liste (le fichier d'origine n'est pas modifié). Volume par canal : de -30 à +20 dB, avec décimales, comme dans Jmg AudioProcesador. S'il y a deux pistes traitées ou plus, au moment du traitement on vous demande laquelle passe en premier et par défaut. «🔍 See everything» (avant le traitement) et Edit/Log indiquent les effets audio de chaque piste. «Visual / Waves» ne recalcule pas les ondes si rien n'a changé. Une position sous -30, c'est «Mute» (en rouge) : ce canal est muet. Le volume par canal s'applique en dernier (après Double Bass et Channel separation) : ce que vous réglez est exactement ce que ce canal monte ou baisse.
+• Pistes audio, comme dans Jmg AudioProcesador : la piste traitée (avec des effets ; changer seulement le codec ou le bitrate ne compte pas) sort en premier et par défaut, avec le titre «Jmg procesada» (modifiable), et l'originale est conservée derrière. «🚫 Remove original» la retire (la ligne passe en rouge pâle ; à nouveau, elle revient) ; sur une piste non traitée, elle la retire de la vidéo. «➕ Add track» apporte une piste d'un autre fichier et «➖ Delete track» la retire de la liste (le fichier d'origine n'est pas modifié). Volume par canal : de -30 à +20 dB, avec décimales, comme dans Jmg AudioProcesador. S'il y a deux pistes traitées ou plus, au moment du traitement on vous demande laquelle passe en premier et par défaut. «🔍 See everything» (avant le traitement) et Edit/Log indiquent les effets audio de chaque piste. «Visual / Waves» ne recalcule pas les ondes si rien n'a changé. Une position sous -30, c'est «Mute» (en rouge) : ce canal est muet. Le volume par canal s'applique en dernier (après Double Bass et Channel separation) : ce que vous réglez est exactement ce que ce canal monte ou baisse. AAC, FLAC et Opus conservent le 7.1 (l'AAC jusqu'à 768 kbps) ; AC3, E-AC3, DTS et TrueHD le ramènent en 5.1.
 • «➕ Core» (onglet Audio ; ne s'active que sur les pistes qui en ont un) : une piste DTS-HD (Master Audio ou High Resolution) contient un DTS normal pour les appareils qui ne comprennent pas le HD, et une piste Dolby Atmos (TrueHD) un TrueHD sans Atmos ; ceci le sort aussi comme piste séparée (en MKV), sans réencodage. À nouveau : il est retiré.
 • Dans «Information», le bouton droit de la souris : «Copy» et «Select all» (aussi dans le Log). À l'ouverture, l'onglet Video se voit en entier ; la ligne du milieu se déplace et elle est mémorisée.
 • En appuyant sur PROCESS, une fenêtre montre l'essentiel (chaque vidéo et le fichier qui sortira, et les avertissements) ; «🔍 See everything» montre tout (vidéo, image, découpe, chaque piste, sous-titres et les commandes FFmpeg) et se copie avec «📋 Copy all». «Oui» pour commencer.
@@ -8266,8 +9522,8 @@ SOUS-TITRES
 
 OPTIONS AVANCÉES
 • Vidéo · «More options» (onglet Video) : s'ouvre dans la fenêtre, avec «Back». En haut l'image avant et après ; en dessous, la barre (clic et flèches ← → = image par image ; avec Maj, seconde par seconde), la découpe par parties (plusieurs parties sont réunies en une seule vidéo), l'image (luminosité, contraste, saturation, teinte, netteté et débruitage) et les bandes noires (recherchées toutes seules à l'ajout de la vidéo). «Auto» dans Picture mesure le film et propose les valeurs (le presser à nouveau = tout à 0) ; si le résultat ne vous plaît pas, retouchez-le à la main.
-• «Play» ouvre une fenêtre vidéo avec le son depuis le point de la barre : l'original ou avec les réglages, avec la première piste audio incluse, en multicanal ou en stéréo.
-• Audio · «Visual / Waves» (onglet Audio) : les ondes de chaque canal avant et après, pour le segment choisi (5, 10 ou 30 premières minutes ou le fichier entier), comme dans Jmg AudioProcesador. Clic sur les ondes = écouter depuis là. Les ondes se génèrent toutes seules à l'entrée et se refont quand vous changez Presence ou le segment ; chaque canal est rempli, avec son pic en dBFS, et «Zoom» agrandit les ondes faibles. À droite de Presence, Dynamic range / Compression : avec elle, inutile de monter autant Presence. «Detail» (x1-x8) montre les ondes avec plus de résolution ; on se déplace avec la molette ou la barre en dessous, et pendant la lecture la vue suit le trait rouge.
+• «▶ Original» ou «▶ With the settings» ouvre une fenêtre vidéo avec le son depuis le point de la barre : l'original ou avec les réglages, avec la première piste audio incluse, en multicanal ou en stéréo.
+• Audio · «Visual / Waves» (onglet Audio) : les ondes de chaque canal avant et après, pour le segment choisi (5, 10 ou 30 premières minutes ou le fichier entier), comme dans Jmg AudioProcesador. Clic sur les ondes = écouter depuis là. La première fois que vous entrez avec une piste, les ondes se génèrent seules ; ensuite, en appuyant sur «🔄 Generate visualization» ; chaque canal est rempli, avec son pic en dBFS, et «Zoom» agrandit les ondes faibles. «Detail» (x1-x1024) montre les ondes avec plus de résolution ; on se déplace avec Maj + molette ou la barre en dessous, et pendant la lecture la vue suit le trait rouge. Deux zooms : ↕ «Zoom» (hauteur des ondes, x1-x16) et ↔ «Detail» (le temps, x1-x1024) ; cochez celui que vous voulez et la molette l'augmente ou le diminue.
 • Les effets s'additionnent : «After» porte tous ceux de la piste. La Présence (voix, ambiance, effets et caisson) avec son «Auto» s'y trouve aussi. Undo et Redo restent en bas.
 
 SORTIE
@@ -8278,7 +9534,33 @@ SORTIE
 • «🔍 Search online...» (Output → Cover) : cherche le film sur TMDB, montre ses affiches pour en choisir une et la met en pochette avec le nom «Titre (Année)». S'il y a un cover.jpg ou folder.jpg à côté de la vidéo (laissés par de nombreux programmes de rip, Kodi ou Plex) et que la vidéo n'a pas de pochette, il est utilisé tout seul. Il faut votre propre clé TMDB, gratuite : la première fois, le programme explique comment l'obtenir (compte sur themoviedb.org → Paramètres → API). Sans connexion, la recherche ne se fait simplement pas.
 
 À SAVOIR
+• Les réglages sont enregistrés en toute sécurité : d'abord dans un fichier temporaire, qui remplace ensuite le vrai en une seule fois ; en cas de coupure de courant ou de fermeture en cours de route, l'ancien fichier reste intact, jamais à moitié écrit.
+• Ce que crée le programme s'écrit d'abord sous le nom «nom.part.ext» et ne prend son vrai nom que s'il se termine bien : en cas de coupure de courant, un fichier coupé ne garde jamais le nom d'un fichier terminé. À l'ouverture, le programme signale les «.part» restés de la dernière fois (on peut les supprimer).
+• Les pistes AC3 et E-AC3 sont décodées telles quelles, sans la compression qu'elles contiennent (FFmpeg l'appliquait de lui-même et abaissait les crêtes) : on obtient le son d'origine.
 • «↶ Undo» et «↷ Redo» (en bas ; aussi Ctrl+Z et Ctrl+Y) : annulent et rétablissent, une par une, les 50 dernières actions (réglages, ajout ou retrait de vidéos...). «Reset» remet les réglages automatiques de l'onglet ouvert (Video, Audio, Subtitles ou Output) de la vidéo active ; avec «All», tout repart de zéro : la liste des vidéos, leurs informations, leurs réglages et la Sortie par défaut (↶ la récupère). Tant qu'une fenêtre comme «Combine videos» ou «Check synchronization» est ouverte, les boutons de la fenêtre principale ne fonctionnent pas : ces fenêtres ont leurs propres ↶ ↷. Dans les options avancées («More options» et «Visual / Waves»), ceux du bas fonctionnent.
+• La barre entre les deux colonnes du haut s'arrête quand les boutons ou le texte d'une colonne ne tiennent plus : ils ne sont jamais coupés.
+• Les barres de défilement n'apparaissent que si nécessaire, et l'explication de chaque réglage s'affiche au survol de la souris (les onglets n'ont pas de textes d'explication).
+• Le panneau des onglets prend juste la hauteur de ce que contient chaque onglet (ni espace vide ni rien de coupé) ; la liste des fichiers en haut prend le reste.
+• Le titre de chaque effet passe au vert quand il est activé (avec n'importe quel réglage modifié : intensité, coupure, plafond, fréquences...).
+• Le vert montre d'un coup d'œil tout ce qui agit : le titre de chaque effet ou section avec un réglage fait (aussi image, découpe, bandes noires, couleur) et les boutons qui ont déjà corrigé quelque chose (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Au survol d'un bouton, ses lettres passent au vert.
+• Les onglets passent aussi au vert : celui qui est ouvert et celui que survole la souris. À la fin, le dossier de destination s'ouvre avec le fichier déjà sélectionné.
+• DVD (dossier VIDEO_TS ou image .iso) : la langue des pistes audio et des sous-titres est lue dans le fichier .IFO du disque (les .VOB ne la contiennent pas).
+• «Visual / Waves» : Dynamic processing a sa «⚙» (seuil, attaque, relâchement, genou et le limiteur), avec «Default» ; double clic sur un curseur = valeur initiale, flèches = pas à pas. La description en dessous a disparu (plus de hauteur pour les ondes), et le zoom à la molette ne déplace plus les noms des canaux. Au survol d'un bouton, seules ses lettres passent au vert.
+• «Visual / Waves» plus détaillé : quatre fois plus de détail et «Detail» jusqu'à x1024 (aussi avec la molette).
+• «🔍 View large» (ou double-clic sur l'une des deux images) : l'avant et l'après en taille réelle, côte à côte, pour voir les détails. Faites glisser pour vous déplacer (les deux bougent ensemble) ; la molette zoome (x1-x4) ; Échap ferme.
+• «Encode with» : «CPU» (le processeur). Dans «Visual / Waves», toucher un effet arrête la lecture ; appuyez sur «🔄 Generate visualization» pour voir les ondes avec le changement et sur ▶ pour l'écouter. Pendant l'encodage, «⬅ Back» fonctionne toujours. «Auto» de l'image laisse la teinte à 0 et l'enlever remet tout à 0. Les infobulles disparaissent seules après quelques secondes.
+• Toute la puissance du processeur : chaque piste audio réencodée a son propre fil FFmpeg (avant, toutes dans un seul), donc plusieurs pistes sont traitées à la fois.
+• «Preview» (en bas, juste après le bouton de traitement) : montre en temps réel, avec le son, l'original à gauche et la vidéo encodée avec vos réglages (codec, qualité, résolution, image) à droite, à la même taille, à partir de l'endroit où en est l'encodage. Sa fenêtre peut être agrandie (double-clic = plein écran) pour voir les détails ; Échap ou un nouveau clic sur «Preview» la ferme. Elle n'est active que pendant l'encodage de la vidéo (pas pendant les étapes audio) et montre la vidéo en cours d'encodage. Avec des réglages lents, elle va aussi vite que le processeur encode.
+• «Save preset» enregistre tous les réglages de la vidéo choisie : vidéo, audio (chaque piste, avec son codec et ses effets), sous-titres, couverture et sortie. «Load preset» les applique à la vidéo choisie, piste par piste et dans l'ordre. Ce qui est propre à chaque film n'est pas enregistré : la coupe par segments, le recadrage des bandes noires, les délais, la synchronisation par segments et le nom.
+• Les presets sont communs à Jmg AudioProcesador et Jmg VideoEncoder (le même dossier) : chaque programme applique sa partie ; l'audio passe de l'un à l'autre et, dans Jmg AudioProcesador, la vidéo et les sous-titres n'ont aucun effet.
+• En passant des fichiers d'un programme à l'autre, ceux qui étaient ajoutés arrivent ajoutés (avec leurs réglages audio).
+• Ce qui est en cours (générer, écouter, lire, prévisualiser) passe en vert. En pause, «Resume» (dans Jmg VideoEncoder, ⏸) reste en vert.
+• À l'encodage, la vidéo est décodée par la carte graphique si possible (le processeur reste libre pour le codec) ; les codecs processeur utilisent tous ses cœurs.
+• «Visual / Waves» : la première fois que vous entrez avec une piste, les ondes se génèrent seules ; ensuite, en appuyant sur «🔄 Generate visualization» (si vous changez quelque chose, la lecture s'arrête et un message le signale). Elles commencent avec «Zoom» x1. Détail comme dans Sound Forge : «Detail» va jusqu'à x1024 et, à partir de x64, ce que vous voyez est lu avec tous ses échantillons (avant, dans le fichier ; après, avec les effets).
+• Dynamic processing : il n'y a plus de mode 0. Par défaut, le mode 2 avec les curseurs à 0 : à 0 il ne fait rien ; en montant un curseur, le mode choisi s'applique.
+• «Edit/Log» : en haut, ce que contient la vidéo des onglets (vidéo, image, découpe, chaque piste audio avec ses effets et les sous-titres), comme dans Jmg AudioProcesador ; en dessous, le journal.
+• «Encode with» : en plus de Processor, NVIDIA et AMD, «INTEL» (Quick Sync, cartes Intel Arc et graphiques intégrés) et «Vulkan» (toute carte avec des pilotes récents ; sur NVIDIA et AMD, leurs propres boutons donnent plus de qualité). Chacun ne s'active que si le PC peut l'utiliser.
+• Dans «Audio», Synchronization est à droite de Double Bass ; dans «Subtitles», la synchronisation du sous-titre est à droite de la liste ; dans «Output», Cover est à droite, sous «Also copy».
 • Une fois réduit, le programme reste en icône près de l'horloge (zone de notification), qui indique l'avancement : clic gauche = la fenêtre revient ; clic droit = menu (annuler le traitement, que faire à la fin —rien, quitter ou éteindre le PC—, ouvrir le dossier à la fin, quitter). Dans Output on peut le désactiver, pour réduire dans la barre des tâches comme d'habitude. En laissant la souris sur un bouton, une case ou un curseur, une description apparaît et disparaît seule après quelques secondes.
 • Options avancées («⚙» à côté du codec, dans Video et sur chaque piste Audio) : l'essentiel de chaque codec, pour qui veut affiner. Vidéo : réglage (tune : film, animation, grain...), profil et niveau, une image clé toutes les X secondes, images B et de référence, quantification adaptative, grain de film synthétique en AV1, deux passes et AQ de NVIDIA, qualité maximale et pré-analyse d'AMD, profil ProRes (Proxy à 4444 XQ) et DNxHR (LB à 444). Audio : les informations du flux AC3 et E-AC3 (niveau de dialogue, Dolby Surround EX, casque, HDCD, downmix) et la coupure des aigus, VBR de MP3 et d'Opus, compression FLAC. Ce qui n'est pas touché reste automatique ; chaque vidéo et chaque piste garde le sien. Dans la liste des pistes, «⚙» = avec options avancées. En AC3 et E-AC3 aussi le type de salle (grande ou petite) avec son niveau de mixage ; en DTS, la prédiction ADPCM. Le DTS de FFmpeg est toujours à débit constant : 768 ou 1536 kbps, les débits standard (en dessous, les lecteurs ne donnent que du bruit). AC3 (Aften et FFmpeg) : en 5.1, de 224 à 640 kbps ; en stéréo, de 96 à 640 (192 par défaut). E-AC3 : n'importe quel débit, saisi à la main, dès 192 kbps en 5.1 (en stéréo dès 64 ; 192 par défaut). Dolby TrueHD vient après les Dolby.
 • Sous-titres · «Burn into the picture» : le sous-titre choisi est dessiné dans la vidéo ; il se voit sur n'importe quel appareil, mais ne peut plus être retiré. Un seul, et la vidéo doit être réencodée (si elle était en Passthrough, elle passe en H.265). Ceux de texte (SRT, ASS) sont dessinés sur l'image finale ; ceux d'image (PGS, DVD), sur l'originale (en retirant les bandes noires, ce qui s'y trouve est coupé).
@@ -8298,7 +9580,7 @@ Utilise FFmpeg (ffmpeg.org, compilation de BtbN) sous licence GNU GPL v3.
 Jmg VideoEncoder est un logiciel libre sous licence GNU GPL v3.
 Contact : jmgsoftwaremultimedia@gmail.com
 Soutenez le projet : https://www.paypal.com/paypalme/JmgSoftware
-Réaliser Jmg SuiteMultimedia (ce programme et Jmg AudioProcesador 5.1) a demandé un travail énorme : environ 45 jours, avec des essais sur de vrais films. Développé avec l'aide de Claude, l'intelligence artificielle d'Anthropic.
+Réaliser Jmg SuiteMultimedia (ce programme et Jmg AudioProcesador 5.1) a été un travail et un dévouement énormes, avec des essais sur de vrais films. Développé avec l'aide de Claude, l'intelligence artificielle d'Anthropic.
 """
 AYUDA["de"]="""JMG VIDEOENCODER · HILFE
 
@@ -8321,9 +9603,9 @@ VIDEO
 AUDIO
 • Alle Spuren des Videos: Sie können Reihenfolge (⬆ ⬇), Sprache, Titel und Standardspur ändern und unerwünschte entfernen (Doppelklick).
 • Codecs: Passthrough (unverändert), AC3, E-AC3, DTS, AAC, MP3 (nur Stereo: 5.1 wird heruntergemischt), FLAC und Opus. «Aften Dolby Digital» (Standard) erzeugt das AC3 mit Aften, das bei Filmen mit großer Dynamik die bessere Dynamik liefert; «AC3 · FFmpeg» mit FFmpeg. Seine Einstellungen über «⚙ Aften...» wie bei den anderen Formaten (standardmäßig Blockumschaltung und feste volle Bandbreite): CBR oder VBR, Bandbreite, Genauigkeit, Filter, Dynamik (DRC und Dialogpegel) und die Bitstream-Informationen für den Verstärker (Dolby Surround EX, Dolby Headphone, A/D-Wandler Standard oder HDCD, bevorzugter Downmix und seine Pegel). Nicht jedes Gerät liest ein VBR-AC3.
-• Dynamikumfang / Kompression: Regler mit ausgeschalteter Mitte. Links (1-10) Dynamikumfang: mehr Kontrast. Rechts (1-10) Kompression: leise Töne werden lauter (für Filme in der Nacht). Einer für Front und Surround, einer für den Center. Der Subwoofer bleibt unverändert. Er befindet sich in «Visual / Waves» (Reiter Audio), rechts neben Presence, wo man ihn an den Wellen sieht. Rechts daneben «Channel separation» (-10 bis +10): mehr oder weniger Trennung zwischen links und rechts und zwischen vorne und hinten, ohne die Lautstärke anzuheben. Sein «Auto» misst die Trennung des Films und stellt je nach Tempo die passende ein (mehr bei Action, weniger bei ruhigen Filmen); der Center wird nie angetastet. Das «Auto» von Dynamikumfang / Kompression lässt den Center unberührt: Er ist die Referenz (von Hand geht es). Das «Auto» von Presence nimmt den Center als Bezug (es hebt die Stimme nicht an: ist der Center zu leise, senkt es die anderen), und das der Lautstärke pro Kanal senkt Front- und Surroundkanäle nur ab, hebt sie nie an. Empfohlen: als vorletzte Einstellung die Channel separation und als letzte das Volume per channel.
+• «Dynamic processing» (das aus Jmg AudioProcesador, ohne Azid; es ersetzt das frühere «Dynamic range / Compression»): es befindet sich in «Visual / Waves» (Reiter Audio), rechts von «Presence», wo man die Wirkung an den Wellen sieht. Modus: 0 = aus · 1 Lift: hebt leise Töne an · 2 Impact: laute Töne treten hervor · 3 beides. Drei Gruppen, jede von 0 bis 15 (0 = ohne Wirkung): Front und Surround, Center und Subwoofer (den Subwoofer besser auf 0 lassen, wenn Sie Double Bass verwenden). «Limiter ceiling»: kein Spitzenwert geht über diesen Pegel; «No limit» kann übersteuern, wenn Sie den Effekt stark erhöhen. Sein «Auto» misst den Dynamikumfang des Films: wenn nicht nötig, bleibt es aus; sonst setzt es Lift + Impact auf Front und Surround (der Center ist die Referenz und wird nicht verändert). Es geht unverändert an Jmg AudioProcesador und kommt unverändert zurück. Rechts davon «Channel separation» (-15 bis +15): mehr oder weniger Trennung zwischen links und rechts und zwischen vorne und hinten, ohne die Lautstärke anzuheben. Sein «Auto» misst die Trennung des Films und stellt die passende ein, je nachdem wie bewegt er ist (mehr bei Action, weniger bei ruhigen Filmen); der Center wird nie verändert. Das «Auto» von Presence nimmt den Center als Referenz (es hebt die Stimme nicht an: ist der Center leise, senkt es die anderen), und das der Lautstärke pro Kanal senkt nur Front und Surround, hebt sie nie an. Es wird empfohlen, dass die vorletzte Einstellung die Channel separation ist und die letzte die Lautstärke pro Kanal. Feineinstellungen in 1er-Schritten: Presence, Channel separation und Equalizer von -15 bis +15; Dynamic processing von 0 bis 15; Double Bass von 0 bis 6.
 • Lautstärke pro Kanal, Digitale Glättung (zu viele Höhen in Filmen der 80er und 90er) und 3-Band-Equalizer (Front, Center und Surround).
-• Empfohlene Reihenfolge: zuerst Presence und/oder Dynamic range, dann die übrigen Effekte und immer zuletzt Volume per channel: So wird die Lautstärke jedes Kanals auf das Ergebnis aller anderen Einstellungen abgestimmt, feiner und besser kontrollierbar.
+• Empfohlene Reihenfolge: zuerst Presence und/oder Dynamic processing, dann die übrigen Effekte und immer zuletzt Volume per channel: So wird die Lautstärke jedes Kanals auf das Ergebnis aller anderen Einstellungen abgestimmt, feiner und besser kontrollierbar.
 • Jedes «Auto» misst die Spur mit den übrigen Effekten und stellt seine Regler ein; erneut gedrückt, ohne etwas zu ändern, geht es auf 0 zurück. Die Effekte gehören zur ausgewählten Spur; bei Passthrough wird die Spur mit ihrem eigenen Codec neu komprimiert.
 • TrueHD und FLAC sind verlustfrei: statt kbps wählen Sie 16 oder 24 Bit.
 • Double Bass: kopiert den Bass des Subwoofers zu den Lautsprechern und den der Lautsprecher zum Subwoofer (nur bei Spuren mit Subwoofer), mit seinem «Auto». Sein «Auto» setzt Double Bass (1-3), wenn den Lautsprechern tiefer Bass fehlt oder der Subwoofer schwach ist; sind sie ausgewogen, 0. Standard-Trennfrequenz: 90 Hz.
@@ -8331,7 +9613,7 @@ AUDIO
 • «▶ Check synchronization» (in Synchronization): das Video in seinem Fenster mit der Spur so, wie sie herauskommt (Delay, Teile und Effekte), ab dem gewählten Punkt oder ab jedem Teil, damit Sie mit eigenen Augen sehen, ob die Lippen zur Stimme passen. An derselben Stelle können Sie auch die unkorrigierte Spur oder die Referenzspur hören. Es ist dasselbe Fenster wie in Jmg AudioProcesador.
 • Framerate (in Synchronization): für eine Spur aus einer 25-fps-Ausgabe in einem 23,976-Film (oder umgekehrt), wie in Jmg AudioProcesador: ändert ihre genaue Geschwindigkeit, mit oder ohne Tonhöhenänderung, vor Delay und Teilen. Fügen Sie eine Spur aus einer anderen Datei hinzu, die 4 % kürzer (oder länger) als das Video ist, erkennt das Programm dies, stellt es selbst ein und meldet es. Danach den Delay berechnen.
 • Anhören: in den «Visual / Waves» von Audio, «▶ Before» oder «▶ After» (oder Klick auf die Wellen); ⏸ Pause (erneut gedrückt, geht es weiter) und ⏹ stoppt und springt an den Anfang. Mehrkanalig (für einen AV-Receiver) oder in Stereo.
-• Audiospuren wie in Jmg AudioProcesador: Die bearbeitete Spur (mit Effekten; nur Codec oder Bitrate zu ändern zählt nicht) kommt zuerst und als Standard, mit dem Titel «Jmg procesada» (änderbar), und die Originalspur bleibt dahinter erhalten. «🚫 Remove original» entfernt sie (die Zeile wird hellrot; erneut gedrückt, kommt sie zurück); bei einer unbearbeiteten Spur wird sie aus dem Video entfernt. «➕ Add track» holt eine Spur aus einer anderen Datei, «➖ Delete track» nimmt sie aus der Liste (die Originaldatei bleibt unberührt). Lautstärke pro Kanal: von -30 bis +20 dB, mit Dezimalstellen, wie in Jmg AudioProcesador. Gibt es zwei oder mehr bearbeitete Spuren, wird beim Verarbeiten gefragt, welche zuerst und als Standard kommt. «🔍 See everything» (vor dem Verarbeiten) und Edit/Log nennen die Audioeffekte jeder Spur. «Visual / Waves» berechnet die Wellen nicht neu, wenn sich nichts geändert hat. Eine Stufe unter -30 ist «Mute» (rot): dieser Kanal ist stumm. Die Lautstärke pro Kanal wird zuletzt angewendet (nach Double Bass und Channel separation): Was Sie einstellen, ist genau, um wie viel dieser Kanal lauter oder leiser wird.
+• Audiospuren wie in Jmg AudioProcesador: Die bearbeitete Spur (mit Effekten; nur Codec oder Bitrate zu ändern zählt nicht) kommt zuerst und als Standard, mit dem Titel «Jmg procesada» (änderbar), und die Originalspur bleibt dahinter erhalten. «🚫 Remove original» entfernt sie (die Zeile wird hellrot; erneut gedrückt, kommt sie zurück); bei einer unbearbeiteten Spur wird sie aus dem Video entfernt. «➕ Add track» holt eine Spur aus einer anderen Datei, «➖ Delete track» nimmt sie aus der Liste (die Originaldatei bleibt unberührt). Lautstärke pro Kanal: von -30 bis +20 dB, mit Dezimalstellen, wie in Jmg AudioProcesador. Gibt es zwei oder mehr bearbeitete Spuren, wird beim Verarbeiten gefragt, welche zuerst und als Standard kommt. «🔍 See everything» (vor dem Verarbeiten) und Edit/Log nennen die Audioeffekte jeder Spur. «Visual / Waves» berechnet die Wellen nicht neu, wenn sich nichts geändert hat. Eine Stufe unter -30 ist «Mute» (rot): dieser Kanal ist stumm. Die Lautstärke pro Kanal wird zuletzt angewendet (nach Double Bass und Channel separation): Was Sie einstellen, ist genau, um wie viel dieser Kanal lauter oder leiser wird. AAC, FLAC und Opus behalten 7.1 (AAC bis 768 kbps); AC3, E-AC3, DTS und TrueHD reduzieren es auf 5.1.
 • «➕ Core» (Registerkarte Audio; nur bei Spuren aktiv, die einen Kern haben): Eine DTS-HD-Spur (Master Audio oder High Resolution) enthält ein normales DTS für Geräte, die kein HD verstehen, und eine Dolby-Atmos-Spur (TrueHD) ein TrueHD ohne Atmos; damit kommt er zusätzlich als eigene Spur heraus (in MKV), ohne Neukodierung. Erneut gedrückt: wird er entfernt.
 • In «Information» die rechte Maustaste: «Copy» und «Select all» (auch im Log). Beim Öffnen ist der Reiter Video ganz sichtbar; die Linie in der Mitte lässt sich ziehen und wird gespeichert.
 • Beim Drücken von PROCESS zeigt ein Fenster das Wesentliche (jedes Video, die entstehende Datei und die Hinweise); «🔍 See everything» zeigt alles (Video, Bild, Schnitt, jede Spur, Untertitel und die FFmpeg-Befehle) und lässt sich mit «📋 Copy all» kopieren. «Ja» zum Starten.
@@ -8343,8 +9625,8 @@ UNTERTITEL
 
 ERWEITERTE OPTIONEN
 • Video · «More options» (Reiter Video): öffnet sich im Fenster, mit «Back». Oben das Bild vorher und nachher; darunter der Balken (Klick und Pfeile ← → = Bild für Bild; mit Umschalt Sekunde für Sekunde), der Schnitt in Teilen (mehrere Teile werden zu einem Video verbunden), das Bild (Helligkeit, Kontrast, Sättigung, Farbton, Schärfe und Rauschminderung) und die schwarzen Balken (werden beim Hinzufügen des Videos selbst gesucht). «Auto» bei Picture misst den Film und schlägt die Werte vor (erneut drücken = alles auf 0); gefällt Ihnen das Ergebnis nicht, korrigieren Sie es von Hand.
-• «Play» öffnet ein Videofenster mit Ton ab der Stelle des Balkens: das Original oder mit den Einstellungen, mit der ersten eingeschlossenen Audiospur, mehrkanalig oder in Stereo.
-• Audio · «Visual / Waves» (Reiter Audio): die Wellen jedes Kanals vorher und nachher für den gewählten Abschnitt (erste 5, 10 oder 30 Minuten oder die ganze Datei), wie in Jmg AudioProcesador. Klick auf die Wellen = ab dort anhören. Die Wellen werden beim Öffnen selbst erzeugt und bei Änderung von Presence oder Abschnitt neu berechnet; jeder Kanal wird gefüllt gezeichnet, mit seinem Spitzenpegel in dBFS, und «Zoom» vergrößert leise Wellen. Rechts neben Presence: Dynamic range / Compression: damit muss Presence nicht so stark angehoben werden. «Detail» (x1-x8) zeigt die Wellen mit mehr Auflösung; mit dem Mausrad oder dem Balken darunter verschieben, und beim Abspielen folgt die Ansicht der roten Linie.
+• «▶ Original» oder «▶ With the settings» öffnet ein Videofenster mit Ton ab der Stelle des Balkens: das Original oder mit den Einstellungen, mit der ersten eingeschlossenen Audiospur, mehrkanalig oder in Stereo.
+• Audio · «Visual / Waves» (Reiter Audio): die Wellen jedes Kanals vorher und nachher für den gewählten Abschnitt (erste 5, 10 oder 30 Minuten oder die ganze Datei), wie in Jmg AudioProcesador. Klick auf die Wellen = ab dort anhören. Beim ersten Öffnen mit einer Spur werden die Wellen von selbst erzeugt, danach mit «🔄 Generate visualization»; jeder Kanal wird gefüllt gezeichnet, mit seinem Spitzenpegel in dBFS, und «Zoom» vergrößert leise Wellen. «Detail» (x1-x1024) zeigt die Wellen mit mehr Auflösung; mit Umschalt + Mausrad oder dem Balken darunter verschieben, und beim Abspielen folgt die Ansicht der roten Linie. Zwei Zooms: ↕ «Zoom» (Höhe der Wellen, x1-x16) und ↔ «Detail» (die Zeit, x1-x1024); markieren Sie den gewünschten, und das Mausrad vergrößert oder verkleinert ihn.
 • Die Effekte summieren sich: «After» enthält alle der Spur. Dort ist auch Präsenz (Stimme, Ambiente, Effekte und Subwoofer) mit ihrem «Auto». Undo und Redo bleiben unten.
 
 AUSGABE
@@ -8355,7 +9637,33 @@ AUSGABE
 • «🔍 Search online...» (Output → Cover): sucht den Film bei TMDB, zeigt seine Poster zur Auswahl und setzt das gewählte als Cover, mit dem Namen «Titel (Jahr)». Liegt neben dem Video eine cover.jpg oder folder.jpg (wie sie viele Ripping-Programme, Kodi oder Plex anlegen) und hat das Video kein Cover, wird sie automatisch verwendet. Dafür brauchen Sie einen eigenen, kostenlosen TMDB-Schlüssel: Beim ersten Mal erklärt das Programm, wie Sie ihn bekommen (Konto auf themoviedb.org → Einstellungen → API). Ohne Verbindung wird einfach nicht gesucht.
 
 GUT ZU WISSEN
+• Einstellungen werden sicher gespeichert: zuerst in eine temporäre Datei, die dann die echte in einem Schritt ersetzt; fällt der Strom aus oder schließt sich das Programm mittendrin, bleibt die vorherige Datei vollständig erhalten, nie eine halb geschriebene.
+• Was das Programm erzeugt, wird zuerst als «name.part.ext» geschrieben und erhält seinen echten Namen erst, wenn es gut fertig wird: fällt mittendrin der Strom aus, trägt eine abgebrochene Datei nie den Namen einer fertigen. Beim Öffnen weist das Programm auf «.part»-Dateien vom letzten Mal hin (sie können gelöscht werden).
+• AC3- und E-AC3-Spuren werden so dekodiert, wie sie sind, ohne die darin enthaltene Kompression (FFmpeg wandte sie von sich aus an und senkte die Spitzen): Sie erhalten den Originalklang.
 • «↶ Undo» und «↷ Redo» (unten; auch Strg+Z und Strg+Y): machen die letzten 50 Aktionen einzeln rückgängig bzw. wieder (Einstellungen, Videos hinzufügen oder entfernen...). «Reset» stellt die automatischen Einstellungen des offenen Reiters (Video, Audio, Subtitles oder Output) des aktiven Videos wieder her; mit «All» alles von vorn: die Videoliste, ihre Informationen, ihre Einstellungen und die Standard-Ausgabe (↶ holt es zurück). Solange ein Fenster wie «Combine videos» oder «Check synchronization» offen ist, funktionieren die Tasten des Hauptfensters nicht: Diese Fenster haben eigene ↶ ↷. In den erweiterten Optionen («More options» und «Visual / Waves») funktionieren die unteren.
+• Der Trennbalken zwischen den beiden oberen Spalten stoppt, sobald die Schaltflächen oder der Text einer Spalte nicht mehr passen: Sie werden nie abgeschnitten.
+• Bildlaufleisten erscheinen nur bei Bedarf, und die Erklärung jeder Einstellung erscheint, wenn man mit der Maus darüberfährt (die Registerkarten enthalten keine Erklärungstexte).
+• Der Registerkartenbereich nimmt genau die Höhe dessen ein, was jede Registerkarte enthält (kein leerer Platz, nichts fehlt); die Dateiliste oben bekommt den Rest.
+• Der Titel jedes Effekts wird grün, wenn er eingeschaltet ist (mit irgendeiner geänderten Einstellung: Stärke, Trennfrequenz, Obergrenze, Frequenzen...).
+• Grün zeigt auf einen Blick alles, was etwas bewirkt: den Titel jedes Effekts oder Bereichs mit einer vorgenommenen Einstellung (auch Bild, Zuschnitt, schwarze Balken, Farbe) und die Schaltflächen, die schon etwas korrigiert haben (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Fährt man mit der Maus über eine Schaltfläche, werden ihre Buchstaben grün.
+• Auch die Registerkarten werden grün: die geöffnete und die, über der die Maus steht. Am Ende öffnet sich der Zielordner mit der Datei bereits ausgewählt.
+• DVD (VIDEO_TS-Ordner oder .iso-Abbild): die Sprache der Audiospuren und Untertitel wird aus der .IFO-Datei der Disc gelesen (die .VOB-Dateien enthalten sie nicht).
+• «Visual / Waves»: Dynamic processing hat sein «⚙» (Schwelle, Attack, Release, Knie und den Limiter), mit «Default»; Doppelklick auf einen Regler = Anfangswert, Pfeiltasten = schrittweise. Die Beschreibung darunter entfällt (mehr Höhe für die Wellen), und Zoomen mit dem Mausrad verschiebt die Kanalnamen nicht mehr. Beim Überfahren einer Schaltfläche werden nur ihre Buchstaben grün.
+• «Visual / Waves» mit höherer Auflösung: viermal mehr Detail und «Detail» bis x1024 (auch mit dem Mausrad).
+• «🔍 View large» (oder Doppelklick auf eines der beiden Bilder): Vorher und Nachher in Originalgröße nebeneinander, um die Details zu sehen. Ziehen zum Verschieben (beide bewegen sich gemeinsam); das Mausrad zoomt (x1-x4); Esc schließt.
+• «Encode with»: «CPU» (der Prozessor). In «Visual / Waves» stoppt das Berühren eines Effekts die Wiedergabe; drücken Sie «🔄 Generate visualization», um die Wellen mit der Änderung zu sehen, und ▶, um es zu hören. Während der Kodierung funktioniert «⬅ Back» weiterhin. Bild-«Auto» lässt den Farbton auf 0, und beim Ausschalten geht alles auf 0 zurück. Tooltips verschwinden nach einigen Sekunden von selbst.
+• Volle Prozessorleistung: jede neu kodierte Audiospur läuft in ihrem eigenen FFmpeg-Thread (vorher alle in einem), so werden mehrere Spuren gleichzeitig verarbeitet.
+• «Preview» (unten, direkt nach der Verarbeiten-Schaltfläche): zeigt in Echtzeit mit Ton links das Original und rechts das mit Ihren Einstellungen (Codec, Qualität, Auflösung, Bild) kodierte Video in gleicher Größe, ab der Stelle, an der die Kodierung gerade ist. Das Fenster lässt sich maximieren (Doppelklick = Vollbild), um Details zu sehen; Esc oder ein weiterer Klick auf «Preview» schließt es. Es ist nur während der Videokodierung aktiv (nicht bei den Audioschritten) und zeigt das Video, das gerade kodiert wird. Bei langsamen Einstellungen läuft es so schnell, wie der Prozessor kodiert.
+• «Save preset» speichert alle Einstellungen des gewählten Videos: Video, Audio (jede Spur mit ihrem Codec und ihren Effekten), Untertitel, Cover und Ausgabe. «Load preset» wendet sie auf das gewählte Video an, Spur für Spur der Reihe nach. Was zu jedem Film gehört, wird nicht gespeichert: der Schnitt in Abschnitten, das Zuschneiden der schwarzen Balken, die Verzögerungen, die Synchronisation in Abschnitten und der Name.
+• Die Presets sind für Jmg AudioProcesador und Jmg VideoEncoder gemeinsam (derselbe Ordner): Jedes Programm übernimmt seinen Teil; der Ton geht von einem zum anderen, und in Jmg AudioProcesador wirken Video und Untertitel nicht.
+• Beim Übergeben von Dateien an das andere Programm kommen die hinzugefügten auch dort hinzugefügt an (mit ihren Audioeinstellungen).
+• Was gerade läuft (Erstellen, Anhören, Abspielen, Vorschau), wird grün. In der Pause bleibt «Resume» (in Jmg VideoEncoder ⏸) grün.
+• Beim Kodieren wird das Video nach Möglichkeit von der Grafikkarte dekodiert (der Prozessor bleibt für den Codec frei); die Prozessor-Codecs nutzen alle Kerne.
+• «Visual / Waves»: Beim ersten Öffnen mit einer Spur werden die Wellen von selbst erzeugt, danach mit «🔄 Generate visualization» (ändern Sie etwas, stoppt die Wiedergabe und ein Hinweis erscheint). Sie beginnen mit «Zoom» x1. Details wie in Sound Forge: «Detail» reicht bis x1024, und ab x64 wird das Sichtbare mit allen Samples gelesen (vorher aus der Datei, nachher mit den Effekten).
+• Dynamic processing: es gibt keinen Modus 0 mehr. Standard: Modus 2 mit den Reglern auf 0; bei 0 passiert nichts, wird ein Regler erhöht, gilt der gewählte Modus.
+• «Edit/Log»: oben, was das Video der Registerkarten enthält (Video, Bild, Zuschnitt, jede Audiospur mit ihren Effekten und die Untertitel), wie in Jmg AudioProcesador; darunter das Protokoll.
+• «Encode with»: neben Processor, NVIDIA und AMD auch «INTEL» (Quick Sync, Intel-Arc- und integrierte Grafik) und «Vulkan» (jede Karte mit aktuellen Treibern; bei NVIDIA und AMD liefern deren eigene Schaltflächen mehr Qualität). Jede Option ist nur aktiv, wenn der PC sie nutzen kann.
+• In «Audio» steht Synchronization rechts von Double Bass; in «Subtitles» steht die Synchronisation des Untertitels rechts von der Liste; in «Output» steht Cover rechts, unter «Also copy».
 • Minimiert bleibt das Programm als Symbol neben der Uhr (Infobereich), das den Fortschritt zeigt: Linksklick = das Fenster kommt zurück; Rechtsklick = Menü (Vorgang abbrechen, was am Ende passiert —nichts, beenden oder PC herunterfahren—, Ordner am Ende öffnen, beenden). Unter Output lässt es sich abschalten, um wie gewohnt in die Taskleiste zu minimieren. Bleibt die Maus über einer Schaltfläche, einem Kästchen oder einem Regler, erscheint eine Beschreibung, die nach ein paar Sekunden von selbst verschwindet.
 • Erweiterte Optionen («⚙» neben dem Codec, unter Video und bei jeder Audiospur): das Wichtigste jedes Codecs, für alle, die feinjustieren wollen. Video: Tune (Film, Animation, Korn...), Profil und Level, alle X Sekunden ein Schlüsselbild, B- und Referenzbilder, adaptive Quantisierung, synthetisches Filmkorn bei AV1, Zwei-Pass und AQ bei NVIDIA, höchste Qualität und Voranalyse bei AMD, ProRes-Profil (Proxy bis 4444 XQ) und DNxHR-Profil (LB bis 444). Audio: die Bitstream-Informationen von AC3 und E-AC3 (Dialogpegel, Dolby Surround EX, Kopfhörer, HDCD, Downmix) und die Höhengrenze, VBR bei MP3 und Opus, FLAC-Kompression. Was nicht angefasst wird, bleibt automatisch; jedes Video und jede Spur behält das Seine. In der Spurliste bedeutet «⚙»: mit erweiterten Optionen. Bei AC3 und E-AC3 außerdem der Raumtyp (groß oder klein) mit seinem Mischpegel; bei DTS die ADPCM-Prädiktion. Das DTS von FFmpeg hat immer eine feste Bitrate: 768 oder 1536 kbps, die Standardwerte (darunter geben Player nur Rauschen aus). AC3 (Aften und FFmpeg): bei 5.1 von 224 bis 640 kbps; bei Stereo von 96 bis 640 (Standard 192). E-AC3: jede Bitrate, von Hand eingegeben, ab 192 kbps bei 5.1 (bei Stereo ab 64; Standard 192). Dolby TrueHD steht hinter den Dolby-Formaten.
 • Untertitel · «Burn into the picture»: der gewählte Untertitel wird ins Video gezeichnet; er ist auf jedem Gerät zu sehen, lässt sich aber nicht mehr entfernen. Nur einer, und das Video muss neu kodiert werden (war es Passthrough, wird es H.265). Text-Untertitel (SRT, ASS) werden auf das fertige Bild gezeichnet, Bild-Untertitel (PGS, DVD) auf das Original (beim Entfernen schwarzer Balken wird abgeschnitten, was darin liegt).
@@ -8375,7 +9683,7 @@ Verwendet FFmpeg (ffmpeg.org, BtbN-Build) unter der Lizenz GNU GPL v3.
 Jmg VideoEncoder ist freie Software unter der Lizenz GNU GPL v3.
 Kontakt: jmgsoftwaremultimedia@gmail.com
 Unterstützen Sie das Projekt: https://www.paypal.com/paypalme/JmgSoftware
-Jmg SuiteMultimedia (dieses Programm und Jmg AudioProcesador 5.1) zu entwickeln war eine riesige Arbeit: etwa 45 Tage, mit Tests an echten Filmen. Entwickelt mit Hilfe von Claude, der KI von Anthropic.
+Jmg SuiteMultimedia (dieses Programm und Jmg AudioProcesador 5.1) zu entwickeln war eine riesige Arbeit und Hingabe, mit Tests an echten Filmen. Entwickelt mit Hilfe von Claude, der KI von Anthropic.
 """
 AYUDA["pt"]="""JMG VIDEOENCODER · AJUDA
 
@@ -8398,9 +9706,9 @@ VÍDEO
 ÁUDIO
 • Todas as faixas do vídeo: pode mudar a ordem (⬆ ⬇), o idioma, o título, a faixa predefinida e retirar as que não quer (duplo clique).
 • Codecs: Passthrough (sem tocar), AC3, E-AC3, DTS, AAC, MP3 (só estéreo: o 5.1 passa a estéreo), FLAC e Opus. «Aften Dolby Digital» (por defeito) faz o AC3 com o Aften, que dá melhor gama dinâmica nos filmes que têm muita; «AC3 · FFmpeg», com o FFmpeg. Os seus ajustes, com «⚙ Aften...» como os dos outros formatos (por defeito, comutação de blocos e largura de banda fixa completa): CBR ou VBR, largura de banda, precisão, filtros, gama dinâmica (DRC e nível de diálogo) e a informação do fluxo para o amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Standard ou HDCD, downmix preferido e os seus níveis). Nem todos os aparelhos leem um AC3 VBR.
-• Gama dinâmica / Compressão: controlo com o centro desligado. À esquerda (1-10) gama dinâmica: mais contraste. À direita (1-10) compressão: os sons fracos sobem (para ver o filme à noite). Um para frontais e traseiros, outro para o central. O subwoofer não é alterado. Está em «Visual / Waves» (separador Audio), à direita de Presence, onde se vê nas ondas. À sua direita, «Channel separation» (-10 a +10): mais ou menos separação entre esquerda e direita e entre a frente e trás, sem subir o volume. O seu «Auto» mede a separação do filme e põe a que lhe convém conforme seja mais ou menos movimentado (mais nos de ação, menos nos calmos); o central nunca se toca. O «Auto» da gama dinâmica / compressão não toca no central: é a referência (à mão, pode-se). O «Auto» de Presence toma o central como referência (não sobe a voz: se o central estiver baixo, baixa os outros) e o do volume por canal só baixa os frontais e os surrounds, nunca os sobe. Recomenda-se que o penúltimo ajuste seja a Channel separation e o último, o Volume per channel.
+• «Dynamic processing» (o do Jmg AudioProcesador, sem Azid; substitui o antigo «Dynamic range / Compression»): está em «Visual / Waves» (separador Audio), à direita de «Presence», onde se vê o efeito nas ondas. Modo: 0 = desligado · 1 Lift: sobe os sons fracos · 2 Impact: os sons fortes destacam-se · 3 as duas coisas. Três grupos, cada um de 0 a 15 (0 = sem efeito): frontais e traseiros, central e subwoofer (melhor deixar o subwoofer a 0 se usar Double Bass). «Limiter ceiling»: nenhum pico passa desse nível; «No limit» pode saturar se subir muito o efeito. O seu «Auto» mede a gama dinâmica do filme: se não for preciso, fica desligado; se não, põe Lift + Impact nos frontais e traseiros (o central é a referência e não se toca). Passa igual para o Jmg AudioProcesador e volta igual. À sua direita, «Channel separation» (-15 a +15): mais ou menos separação entre esquerda e direita e entre frente e trás, sem subir o volume. O seu «Auto» mede a separação do filme e põe a que lhe convém conforme seja mais ou menos agitado (mais nos de ação, menos nos calmos); o central nunca se toca. O «Auto» de Presence toma o central como referência (não sobe a voz: se o central estiver baixo, baixa os outros) e o do volume por canal só baixa os frontais e os surrounds, nunca os sobe. Recomenda-se que o penúltimo ajuste seja a Channel separation e o último, o volume por canal. Ajustes finos, de 1 em 1: Presence, Channel separation e equalizador de -15 a +15; Dynamic processing de 0 a 15; Double Bass de 0 a 6.
 • Volume por canal, Suavização digital (excesso de agudos dos filmes dos anos 80 e 90) e Equalizador de 3 bandas (frontais, central e traseiros).
-• Ordem recomendada: primeiro Presence e/ou Dynamic range, depois os outros efeitos e sempre por último Volume per channel: assim o volume de cada canal ajusta-se sobre o resultado de tudo o resto, com mais controlo e precisão.
+• Ordem recomendada: primeiro Presence e/ou Dynamic processing, depois os outros efeitos e sempre por último Volume per channel: assim o volume de cada canal ajusta-se sobre o resultado de tudo o resto, com mais controlo e precisão.
 • Cada «Auto» mede a faixa com os outros efeitos já aplicados e coloca os seus controlos; premido outra vez sem mexer em nada, volta a 0. Os efeitos são da faixa selecionada; com Passthrough a faixa volta a ser comprimida com o seu próprio codec.
 • TrueHD e FLAC são sem perdas: em vez de kbps escolhe 16 ou 24 bits.
 • Double Bass: copia os graves do subwoofer para as colunas e os das colunas para o subwoofer (só em faixas com subwoofer), com o seu «Auto». O seu «Auto» põe o Double Bass (1-3) se faltarem graves profundos às colunas ou se o subwoofer estiver fraco; se estiverem equilibrados, 0. Corte por defeito: 90 Hz.
@@ -8408,7 +9716,7 @@ VÍDEO
 • «▶ Check synchronization» (em Synchronization): o vídeo na sua janela com a faixa tal como vai sair (delay, partes e efeitos), a partir do ponto que escolher ou de cada parte, para ver com os próprios olhos se os lábios acompanham a voz. No mesmo momento também pode ouvir a faixa sem correção ou a de referência. É a mesma janela que no Jmg AudioProcesador.
 • Framerate (em Synchronization): para uma faixa de uma edição de 25 fps num filme de 23,976 (ou o contrário), como no Jmg AudioProcesador: muda a sua velocidade exata, com ou sem mudança de tom, antes do delay e das partes. Ao juntar uma faixa de outro ficheiro que dura 4 % menos (ou mais) do que o vídeo, o programa deteta-o, põe-no sozinho e avisa. Depois calcule o delay.
 • Ouvir: nas «Visual / Waves» de Audio, «▶ Before» ou «▶ After» (ou clique nas ondas); ⏸ pausa (premido outra vez, continua) e ⏹ para e volta ao início. Em multicanal (para um amplificador AV) ou em estéreo.
-• Faixas de áudio, como no Jmg AudioProcesador: a faixa processada (com efeitos; mudar só o codec ou o bitrate não conta) sai primeiro e por defeito, com o título «Jmg procesada» (pode mudar-se), e a original fica atrás. «🚫 Remove original» tira-a (a linha fica vermelho-claro; outra vez, volta); numa faixa sem processar, tira-a do vídeo. «➕ Add track» traz uma faixa de outro ficheiro e «➖ Delete track» tira-a da lista (o ficheiro original não é tocado). Volume por canal: de -30 a +20 dB, com décimas, como no Jmg AudioProcesador. Se houver duas ou mais faixas processadas, ao processar pergunta-se qual sai primeiro e por defeito. «🔍 See everything» (antes de processar) e Edit/Log indicam os efeitos de áudio de cada faixa. «Visual / Waves» não volta a calcular as ondas se nada mudou. Uma posição abaixo de -30 é «Mute» (a vermelho): esse canal fica em silêncio. O volume por canal aplica-se em último lugar (depois de Double Bass e Channel separation): o que define é exatamente o que esse canal sobe ou desce.
+• Faixas de áudio, como no Jmg AudioProcesador: a faixa processada (com efeitos; mudar só o codec ou o bitrate não conta) sai primeiro e por defeito, com o título «Jmg procesada» (pode mudar-se), e a original fica atrás. «🚫 Remove original» tira-a (a linha fica vermelho-claro; outra vez, volta); numa faixa sem processar, tira-a do vídeo. «➕ Add track» traz uma faixa de outro ficheiro e «➖ Delete track» tira-a da lista (o ficheiro original não é tocado). Volume por canal: de -30 a +20 dB, com décimas, como no Jmg AudioProcesador. Se houver duas ou mais faixas processadas, ao processar pergunta-se qual sai primeiro e por defeito. «🔍 See everything» (antes de processar) e Edit/Log indicam os efeitos de áudio de cada faixa. «Visual / Waves» não volta a calcular as ondas se nada mudou. Uma posição abaixo de -30 é «Mute» (a vermelho): esse canal fica em silêncio. O volume por canal aplica-se em último lugar (depois de Double Bass e Channel separation): o que define é exatamente o que esse canal sobe ou desce. AAC, FLAC e Opus mantêm o 7.1 (o AAC até 768 kbps); AC3, E-AC3, DTS e TrueHD reduzem-no para 5.1.
 • «➕ Core» (separador Audio; só se ativa nas faixas que o têm): uma faixa DTS-HD (Master Audio ou High Resolution) leva dentro um DTS normal para os aparelhos que não entendem o HD, e uma Dolby Atmos (TrueHD) leva um TrueHD sem Atmos; isto tira-o também como faixa à parte (em MKV), sem recomprimir. Outra vez: tira-se.
 • Em «Information», o botão direito do rato: «Copy» e «Select all» (também no Log). Ao abrir o programa, o separador Video vê-se inteiro; a linha do meio pode arrastar-se e fica guardada.
 • Ao premir PROCESS aparece uma janela com o essencial (cada vídeo, o ficheiro que vai sair e os avisos); «🔍 See everything» mostra tudo (vídeo, imagem, corte, cada faixa, legendas e os comandos do FFmpeg) e copia-se com «📋 Copy all». «Sim» para começar.
@@ -8420,8 +9728,8 @@ LEGENDAS
 
 OPÇÕES AVANÇADAS
 • Vídeo · «More options» (separador Video): abre-se dentro da janela, com «Back». Em cima a imagem antes e depois; em baixo, a barra (clique e setas ← → = imagem a imagem; com Shift, de segundo em segundo), o corte por partes (várias partes juntam-se num só vídeo), a imagem (brilho, contraste, saturação, tom, nitidez e remover ruído) e as barras pretas (procuradas sozinhas ao adicionar o vídeo). «Auto» em Picture mede o filme e propõe os valores (premir outra vez = tudo a 0); se não gostar do resultado, retoque-o à mão.
-• «Play» abre uma janela de vídeo com som a partir do ponto da barra: o original ou com as definições, com a primeira faixa de áudio incluída, em multicanal ou estéreo.
-• Áudio · «Visual / Waves» (separador Audio): as ondas de cada canal antes e depois, do troço que escolher (primeiros 5, 10 ou 30 minutos ou o ficheiro inteiro), como no Jmg AudioProcesador. Clique nas ondas = ouvir a partir daí. As ondas geram-se sozinhas ao entrar e refazem-se ao mudar Presence ou o troço; cada canal aparece preenchido, com o seu pico em dBFS, e «Zoom» amplia as ondas fracas. À direita de Presence, Dynamic range / Compression: com ela não é preciso subir tanto a Presence. «Detail» (x1-x8) mostra as ondas com mais resolução; movem-se com a roda ou com a barra de baixo, e enquanto toca a vista segue a linha vermelha.
+• «▶ Original» ou «▶ With the settings» abre uma janela de vídeo com som a partir do ponto da barra: o original ou com as definições, com a primeira faixa de áudio incluída, em multicanal ou estéreo.
+• Áudio · «Visual / Waves» (separador Audio): as ondas de cada canal antes e depois, do troço que escolher (primeiros 5, 10 ou 30 minutos ou o ficheiro inteiro), como no Jmg AudioProcesador. Clique nas ondas = ouvir a partir daí. Na primeira vez que entra com uma faixa as ondas geram-se sozinhas; depois, ao carregar em «🔄 Generate visualization»; cada canal aparece preenchido, com o seu pico em dBFS, e «Zoom» amplia as ondas fracas. «Detail» (x1-x1024) mostra as ondas com mais resolução; movem-se com Shift + roda ou com a barra de baixo, e enquanto toca a vista segue a linha vermelha. Dois zooms: ↕ «Zoom» (altura das ondas, x1-x16) e ↔ «Detail» (o tempo, x1-x1024); marque o que quiser e a roda do rato aumenta-o ou diminui-o.
 • Os efeitos somam-se: o «After» leva todos os da faixa. Aí está também a Presença (voz, ambiente, efeitos e subwoofer) com o seu «Auto». Undo e Redo continuam em baixo.
 
 SAÍDA
@@ -8432,7 +9740,33 @@ SAÍDA
 • «🔍 Search online...» (Output → Cover): procura o filme no TMDB, mostra os seus pósteres para escolher um e põe-no como capa com o nome «Título (Ano)». Se junto ao vídeo houver um cover.jpg ou folder.jpg (deixados por muitos programas de ripagem, Kodi ou Plex) e o vídeo não tiver capa, é usado sozinho. Precisa da sua própria chave do TMDB, gratuita: na primeira vez, o programa explica como obtê-la (conta em themoviedb.org → Definições → API). Sem ligação, simplesmente não procura.
 
 A TER EM CONTA
+• As definições são guardadas de forma segura: primeiro num ficheiro temporário, que depois substitui o verdadeiro de uma só vez; se faltar a luz ou o programa fechar a meio, fica o anterior inteiro, nunca um a meio.
+• O que o programa cria é escrito primeiro como «nome.part.ext» e só recebe o nome verdadeiro quando termina bem: se faltar a luz a meio, um ficheiro cortado nunca fica com o nome de um terminado. Ao abrir, o programa avisa dos «.part» que ficaram da última vez (podem ser apagados).
+• As faixas AC3 e E-AC3 são descodificadas tal como estão, sem a compressão que trazem dentro (o FFmpeg aplicava-a por conta própria e baixava os picos): chega o som original.
 • «↶ Undo» e «↷ Redo» (em baixo; também Ctrl+Z e Ctrl+Y): anulam e refazem, uma a uma, as últimas 50 ações (definições, adicionar ou retirar vídeos...). «Reset» repõe as definições automáticas do separador aberto (Video, Audio, Subtitles ou Output) do vídeo ativo; com «All», tudo do zero: a lista de vídeos, a sua informação, as suas definições e a Saída predefinida (↶ recupera). Enquanto uma janela como «Combine videos» ou «Check synchronization» estiver aberta, os botões da janela principal não funcionam: essas janelas têm os seus próprios ↶ ↷. Nas opções avançadas («More options» e «Visual / Waves») funcionam os de baixo.
+• A barra entre as duas colunas de cima para quando os botões ou o texto de uma coluna já não cabem: nunca ficam cortados.
+• As barras de deslocamento só aparecem quando são precisas, e a explicação de cada definição aparece ao passar o rato por cima (os separadores não têm textos de explicação).
+• O painel dos separadores fica com a altura certa do que cada separador tem (sem espaço vazio nem nada em falta); a lista de ficheiros em cima fica com o resto.
+• O título de cada efeito fica verde quando está ligado (com qualquer definição alterada: intensidade, corte, teto, frequências...).
+• O verde mostra de relance tudo o que está a fazer algo: o título de cada efeito ou secção com alguma definição feita (também imagem, corte, barras negras, cor) e os botões que já corrigiram algo (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Ao passar o rato por cima de um botão, as letras ficam verdes.
+• Os separadores também ficam verdes: o que está aberto e aquele sobre o qual passa o rato. No fim, a pasta de destino abre com o ficheiro já selecionado.
+• DVD (pasta VIDEO_TS ou imagem .iso): o idioma das faixas de áudio e das legendas é lido do ficheiro .IFO do disco (os .VOB não o trazem).
+• «Visual / Waves»: o Dynamic processing tem a sua «⚙» (limiar, ataque, libertação, joelho e o limitador), com «Default»; duplo clique num controlo = valor inicial, setas = passo a passo. Já não tem a descrição por baixo (mais altura para as ondas), e o zoom com a roda já não move os nomes dos canais. Ao passar o rato por um botão, só as letras ficam verdes.
+• «Visual / Waves» com mais resolução: quatro vezes mais detalhe e «Detail» até x1024 (também com a roda do rato).
+• «🔍 View large» (ou duplo clique numa das duas imagens): o antes e o depois em tamanho real, lado a lado, para ver os detalhes. Arraste para se mover (as duas movem-se juntas); a roda do rato faz zoom (x1-x4); Esc fecha.
+• «Encode with»: «CPU» (o processador). Em «Visual / Waves», mexer num efeito para o som; carregue em «🔄 Generate visualization» para ver as ondas com a mudança e em ▶ para o ouvir. Durante a codificação, «⬅ Back» continua a funcionar. O «Auto» da imagem deixa o Tom em 0 e ao tirá-lo volta tudo a 0. As descrições flutuantes desaparecem sozinhas após alguns segundos.
+• Toda a potência do processador: cada faixa de áudio recodificada vai no seu próprio fio do FFmpeg (antes, todas num só), assim várias faixas são processadas ao mesmo tempo.
+• «Preview» (em baixo, logo a seguir ao botão de processar): mostra em tempo real, com som, o original à esquerda e o vídeo codificado com os seus ajustes (codec, qualidade, resolução, imagem) à direita, do mesmo tamanho, a partir de onde vai a codificação. A janela pode ser maximizada (duplo clique = ecrã inteiro) para ver os detalhes; fecha-se com Esc ou com outro clique em «Preview». Só fica ativo durante a codificação do vídeo (não nos passos do áudio) e mostra o vídeo que está a ser codificado. Com ajustes lentos vai tão depressa quanto o processador codificar.
+• «Save preset» guarda todos os ajustes do vídeo escolhido: vídeo, áudio (cada faixa, com o seu codec e os seus efeitos), legendas, capa e saída. «Load preset» aplica-os ao vídeo escolhido, faixa a faixa e por ordem. Não se guarda o que é de cada filme: o corte por troços, o corte das barras pretas, os atrasos, a sincronização por troços e o nome.
+• Os presets são comuns ao Jmg AudioProcesador e ao Jmg VideoEncoder (a mesma pasta): cada programa aplica a sua parte; o áudio passa de um para o outro e, no Jmg AudioProcesador, o vídeo e as legendas não têm efeito.
+• Ao passar ficheiros de um programa para o outro, os que estavam adicionados chegam adicionados (com os seus ajustes de áudio).
+• O que está em curso (gerar, ouvir, reproduzir, pré-visualizar) fica a verde. Em pausa, «Resume» (no Jmg VideoEncoder, ⏸) fica a verde.
+• Ao codificar, o vídeo é descodificado pela placa gráfica se possível (o processador fica livre para o codec); os codecs por processador usam todos os núcleos.
+• «Visual / Waves»: na primeira vez que entra com uma faixa as ondas geram-se sozinhas; depois, ao carregar em «🔄 Generate visualization» (se mudar alguma coisa, o som para e aparece um aviso). Começam com «Zoom» x1. Detalhe como no Sound Forge: «Detail» chega a x1024 e, a partir de x64, o que se vê é lido com todas as amostras (antes, do ficheiro; depois, com os efeitos).
+• Dynamic processing: já não tem o modo 0. Por defeito, o modo 2 com os controlos a 0: a 0 não faz nada; ao subir um controlo aplica-se o modo escolhido.
+• «Edit/Log»: em cima, o que o vídeo dos separadores leva (vídeo, imagem, corte, cada faixa de áudio com os seus efeitos e as legendas), como no Jmg AudioProcesador; em baixo, o registo.
+• «Encode with»: além de Processor, NVIDIA e AMD, «INTEL» (Quick Sync, placas Intel Arc e gráficos integrados) e «Vulkan» (qualquer placa com drivers recentes; em NVIDIA e AMD, os seus próprios botões dão mais qualidade). Cada um só fica ativo se o PC o puder usar.
+• Em «Audio», Synchronization fica à direita de Double Bass; em «Subtitles», a sincronização da legenda fica à direita da lista; em «Output», Cover fica à direita, por baixo de «Also copy».
 • Ao minimizar, o programa fica como um ícone junto ao relógio (área de notificação), que mostra como vai o processo: clique esquerdo = a janela volta; clique direito = menu (cancelar o processo, o que fazer no fim —nada, sair ou desligar o PC—, abrir a pasta no fim, sair). Em Output pode desligar-se, para minimizar para a barra de tarefas como sempre. Deixando o rato sobre um botão, caixa ou controlo, aparece uma descrição, que desaparece sozinha após alguns segundos.
 • Opções avançadas («⚙» junto ao codec, em Video e em cada faixa de Audio): o mais importante de cada codec, para quem quiser afinar. Vídeo: ajuste (tune: cinema, animação, grão...), perfil e nível, uma imagem-chave a cada X segundos, imagens B e de referência, quantização adaptativa, grão de película sintético em AV1, duas passagens e AQ da NVIDIA, qualidade máxima e pré-análise da AMD, perfil ProRes (Proxy a 4444 XQ) e DNxHR (LB a 444). Áudio: a informação do fluxo AC3 e E-AC3 (nível de diálogo, Dolby Surround EX, auscultadores, HDCD, downmix) e o corte de agudos, VBR de MP3 e de Opus, compressão FLAC. O que não se toca fica automático; cada vídeo e cada faixa com o seu. Na lista de faixas, «⚙» = com opções avançadas. Em AC3 e E-AC3 também o tipo de sala (grande ou pequena) com o seu nível de mistura; em DTS, a predição ADPCM. O DTS do FFmpeg é sempre de bitrate fixo: 768 ou 1536 kbps, os padrão (com menos, os leitores só dão ruído). AC3 (Aften e FFmpeg): em 5.1, de 224 a 640 kbps; em estéreo, de 96 a 640 (por defeito 192). E-AC3: qualquer bitrate, escrito à mão, a partir de 192 kbps em 5.1 (em estéreo a partir de 64; por defeito 192). O Dolby TrueHD vem a seguir aos Dolby.
 • Legendas · «Burn into the picture»: a legenda escolhida fica desenhada no vídeo; vê-se em qualquer aparelho, mas já não se pode tirar. Só uma, e obriga a recomprimir o vídeo (se estava em Passthrough, passa a H.265). As de texto (SRT, ASS) desenham-se sobre a imagem final; as de imagem (PGS, DVD), sobre a original (ao tirar as barras pretas, o que estiver nelas é cortado).
@@ -8452,7 +9786,7 @@ Usa FFmpeg (ffmpeg.org, compilação de BtbN) com licença GNU GPL v3.
 Jmg VideoEncoder é software livre sob a licença GNU GPL v3.
 Contacto: jmgsoftwaremultimedia@gmail.com
 Apoie o projeto: https://www.paypal.com/paypalme/JmgSoftware
-Realizar o Jmg SuiteMultimedia (este programa e o Jmg AudioProcesador 5.1) custou um trabalho enorme: cerca de 45 dias, com testes em filmes reais. Desenvolvido com a ajuda do Claude, a inteligência artificial da Anthropic.
+Realizar o Jmg SuiteMultimedia (este programa e o Jmg AudioProcesador 5.1) foi um enorme trabalho e dedicação, com testes em filmes reais. Desenvolvido com a ajuda do Claude, a inteligência artificial da Anthropic.
 """
 AYUDA["zh"]="""JMG VIDEOENCODER · 帮助
 
@@ -8475,9 +9809,9 @@ AYUDA["zh"]="""JMG VIDEOENCODER · 帮助
 音频
 • 视频的所有音轨：可以调整顺序（⬆ ⬇）、语言、标题、默认音轨，并去掉不需要的音轨（双击）。
 • 编码：Passthrough（不改动）、AC3、E-AC3、DTS、AAC、MP3（仅立体声：5.1 会缩混为立体声）、FLAC 和 Opus。「Aften Dolby Digital」（默认）用 Aften 编码 AC3，对动态范围大的影片效果更好；「AC3 · FFmpeg」用 FFmpeg。其设置在「⚙ Aften...」中，与其他格式相同（默认启用块切换和固定全带宽）：CBR 或 VBR、带宽、精度、滤波器、动态范围（DRC 和对白电平）以及供功放使用的码流信息（Dolby Surround EX、Dolby Headphone、A/D 转换器 Standard 或 HDCD、首选下混及其电平）。并非所有设备都能读取 VBR 的 AC3。
-• 动态范围 / 压缩：滑块中间为关闭。向左（1-10）为动态范围：对比更强。向右（1-10）为压缩：小声的部分变大（适合夜间观看）。一个用于前置和环绕，另一个用于中置。低音炮不变。它位于「Visual / Waves」（Audio 选项卡）中 Presence 的右侧，可以在波形上看到效果。右侧的「Channel separation」（-10 到 +10）：增强或减弱左右之间以及前后之间的分离感，不提高音量。它的「Auto」会测量影片的分离度，并按影片的激烈程度设置合适的值（动作片多一些，平静的影片少一些）；中置声道从不改动。动态范围 / 压缩的「Auto」不改动中置声道：它是参照（可以手动调整）。Presence 的「Auto」以中置为参照（不提高人声：中置偏低时降低其他声道），每声道音量的「Auto」只降低前置和环绕，从不提高。建议倒数第二步调整 Channel separation，最后一步调整 Volume per channel。
+• 「Dynamic processing」（来自 Jmg AudioProcesador，不含 Azid；取代原来的「Dynamic range / Compression」）：位于「Visual / Waves」（Audio 选项卡）中「Presence」的右侧，可在波形上看到效果。模式：0 = 关闭 · 1 Lift：提升轻声 · 2 Impact：让响亮的声音更突出 · 3 两者兼有。三个组，每组 0 到 15（0 = 无效果）：前置和环绕、中置、低音炮（若使用 Double Bass，低音炮最好设为 0）。「Limiter ceiling」：任何峰值都不会超过该电平；「No limit」在效果调得很大时可能削波。其「Auto」会测量影片的动态范围：不需要时保持关闭；否则在前置和环绕上设置 Lift + Impact（中置是参考，不会改动）。传到 Jmg AudioProcesador 和传回时保持不变。其右侧是「Channel separation」（-15 到 +15）：增加或减少左右之间、前后之间的分离度，而不提高音量。其「Auto」会测量影片的分离度，并根据影片的激烈程度设置合适的值（动作片多一些，平静的影片少一些）；中置从不改动。「Presence」的「Auto」以中置为参考（不会提高人声：若中置偏低，就降低其他声道），每声道音量的「Auto」只会降低前置和环绕，绝不提高。建议倒数第二步调整 Channel separation，最后调整每声道音量。精细调整，步长为 1：Presence、Channel separation 和均衡器为 -15 到 +15；Dynamic processing 为 0 到 15；Double Bass 为 0 到 6。
 • 各声道音量、数字平滑（80、90 年代电影高音过多）和三段均衡器（前置、中置和环绕）。
-• 建议的顺序：先调 Presence 和/或 Dynamic range，再调其他效果，最后才调 Volume per channel：这样每个声道的音量是在其他所有效果的结果上调整的，控制更精细。
+• 建议的顺序：先调 Presence 和/或 Dynamic processing，再调其他效果，最后才调 Volume per channel：这样每个声道的音量是在其他所有效果的结果上调整的，控制更精细。
 • 每个「Auto」在已应用其他效果的情况下测量音轨并设置控件；不做改动再按一次，会恢复为 0。效果属于所选音轨；如果是 Passthrough，音轨会用原来的编码重新压缩。
 • TrueHD 和 FLAC 是无损格式：不是选择码率，而是选择 16 或 24 位。
 • Double Bass：把低音炮的低频复制到各扬声器，并把各扬声器的低频复制到低音炮（仅限有低音炮的音轨），带「Auto」。其「Auto」在扬声器缺少深沉低频或低音炮偏弱时设置 Double Bass（1-3）；两者平衡时为 0。默认分频点：90 Hz。
@@ -8485,7 +9819,7 @@ AYUDA["zh"]="""JMG VIDEOENCODER · 帮助
 • 「▶ Check synchronization」（在 Synchronization 中）：在窗口中播放视频，音轨与最终输出一致（延迟、分段和效果），可从所选位置或每个分段开始，亲眼确认口型是否与声音一致。在同一时刻也可以试听未校正的音轨或参考音轨。与 Jmg AudioProcesador 中的窗口相同。
 • Framerate（在 Synchronization 中）：用于 23.976 fps 影片中来自 25 fps 版本的音轨（或反过来），与 Jmg AudioProcesador 相同：在延迟和分段之前精确改变其速度，可选是否改变音调。添加来自其他文件、比视频短（或长）4% 的音轨时，程序会自动检测并设置，并给出提示。之后再计算延迟。
 • 试听：在 Audio 的「Visual / Waves」中，「▶ Before」或「▶ After」（或点击波形）；⏸ 暂停（再按一次继续），⏹ 停止并回到开头。可通过多声道（连接 AV 功放时）或立体声播放。
-• 音轨与 Jmg AudioProcesador 相同：处理过的音轨（应用了效果；仅更改编码或比特率不算）排在最前面并设为默认，标题为「Jmg procesada」（可修改），原始音轨保留在后面。「🚫 Remove original」会移除原始音轨（该行变为浅红色；再按一次恢复）；对未处理的音轨，则将其从视频中移除。「➕ Add track」从其他文件添加音轨，「➖ Delete track」将其从列表中删除（原文件不受影响）。 每声道音量：-30 到 +20 dB，可带小数，与 Jmg AudioProcesador 相同。如果有两条或更多处理过的音轨，处理时会询问哪一条排在最前并设为默认。处理前的「🔍 See everything」和 Edit/Log 会列出每条音轨的音频效果。如果没有任何更改，「Visual / Waves」不会重新计算波形。 低于 -30 再一格是「Mute」（红色）：该声道静音。 每声道音量最后应用（在 Double Bass 和 Channel separation 之后）：设置多少，该声道就正好升高或降低多少。
+• 音轨与 Jmg AudioProcesador 相同：处理过的音轨（应用了效果；仅更改编码或比特率不算）排在最前面并设为默认，标题为「Jmg procesada」（可修改），原始音轨保留在后面。「🚫 Remove original」会移除原始音轨（该行变为浅红色；再按一次恢复）；对未处理的音轨，则将其从视频中移除。「➕ Add track」从其他文件添加音轨，「➖ Delete track」将其从列表中删除（原文件不受影响）。 每声道音量：-30 到 +20 dB，可带小数，与 Jmg AudioProcesador 相同。如果有两条或更多处理过的音轨，处理时会询问哪一条排在最前并设为默认。处理前的「🔍 See everything」和 Edit/Log 会列出每条音轨的音频效果。如果没有任何更改，「Visual / Waves」不会重新计算波形。 低于 -30 再一格是「Mute」（红色）：该声道静音。 每声道音量最后应用（在 Double Bass 和 Channel separation 之后）：设置多少，该声道就正好升高或降低多少。 AAC、FLAC 和 Opus 保留 7.1（AAC 最高 768 kbps）；AC3、E-AC3、DTS 和 TrueHD 会降为 5.1。
 • 「➕ Core」（Audio 选项卡；只有带核心的音轨才能使用）：DTS-HD 音轨（Master Audio 或 High Resolution）内含一条普通 DTS，供不支持 HD 的设备使用；Dolby Atmos（TrueHD）音轨内含一条不带 Atmos 的 TrueHD。此按钮会把它也作为单独的音轨输出（MKV），不重新编码。再按一次：取消。
 • 在「Information」中点击鼠标右键：「Copy」和「Select all」（日志中也可以）。打开程序时，Video 选项卡会完整显示；中间的分隔线可以拖动，并会被记住。
 • 按下 PROCESS 时，会弹出窗口显示要点（每个视频、将生成的文件和提示）；「🔍 See everything」显示全部信息（视频、图像、剪切、每条音轨、字幕和 FFmpeg 命令），可用「📋 Copy all」复制。点「是」开始。
@@ -8497,8 +9831,8 @@ AYUDA["zh"]="""JMG VIDEOENCODER · 帮助
 
 高级选项
 • 视频 · 「More options」（Video 选项卡）：在窗口内打开，带「Back」按钮。上方是处理前后的画面；下方是滑块（点击后用 ← → 逐帧移动；按住 Shift 逐秒移动）、分段剪切（多个片段合并成一个视频）、图像（亮度、对比度、饱和度、色调、锐度和降噪）以及黑边（添加视频时自动检测）。图像中的「Auto」会测量影片并给出建议值（再按一次 = 全部归 0）；如果不满意，可以手动微调。
-• 「Play」从滑块所在位置打开一个带声音的视频窗口：原始的或应用设置后的，使用第一条包含的音轨，多声道或立体声。
-• 音频 · 「Visual / Waves」（Audio 选项卡）：所选片段（前 5、10 或 30 分钟，或整个文件）处理前后每个声道的波形，与 Jmg AudioProcesador 相同。点击波形 = 从该处试听。进入时会自动生成波形，修改 Presence 或片段时会重新生成；每个声道以填充方式显示，并标出 dBFS 峰值，「Zoom」可放大较弱的波形。Presence 右侧是 Dynamic range / Compression：有了它，就不必把 Presence 调得太高。「Detail」（x1-x8）以更高分辨率显示波形；可用滚轮或下方的滚动条移动，播放时视图会跟随红线。
+• 「▶ Original」或「▶ With the settings」从滑块所在位置打开一个带声音的视频窗口：原始的或应用设置后的，使用第一条包含的音轨，多声道或立体声。
+• 音频 · 「Visual / Waves」（Audio 选项卡）：所选片段（前 5、10 或 30 分钟，或整个文件）处理前后每个声道的波形，与 Jmg AudioProcesador 相同。点击波形 = 从该处试听。第一次带着某条音轨进入时波形会自动生成，之后按「🔄 Generate visualization」才会生成；每个声道以填充方式显示，并标出 dBFS 峰值，「Zoom」可放大较弱的波形。「Detail」（x1-x1024）以更高分辨率显示波形；可用 Shift + 滚轮或下方的滚动条移动，播放时视图会跟随红线。两种缩放：↕「Zoom」（波形高度，x1-x16）和 ↔「Detail」（时间，x1-x1024）；选中想要的一种，鼠标滚轮即可放大或缩小。
 • 效果是叠加的：「After」包含该音轨的所有效果。这里还有 Presence（人声、环境、效果和低音炮）及其「Auto」。Undo 和 Redo 仍在底部。
 
 输出
@@ -8509,7 +9843,33 @@ AYUDA["zh"]="""JMG VIDEOENCODER · 帮助
 • 「🔍 Search online...」（Output → Cover）：在 TMDB 上查找电影，显示其海报供你选择，并将其设为封面，文件名改为「标题 (年份)」。如果视频旁边有 cover.jpg 或 folder.jpg（许多抓取软件以及 Kodi、Plex 会生成）且视频本身没有封面，会自动使用。需要你自己的免费 TMDB 密钥：第一次使用时，程序会说明如何获取（在 themoviedb.org 注册账号 → 设置 → API）。没有网络时只是不进行搜索。
 
 注意事项
+• 设置会安全保存：先写入临时文件，再一次性替换正式文件；即使中途断电或程序关闭，也会保留完整的旧文件，绝不会留下写了一半的文件。
+• 程序生成的文件先以「名称.part.扩展名」写入，只有顺利完成后才改为正式名称：即使中途断电，也绝不会留下带着完成文件名的残缺文件。打开程序时，会提示上次留下的「.part」文件（可以删除）。
+• AC3 和 E-AC3 音轨按原样解码，不应用其中携带的压缩（FFmpeg 以前会自行应用并压低峰值）：得到的是原始声音。
 • 「↶ Undo」和「↷ Redo」（在底部；也可用 Ctrl+Z 和 Ctrl+Y）：逐一撤销和重做最近 50 个操作（设置、添加或移除视频等）。「Reset」恢复当前视频在已打开选项卡（Video、Audio、Subtitles 或 Output）中的自动设置；勾选「All」时全部从头开始：视频列表、其信息、其设置以及默认输出（↶ 可以恢复）。打开「Combine videos」或「Check synchronization」等窗口时，主窗口的按钮不可用：这些窗口有自己的 ↶ ↷。在高级选项（「More options」和「Visual / Waves」）中，可以使用底部的按钮。
+• 上方两列之间的分隔条在某一列的按钮或文字放不下时会停住：它们永远不会被截断。
+• 滚动条只在需要时出现；每个设置的说明在鼠标悬停时显示（选项卡中不再有说明文字）。
+• 选项卡面板的高度正好容纳当前选项卡的内容（不留空白，也不缺内容）；上方的文件列表占用其余空间。
+• 每个效果在开启时（任何设置有改动：强度、分频、上限、频率等），其标题会变成绿色。
+• 绿色让你一眼看出哪些在起作用：已做任何设置的效果或栏目标题（包括图像、裁剪、黑边、颜色），以及已经做过校正的按钮（Adjust Master、Normalize、Calculate delay、Fix by parts、More options 等）。鼠标悬停在按钮上时，按钮文字会变成绿色。
+• 选项卡也会变绿：当前打开的选项卡和鼠标悬停的选项卡。处理完成后，目标文件夹会打开并已选中该文件。
+• DVD（VIDEO_TS 文件夹或 .iso 镜像）：音轨和字幕的语言读取自光盘的 .IFO 文件（.VOB 文件中没有）。
+• 「Visual / Waves」：Dynamic processing 有自己的「⚙」（阈值、启动、释放、拐点和限幅器），带「Default」；双击滑块 = 初始值，方向键 = 逐步调整。下方不再显示说明（波形更高），用滚轮缩放时声道名称也不再移动。鼠标悬停在按钮上时，只有文字变绿。
+• 「Visual / Waves」分辨率更高：细节提高四倍，「Detail」可达 x1024（也可用鼠标滚轮）。
+• «🔍 View large»（或双击两张图片之一）：以实际大小并排显示编码前后，便于查看细节。拖动可移动（两张同时移动）；鼠标滚轮缩放（x1-x4）；Esc 关闭。
+• 「Encode with」：「CPU」（处理器）。在「Visual / Waves」中调整效果会停止播放；按「🔄 Generate visualization」查看更改后的波形，按 ▶ 试听。编码期间「⬅ Back」仍然可用。图像「Auto」把色调保持为 0，取消后全部回到 0。悬浮说明几秒后会自动消失。
+• 充分利用处理器：每条重新编码的音轨都在自己的 FFmpeg 线程中处理（以前全部在一个线程里），多条音轨可同时处理。
+• 「Preview」（底部，紧接在处理按钮之后）：从编码当前所在位置开始，实时（带声音）并排显示原片（左）和按你的设置（编码器、质量、分辨率、画面）编码后的视频（右），大小相同。窗口可以最大化（双击 = 全屏）以查看细节；按 Esc 或再次点击「Preview」即可关闭。仅在编码视频时可用（音频步骤时不可用），显示正在编码的视频。设置较慢时，速度取决于处理器的编码速度。
+• 「Save preset」保存所选视频的全部设置：视频、音频（每条音轨及其编码器和效果）、字幕、封面和输出。「Load preset」按顺序逐条音轨应用到所选视频。每部影片特有的内容不会保存：分段剪切、黑边裁剪、延迟、分段同步和名称。
+• 预设由 Jmg AudioProcesador 和 Jmg VideoEncoder 共用（同一个文件夹）：每个程序应用自己的部分；音频设置可在两者之间通用，在 Jmg AudioProcesador 中视频和字幕设置不起作用。
+• 在两个程序之间传递文件时，已添加的文件到达后也会自动添加（带着它们的音频设置）。
+• 正在进行的操作（生成、试听、播放、预览）会显示为绿色。 暂停时，「Resume」（在 Jmg VideoEncoder 中为 ⏸）保持绿色。
+• 编码时，如果可以，视频由显卡解码（处理器留给编码器）；处理器编码器使用全部核心。
+• 「Visual / Waves」：第一次带着某条音轨进入时波形会自动生成，之后按「🔄 Generate visualization」才会生成（更改设置时，播放会停止并给出提示）。开始时「Zoom」为 x1。像 Sound Forge 一样的细节：「Detail」可达 x1024；从 x64 起，所见部分按全部采样读取（处理前取自文件，处理后带效果）。
+• Dynamic processing：不再有模式 0。默认是模式 2，滑块为 0：为 0 时不起作用；调高任一滑块即应用所选模式。
+• 「Edit/Log」：上方显示选项卡中视频的全部设置（视频、图像、裁剪、每条音轨及其效果、字幕），与 Jmg AudioProcesador 相同；下方是日志。
+• 「Encode with」：除 Processor、NVIDIA 和 AMD 外，还有「Intel」（Quick Sync，Intel Arc 独显和核显）和「Vulkan」（任何驱动较新的显卡；在 NVIDIA 和 AMD 上，用它们自己的按钮画质更好）。只有电脑能使用时才会启用。
+• 在「Audio」中，Synchronization 位于 Double Bass 右侧；在「Subtitles」中，字幕同步位于列表右侧；在「Output」中，Cover 位于右侧「Also copy」下方。
 • 最小化后，程序会以图标形式留在时钟旁边（系统托盘），并显示处理进度：左键单击 = 恢复窗口；右键单击 = 菜单（取消处理、完成后的操作——无、退出或关机——、完成后打开文件夹、退出）。可在 Output 中关闭此功能，像平常一样最小化到任务栏。将鼠标停在按钮、复选框或滑块上会显示说明，几秒后自动消失。
 • 高级选项（编码器旁的「⚙」，在 Video 和每条 Audio 音轨中）：每种编码器最重要的设置，供想要微调的用户使用。视频：调优（tune：电影、动画、颗粒……）、配置文件和级别、每 X 秒一个关键帧、B 帧和参考帧、自适应量化、AV1 的合成胶片颗粒、NVIDIA 的两遍编码和 AQ、AMD 的最高质量和预分析、ProRes 配置（Proxy 到 4444 XQ）和 DNxHR 配置（LB 到 444）。音频：AC3 和 E-AC3 的码流信息（对白电平、Dolby Surround EX、耳机、HDCD、下混）和高频截止、MP3 和 Opus 的 VBR、FLAC 压缩。未更改的保持自动；每个视频和每条音轨各自保存。音轨列表中的「⚙」表示带有高级选项。AC3 和 E-AC3 还有房间类型（大或小）及其混音电平；DTS 有 ADPCM 预测。FFmpeg 的 DTS 始终为固定比特率：768 或 1536 kbps，即标准比特率（更低时播放器只会输出噪音）。AC3（Aften 和 FFmpeg）：5.1 为 224 至 640 kbps；立体声为 96 至 640（默认 192）。E-AC3：可手动输入任意比特率，5.1 从 192 kbps 起（立体声从 64 起；默认 192）。Dolby TrueHD 排在 Dolby 格式之后。
 • 字幕 ·「Burn into the picture」：将所选字幕直接绘制到视频画面中；在任何设备上都能看到，但之后无法去除。只能选一条，且必须重新编码视频（若为 Passthrough，会改为 H.265）。文本字幕（SRT、ASS）绘制在最终画面上；图像字幕（PGS、DVD）绘制在原始画面上（去除黑边时，黑边中的内容会被裁掉）。
@@ -8529,7 +9889,7 @@ FFMPEG 与许可证
 Jmg VideoEncoder 是基于 GNU GPL v3 许可证的自由软件。
 联系方式：jmgsoftwaremultimedia@gmail.com
 支持本项目：https://www.paypal.com/paypalme/JmgSoftware
-完成 Jmg SuiteMultimedia（本程序和 Jmg AudioProcesador 5.1）付出了巨大的努力：约 45 天，并用真实的电影进行了测试。在 Anthropic 的人工智能 Claude 的帮助下开发。
+完成 Jmg SuiteMultimedia（本程序和 Jmg AudioProcesador 5.1）付出了巨大的努力和心血，并用真实的电影进行了测试。在 Anthropic 的人工智能 Claude 的帮助下开发。
 """
 AYUDA["ja"]="""JMG VIDEOENCODER · ヘルプ
 
@@ -8552,9 +9912,9 @@ AYUDA["ja"]="""JMG VIDEOENCODER · ヘルプ
 音声
 • 動画のすべてのトラック：順番（⬆ ⬇）、言語、タイトル、既定のトラックを変更でき、不要なものを外せます（ダブルクリック）。
 • コーデック：Passthrough（そのまま）、AC3、E-AC3、DTS、AAC、MP3（ステレオのみ：5.1 はステレオにダウンミックス）、FLAC、Opus。「Aften Dolby Digital」（既定）は Aften で AC3 を作り、ダイナミックレンジの大きい映画で優れます。「AC3 · FFmpeg」は FFmpeg です。設定はほかの形式と同じく「⚙ Aften...」から（初期値はブロック切り替えと固定・全帯域）：CBR/VBR、帯域幅、精度、フィルター、ダイナミックレンジ（DRC と台詞レベル）、アンプ向けのビットストリーム情報（Dolby Surround EX、Dolby Headphone、A/D コンバーター Standard または HDCD、推奨ダウンミックスとそのレベル）。VBR の AC3 はすべての機器で再生できるわけではありません。
-• ダイナミックレンジ / 圧縮：中央がオフのスライダーです。左（1-10）はダイナミックレンジ：コントラストが強くなります。右（1-10）は圧縮：小さな音が大きくなります（夜に映画を見るとき）。フロントとサラウンド用に 1 つ、センター用に 1 つあります。サブウーファーは変更しません。「Visual / Waves」（Audio タブ）の Presence の右にあり、波形で効果を確認できます。その右の「Channel separation」（-10〜+10）：左右と前後の分離を強めたり弱めたりします。音量は上げません。その「Auto」は映画の分離を測り、映画の激しさに合わせて最適な値を設定します（アクション映画は多め、静かな映画は少なめ）。センターは決して変えません。ダイナミックレンジ / 圧縮の「Auto」はセンターを変えません。基準だからです（手動では変えられます）。Presence の「Auto」はセンターを基準にします（声は上げず、センターが小さいときは他を下げます）。チャンネル別音量の「Auto」はフロントとサラウンドを下げるだけで、上げることはありません。Channel separation は最後から 2 番目、Volume per channel は最後に調整することをおすすめします。
+• 「Dynamic processing」（Jmg AudioProcesador と同じもの。Azid なし。以前の「Dynamic range / Compression」に代わるもの）：「Visual / Waves」（Audio タブ）の「Presence」の右にあり、効果を波形で確認できます。モード：0 = オフ · 1 Lift：小さい音を持ち上げる · 2 Impact：大きい音を際立たせる · 3 両方。3 つのグループ、それぞれ 0〜15（0 = 効果なし）：フロントとサラウンド、センター、サブウーファー（Double Bass を使う場合、サブウーファーは 0 がおすすめ）。「Limiter ceiling」：どのピークもそのレベルを超えません。「No limit」は効果を大きくすると歪むことがあります。「Auto」は映画のダイナミックレンジを測定し、不要ならオフのまま、必要ならフロントとサラウンドに Lift + Impact を設定します（センターは基準なので変更しません）。Jmg AudioProcesador へもそのまま渡り、そのまま戻ります。その右の「Channel separation」（-15〜+15）：音量を上げずに、左右と前後の分離を増減します。その「Auto」は映画の分離を測り、動きの多さに合わせて設定します（アクションは多め、静かな映画は少なめ）。センターは変更しません。「Presence」の「Auto」はセンターを基準にし（声は上げません。センターが小さい場合は他を下げます）、チャンネル別音量の「Auto」はフロントとサラウンドを下げるだけで、上げることはありません。Channel separation は最後から 2 番目、チャンネル別音量は最後に調整することをおすすめします。細かい調整（1 刻み）：Presence、Channel separation、イコライザーは -15〜+15、Dynamic processing は 0〜15、Double Bass は 0〜6。
 • チャンネルごとの音量、デジタルスムージング（80〜90 年代の映画の高音過多）、3 バンドイコライザー（フロント、センター、サラウンド）。
-• おすすめの順番：まず Presence や Dynamic range、次にその他のエフェクト、最後に必ず Volume per channel。こうすると各チャンネルの音量を他のすべての効果をかけた結果に合わせて、より細かく調整できます。
+• おすすめの順番：まず Presence や Dynamic processing、次にその他のエフェクト、最後に必ず Volume per channel。こうすると各チャンネルの音量を他のすべての効果をかけた結果に合わせて、より細かく調整できます。
 • 各「Auto」は、ほかの効果を適用した状態でトラックを測定し、コントロールを設定します。何も変えずにもう一度押すと 0 に戻ります。効果は選択したトラックのものです。Passthrough の場合、トラックは元のコーデックで再圧縮されます。
 • TrueHD と FLAC はロスレスです：kbps ではなく 16 ビットか 24 ビットを選びます。
 • Double Bass：サブウーファーの低音をスピーカーへ、スピーカーの低音をサブウーファーへコピーします（サブウーファーのあるトラックのみ）。「Auto」付きです。「Auto」は、スピーカーに深い低音が足りないかサブウーファーが弱いときに Double Bass（1-3）を設定し、バランスが取れていれば 0 にします。既定のカット：90 Hz。
@@ -8562,7 +9922,7 @@ AYUDA["ja"]="""JMG VIDEOENCODER · ヘルプ
 • 「▶ Check synchronization」（Synchronization 内）：出力と同じ状態のトラック（ディレイ、区間、エフェクト）と一緒に動画をウィンドウで再生します。選んだ位置または各区間から再生でき、口の動きと声が合っているかを自分の目で確認できます。同じ場面で未補正のトラックや参照トラックも聞けます。Jmg AudioProcesador と同じウィンドウです。
 • Framerate（Synchronization 内）：23.976 fps の映画に 25 fps 版のトラックを使うとき（またはその逆）、Jmg AudioProcesador と同じく、ディレイと区間の前に速度を正確に変えます（音程の変化あり／なし）。動画より 4 % 短い（または長い）別ファイルのトラックを追加すると、プログラムが自動で検出して設定し、お知らせします。その後ディレイを計算してください。
 • 試聴：Audio の「Visual / Waves」で「▶ Before」または「▶ After」（または波形をクリック）。⏸ で一時停止（もう一度押すと続きから）、⏹ で停止して先頭に戻ります。マルチチャンネル（AV アンプ用）またはステレオで再生できます。
-• 音声トラックは Jmg AudioProcesador と同じです。処理したトラック（エフェクトを適用したもの。コーデックやビットレートの変更だけでは該当しません）が先頭でデフォルトになり、タイトルは「Jmg procesada」（変更可）、元のトラックはその後ろに残ります。「🚫 Remove original」で元のトラックを外します（行が薄い赤になり、もう一度押すと戻ります）。未処理のトラックでは動画から外します。「➕ Add track」で別ファイルのトラックを追加し、「➖ Delete track」でリストから外します（元のファイルは変更しません）。 チャンネルごとの音量：-30〜+20 dB、小数も使えます（Jmg AudioProcesador と同じ）。処理したトラックが2本以上あると、処理のときにどれを最初にしてデフォルトにするかを尋ねます。処理前の「🔍 See everything」と Edit/Log に各トラックのオーディオエフェクトが表示されます。何も変えていなければ「Visual / Waves」は波形を再計算しません。 -30 より1つ下が「Mute」（赤）で、そのチャンネルは無音になります。 チャンネルごとの音量は最後に適用されます（Double Bass、Channel separation の後）。設定した値がそのままそのチャンネルの上げ下げになります。
+• 音声トラックは Jmg AudioProcesador と同じです。処理したトラック（エフェクトを適用したもの。コーデックやビットレートの変更だけでは該当しません）が先頭でデフォルトになり、タイトルは「Jmg procesada」（変更可）、元のトラックはその後ろに残ります。「🚫 Remove original」で元のトラックを外します（行が薄い赤になり、もう一度押すと戻ります）。未処理のトラックでは動画から外します。「➕ Add track」で別ファイルのトラックを追加し、「➖ Delete track」でリストから外します（元のファイルは変更しません）。 チャンネルごとの音量：-30〜+20 dB、小数も使えます（Jmg AudioProcesador と同じ）。処理したトラックが2本以上あると、処理のときにどれを最初にしてデフォルトにするかを尋ねます。処理前の「🔍 See everything」と Edit/Log に各トラックのオーディオエフェクトが表示されます。何も変えていなければ「Visual / Waves」は波形を再計算しません。 -30 より1つ下が「Mute」（赤）で、そのチャンネルは無音になります。 チャンネルごとの音量は最後に適用されます（Double Bass、Channel separation の後）。設定した値がそのままそのチャンネルの上げ下げになります。 AAC、FLAC、Opus は 7.1 のまま（AAC は最大 768 kbps）。AC3、E-AC3、DTS、TrueHD は 5.1 に下げます。
 • 「➕ Core」（Audio タブ；コアを持つトラックでだけ有効）：DTS-HD トラック（Master Audio または High Resolution）には HD に対応しない機器のための通常の DTS が、Dolby Atmos（TrueHD）トラックには Atmos なしの TrueHD が入っています。これで、それも別のトラックとして（MKV で）再エンコードせずに出力します。もう一度押すと取り消します。
 • 「Information」でマウスの右ボタン：「Copy」と「Select all」（ログでも使えます）。起動時は Video タブ全体が見えます。中央の線はドラッグでき、その位置は記憶されます。
 • PROCESS を押すと、要点（各動画と作成されるファイル、注意事項）を示すウィンドウが出ます。「🔍 See everything」ですべて（映像、画像、カット、各トラック、字幕、FFmpeg コマンド）を表示し、「📋 Copy all」でコピーできます。「はい」で開始します。
@@ -8574,8 +9934,8 @@ AYUDA["ja"]="""JMG VIDEOENCODER · ヘルプ
 
 詳細オプション
 • 動画 · 「More options」（Video タブ）：ウィンドウ内に開き、「Back」で戻ります。上に処理前と処理後のフレーム、下にバー（クリックして ← → で 1 フレームずつ、Shift で 1 秒ずつ）、区間カット（複数の区間は 1 本の動画につながります）、画像（明るさ、コントラスト、彩度、色相、シャープネス、ノイズ除去）、黒帯（動画を追加したときに自動で探します）があります。画像の「Auto」は映画を測定して値を提案します（もう一度押す = すべて 0 に戻る）。仕上がりが気に入らなければ手で調整してください。
-• 「Play」はバーの位置から音声付きの動画ウィンドウを開きます：元のもの、または設定を適用したもの。最初に含まれる音声トラックを使い、マルチチャンネルまたはステレオで再生します。
-• 音声 · 「Visual / Waves」（Audio タブ）：選んだ区間（最初の 5・10・30 分、またはファイル全体）の各チャンネルの波形を、処理前と処理後で表示します。Jmg AudioProcesador と同じです。波形をクリック = そこから試聴。波形は開いたときに自動で作成され、Presence や区間を変えると作り直されます。各チャンネルは塗りつぶしで表示され、ピーク (dBFS) も示します。「Zoom」で小さな波形を拡大できます。Presence の右に Dynamic range / Compressionがあります。これを使えば Presence をそれほど上げる必要はありません。「Detail」（x1-x8）で波形をより細かく表示します。ホイールまたは下のバーで移動でき、再生中は表示が赤い線を追います。
+• 「▶ Original」または「▶ With the settings」はバーの位置から音声付きの動画ウィンドウを開きます：元のもの、または設定を適用したもの。最初に含まれる音声トラックを使い、マルチチャンネルまたはステレオで再生します。
+• 音声 · 「Visual / Waves」（Audio タブ）：選んだ区間（最初の 5・10・30 分、またはファイル全体）の各チャンネルの波形を、処理前と処理後で表示します。Jmg AudioProcesador と同じです。波形をクリック = そこから試聴。トラックで初めて入ったときは波形が自動で作成され、その後は「🔄 Generate visualization」を押したときに作成されます。各チャンネルは塗りつぶしで表示され、ピーク (dBFS) も示します。「Zoom」で小さな波形を拡大できます。「Detail」（x1-x1024）で波形をより細かく表示します。Shift + ホイールまたは下のバーで移動でき、再生中は表示が赤い線を追います。ズームは 2 種類：↕「Zoom」（波形の高さ、x1-x16）と ↔「Detail」（時間、x1-x1024）。使いたい方を選ぶと、マウスホイールで拡大・縮小できます。
 • 効果は積み重なります：「After」にはトラックのすべての効果が入ります。ここには Presence（声、環境音、効果音、サブウーファー）とその「Auto」もあります。Undo と Redo は下にあります。
 
 出力
@@ -8586,7 +9946,33 @@ AYUDA["ja"]="""JMG VIDEOENCODER · ヘルプ
 • 「🔍 Search online...」（Output → Cover）：TMDB で映画を検索し、ポスターを表示して選んだものをカバーにし、名前を「タイトル (年)」にします。動画の横に cover.jpg や folder.jpg（多くのリッピングソフトや Kodi、Plex が作るもの）があり、動画にカバーがない場合は自動で使います。ご自身の無料の TMDB キーが必要です。初回に、プログラムが取得方法を説明します（themoviedb.org でアカウント作成 → 設定 → API）。接続がないときは検索しないだけです。
 
 注意点
+• 設定は安全に保存されます。まず一時ファイルに書き込み、それから一度に本来のファイルと置き換えます。途中で停電やプログラムの終了があっても前のファイルがそのまま残り、書きかけのファイルになることはありません。
+• プログラムが作るファイルは、まず「名前.part.拡張子」として書き込まれ、正常に終わったときだけ本来の名前になります。途中で停電しても、途切れたファイルが完成品の名前で残ることはありません。起動時には、前回残った「.part」ファイルを知らせます（削除してかまいません）。
+• AC3 と E-AC3 のトラックは、中に含まれる圧縮を適用せずにそのままデコードします（以前は FFmpeg が勝手に適用してピークを下げていました）。元の音が得られます。
 • 「↶ Undo」と「↷ Redo」（下部。Ctrl+Z と Ctrl+Y も可）：直近 50 つの操作（設定、動画の追加や削除など）を 1 つずつ元に戻し、やり直します。「Reset」は現在の動画の、開いているタブ（Video、Audio、Subtitles、Output）の設定を自動設定に戻します。「All」にチェックすると、動画リスト、その情報、設定、既定の出力まですべて最初からになります（↶ で元に戻せます）。「Combine videos」や「Check synchronization」などのウィンドウを開いている間は、メインウィンドウのボタンは使えません。これらのウィンドウには専用の ↶ ↷ があります。詳細オプション（「More options」と「Visual / Waves」）では、下部のボタンが使えます。
+• 上部の 2 つの列を仕切るバーは、列のボタンや文字が収まらなくなるところで止まります。切れて見えなくなることはありません。
+• スクロールバーは必要なときだけ表示されます。各設定の説明はマウスを重ねると表示されます（タブには説明文を置いていません）。
+• タブのパネルは、各タブの内容にちょうど合う高さになります（余白も欠けもありません）。上のファイル一覧が残りを使います。
+• 各効果のタイトルは、オンのとき（強さ、カットオフ、上限、周波数など、どれかの設定を変えたとき）に緑色になります。
+• 緑色で、何かが効いているものがひと目でわかります。設定を変えた効果や項目のタイトル（画像、トリミング、黒帯、色も）と、すでに補正を行ったボタン（Adjust Master、Normalize、Calculate delay、Fix by parts、More options など）です。ボタンにマウスを重ねると、文字が緑色になります。
+• タブも緑色になります。開いているタブと、マウスを重ねたタブです。処理が終わると、出力先フォルダーがファイルを選択した状態で開きます。
+• DVD（VIDEO_TS フォルダーまたは .iso イメージ）：音声トラックと字幕の言語は、ディスクの .IFO ファイルから読み取ります（.VOB には含まれていません）。
+• 「Visual / Waves」：Dynamic processing に「⚙」（しきい値、アタック、リリース、ニー、リミッター）と「Default」があります。スライダーのダブルクリック = 初期値、矢印 = 1 段ずつ。下の説明はなくなり（波形が高くなります）、ホイールでズームしてもチャンネル名が動かなくなりました。ボタンにマウスを重ねると、文字だけが緑になります。
+• 「Visual / Waves」の解像度アップ：細かさ 4 倍、「Detail」は x1024 まで（マウスホイールでも）。
+• «🔍 View large»（または 2 つの画像のどちらかをダブルクリック）：前後を実寸で横に並べて表示し、細部を確認できます。ドラッグで移動（両方が一緒に動きます）、マウスホイールでズーム（x1-x4）、Esc で閉じます。
+• 「Encode with」：「CPU」（プロセッサー）。「Visual / Waves」でエフェクトに触れると再生が止まります。「🔄 Generate visualization」で変更後の波形を表示し、▶ で試聴できます。エンコード中も「⬅ Back」は使えます。画像の「Auto」は色合いを 0 のままにし、解除するとすべて 0 に戻ります。ツールチップは数秒で自動的に消えます。
+• プロセッサーをフル活用：再エンコードする音声トラックはそれぞれ専用の FFmpeg スレッドで処理されます（以前は 1 つにまとめていました）。複数のトラックを同時に処理できます。
+• 「Preview」（下部、処理ボタンのすぐ後）：エンコードが進んでいる位置から、左に元の映像、右に設定（コーデック・画質・解像度・画像）でエンコードした映像を同じ大きさで、音声付きのリアルタイムで表示します。ウィンドウは最大化でき（ダブルクリック = 全画面）、細部を確認できます。Esc か「Preview」をもう一度クリックすると閉じます。ビデオのエンコード中のみ使え（オーディオの段階では使えません）、エンコード中のビデオを表示します。重い設定ではプロセッサーのエンコード速度に合わせて再生されます。
+• 「Save preset」は選んだビデオのすべての設定（ビデオ、オーディオ（各トラックのコーデックとエフェクト）、字幕、カバー、出力）を保存します。「Load preset」は選んだビデオにトラックごと順番に適用します。各映画固有のもの（区間カット、黒帯のクロップ、ディレイ、区間ごとの同期、名前）は保存されません。
+• プリセットは Jmg AudioProcesador と Jmg VideoEncoder で共通です（同じフォルダー）。各プログラムは自分の部分を適用し、オーディオは両方で使えます。Jmg AudioProcesador ではビデオと字幕の設定は影響しません。
+• ファイルをもう一方のプログラムに渡すと、追加済みのものは追加された状態で届きます（オーディオ設定も一緒に）。
+• 実行中のもの（生成、試聴、再生、プレビュー）は緑色で表示されます。 一時停止中は「Resume」（Jmg VideoEncoder では ⏸）が緑色のままです。
+• エンコード時、可能ならビデオはグラフィックカードでデコードされます（プロセッサーはコーデックに専念）。プロセッサーのコーデックは全コアを使います。
+• 「Visual / Waves」：トラックで初めて入ったときは波形が自動で作成され、その後は「🔄 Generate visualization」を押したときに作成されます（何かを変えると再生が止まり、お知らせが出ます）。「Zoom」は x1 から始まります。Sound Forge のような細かさ：「Detail」は x1024 まで。x64 からは表示中の部分を全サンプルで読み込み（処理前はファイルから、処理後はエフェクト付きで）。
+• Dynamic processing：モード 0 はなくなりました。既定はモード 2、スライダーは 0。0 のときは何もせず、スライダーを上げると選んだモードがかかります。
+• 「Edit/Log」：上にはタブに表示中の動画の内容（映像、画像、トリミング、各音声トラックとその効果、字幕）が Jmg AudioProcesador と同じように表示され、下にはログが表示されます。
+• 「Encode with」：Processor、NVIDIA、AMD に加えて、「Intel」（Quick Sync、Intel Arc と内蔵グラフィックス）と「Vulkan」（ドライバーが新しいあらゆるグラフィックカード。NVIDIA と AMD では、それぞれ専用のボタンのほうが高画質）があります。PC で使える場合だけ有効になります。
+• 「Audio」では Synchronization が Double Bass の右にあります。「Subtitles」では字幕の同期が一覧の右に、「Output」では Cover が右側の「Also copy」の下にあります。
 • 最小化すると、プログラムは時計の横（システムトレイ）にアイコンとして残り、処理の進み具合を表示します。左クリック = ウィンドウが戻る、右クリック = メニュー（処理の中止、終了時の動作——なし・終了・PC のシャットダウン——、終了時にフォルダーを開く、終了）。Output でオフにすると、いつもどおりタスクバーに最小化されます。ボタン、チェックボックス、スライダーの上にマウスを置くと説明が表示され、数秒で自動的に消えます。
 • 詳細オプション（コーデックの横の「⚙」、Video と各 Audio トラック）：各コーデックの最も重要な設定で、細かく調整したい人向けです。映像：チューン（映画、アニメ、粒状感など）、プロファイルとレベル、X 秒ごとのキーフレーム、B フレームと参照フレーム、適応量子化、AV1 の合成フィルムグレイン、NVIDIA の 2 パスと AQ、AMD の最高品質と事前解析、ProRes プロファイル（Proxy〜4444 XQ）と DNxHR プロファイル（LB〜444）。音声：AC3 と E-AC3 のビットストリーム情報（ダイアログレベル、Dolby Surround EX、ヘッドホン、HDCD、ダウンミックス）と高域カット、MP3 と Opus の VBR、FLAC の圧縮。触らない項目は自動のままで、動画やトラックごとに保存されます。トラック一覧の「⚙」は詳細オプションありを意味します。AC3 と E-AC3 には部屋のタイプ（大・小）とミキシングレベルもあり、DTS には ADPCM 予測があります。FFmpeg の DTS は常に固定ビットレートで、標準の 768 または 1536 kbps です（それより低いとプレーヤーはノイズしか出しません）。AC3（Aften と FFmpeg）：5.1 は 224〜640 kbps、ステレオは 96〜640（初期値 192）。E-AC3：任意のビットレートを手入力でき、5.1 は 192 kbps から（ステレオは 64 から、初期値 192）。Dolby TrueHD は Dolby 形式の後に並びます。
 • 字幕 ·「Burn into the picture」：選んだ字幕を映像に焼き込みます。どの機器でも表示されますが、後から消すことはできません。1 つだけで、映像の再エンコードが必要です（Passthrough の場合は H.265 になります）。テキスト字幕（SRT、ASS）は最終的な画面に、画像字幕（PGS、DVD）は元の画面に描画されます（黒帯を除去すると、帯の中の部分は切れます）。
@@ -8606,7 +9992,7 @@ FFmpeg（ffmpeg.org、BtbN ビルド）を GNU GPL v3 ライセンスで使用�
 Jmg VideoEncoder は GNU GPL v3 ライセンスのフリーソフトウェアです。
 連絡先：jmgsoftwaremultimedia@gmail.com
 プロジェクトを支援する：https://www.paypal.com/paypalme/JmgSoftware
-Jmg SuiteMultimedia（このプログラムと Jmg AudioProcesador 5.1）の制作には膨大な作業が必要でした。約 45 日間、実際の映画でテストを重ねています。Anthropic の AI、Claude の協力で開発されました。
+Jmg SuiteMultimedia（このプログラムと Jmg AudioProcesador 5.1）の制作には膨大な作業と献身が注がれ、実際の映画でテストを重ねています。Anthropic の AI、Claude の協力で開発されました。
 """
 AYUDA["ru"]="""JMG VIDEOENCODER · СПРАВКА
 
@@ -8629,9 +10015,9 @@ VIDEO
 AUDIO
 • Все дорожки видео: можно менять порядок (⬆ ⬇), язык, название, дорожку по умолчанию и убирать ненужные (двойной щелчок).
 • Кодеки: Passthrough (без изменений), AC3, E-AC3, DTS, AAC, MP3 (только стерео: 5.1 сводится), FLAC и Opus. «Aften Dolby Digital» (по умолчанию, в списке кодеков) делает AC3 через Aften, что даёт лучший динамический диапазон в фильмах, где его много; «AC3 · FFmpeg» — через FFmpeg. Его настройки — через «⚙ Aften...», как у других форматов (по умолчанию block switching и фиксированная полная полоса): CBR или VBR, полоса, точность, фильтры, динамический диапазон (DRC и уровень диалогов) и служебная информация для ресивера (Dolby Surround EX, Dolby Headphone, преобразователь Standard или HDCD, предпочитаемый даунмикс и его уровни). Не каждое устройство читает AC3 с VBR.
-• Динамический диапазон / компрессия: ползунок, в середине выключен. Влево (1-10) — динамический диапазон: больше контраста. Вправо (1-10) — компрессия: тихие звуки поднимаются (чтобы смотреть фильм ночью). Один для фронтов и тылов, другой для центра. Сабвуфер не трогается. Он в «Visual / Waves» (вкладка Audio), справа от Presence, где его видно на волнах. Справа — «Channel separation» (от -10 до +10): больше или меньше разделения между левым и правым и между передом и тылом, без повышения громкости. Его «Auto» измеряет разделение в фильме и ставит подходящее по динамике (больше для боевиков, меньше для спокойных фильмов); центр никогда не трогается. «Auto» динамического диапазона / компрессии не трогает центр: это опорный канал (вручную можно). «Auto» в Presence берёт центр за опорный канал (голос не поднимает: если центр тихий, опускает остальные), а «Auto» громкости по каналам только опускает фронты и тылы, но никогда не поднимает. Рекомендуется делать Channel separation предпоследней настройкой, а Volume per channel — последней.
+• «Dynamic processing» (как в Jmg AudioProcesador, без Azid; заменяет прежний «Dynamic range / Compression»): находится в «Visual / Waves» (вкладка Audio), справа от «Presence», где эффект виден на волнах. Режим: 0 = выкл. · 1 Lift: поднимает тихие звуки · 2 Impact: громкие звуки выделяются · 3 и то и другое. Три группы, каждая от 0 до 15 (0 = без эффекта): фронтальные и тыловые, центр и сабвуфер (сабвуфер лучше оставить на 0, если используете Double Bass). «Limiter ceiling»: ни один пик не превысит этот уровень; «No limit» может перегружать, если сильно поднять эффект. Его «Auto» измеряет динамический диапазон фильма: если не нужно, оставляет выключенным; иначе ставит Lift + Impact на фронтальные и тыловые (центр — эталон и не меняется). Передаётся в Jmg AudioProcesador и возвращается без изменений. Справа от него «Channel separation» (от -15 до +15): больше или меньше разделения между левым и правым и между передом и тылом, без повышения громкости. Его «Auto» измеряет разделение фильма и ставит подходящее в зависимости от его динамичности (больше в боевиках, меньше в спокойных фильмах); центр никогда не трогается. «Auto» у Presence берёт центр за эталон (не поднимает голос: если центр тихий, опускает остальные), а у громкости по каналам только опускает фронтальные и тыловые, никогда не поднимает. Рекомендуется делать Channel separation предпоследней настройкой, а громкость по каналам — последней. Тонкие настройки с шагом 1: Presence, Channel separation и эквалайзер от -15 до +15; Dynamic processing от 0 до 15; Double Bass от 0 до 6.
 • Громкость по каналам, цифровое сглаживание (лишние верха фильмов 80-х и 90-х) и 3-полосный эквалайзер (фронты, центр и тылы).
-• Рекомендуемый порядок: сначала Presence и/или Dynamic range, затем остальные эффекты и всегда в конце Volume per channel: так громкость каждого канала настраивается по результату всего остального — точнее и удобнее.
+• Рекомендуемый порядок: сначала Presence и/или Dynamic processing, затем остальные эффекты и всегда в конце Volume per channel: так громкость каждого канала настраивается по результату всего остального — точнее и удобнее.
 • Каждый «Auto» измеряет дорожку с уже применёнными остальными эффектами и выставляет свои регуляторы; нажатый ещё раз, ничего не трогая, возвращает 0. Эффекты относятся к выбранной дорожке; с Passthrough дорожка снова сжимается своим же кодеком.
 • TrueHD и FLAC — без потерь: вместо kbps выбирается 16 или 24 бит.
 • Double Bass: копирует бас сабвуфера на колонки и бас колонок на сабвуфер (только на дорожках с сабвуфером), со своим «Auto». Его «Auto» ставит Double Bass (1-3), если колонкам не хватает глубокого баса или сабвуфер слабый; если всё сбалансировано — 0. Частота раздела по умолчанию: 90 Hz.
@@ -8639,7 +10025,7 @@ AUDIO
 • «▶ Check synchronization» (в Synchronization): видео в своём окне с дорожкой такой, какой она выйдет (задержка, части и эффекты), с выбранного места или с каждой части, чтобы вы сами видели, совпадают ли губы с голосом. В тот же момент можно послушать и неисправленную дорожку, и опорную. Это то же окно, что в Jmg AudioProcesador.
 • Частота кадров (в Synchronization): для дорожки из издания 25 fps в фильме 23,976 (или наоборот), как в Jmg AudioProcesador: меняет её точную скорость, со сменой тона или без, до задержки и частей. Когда вы добавляете дорожку из другого файла, которая на 4 % короче (или длиннее) видео, программа это замечает, выставляет сама и сообщает. Потом рассчитайте задержку.
 • Прослушивание: в Audio «Visual / Waves», «▶ Before» или «▶ After» (или щелчок по волнам); ⏸ пауза (ещё нажатие — продолжает) и ⏹ останавливает и возвращает к началу. Через многоканальный выход (для AV-ресивера) или в стерео.
-• Звуковые дорожки, как в Jmg AudioProcesador: обработанная дорожка (с эффектами; смена только кодека или битрейта не считается) идёт первой и по умолчанию, с названием «Jmg procesada» (его можно изменить), а оригинал сохраняется после неё. «🚫 Remove original» убирает его (строка становится бледно-красной; ещё раз — возвращается); на необработанной дорожке убирает её из видео. «➕ Add track» берёт дорожку из другого файла, а «➖ Delete track» убирает её из списка (исходный файл не трогается). Громкость по каналам: от -30 до +20 дБ, с десятыми, как в Jmg AudioProcesador. Если обработанных дорожек две или больше, при обработке спрашивается, какая идёт первой и по умолчанию. «🔍 See everything» (перед обработкой) и Edit/Log показывают аудиоэффекты каждой дорожки. «Visual / Waves» не пересчитывает волны, если ничего не изменилось. Одна позиция ниже -30 — «Mute» (красным): этот канал молчит. Громкость по каналам применяется последней (после Double Bass и Channel separation): сколько вы задали, ровно настолько канал станет громче или тише.
+• Звуковые дорожки, как в Jmg AudioProcesador: обработанная дорожка (с эффектами; смена только кодека или битрейта не считается) идёт первой и по умолчанию, с названием «Jmg procesada» (его можно изменить), а оригинал сохраняется после неё. «🚫 Remove original» убирает его (строка становится бледно-красной; ещё раз — возвращается); на необработанной дорожке убирает её из видео. «➕ Add track» берёт дорожку из другого файла, а «➖ Delete track» убирает её из списка (исходный файл не трогается). Громкость по каналам: от -30 до +20 дБ, с десятыми, как в Jmg AudioProcesador. Если обработанных дорожек две или больше, при обработке спрашивается, какая идёт первой и по умолчанию. «🔍 See everything» (перед обработкой) и Edit/Log показывают аудиоэффекты каждой дорожки. «Visual / Waves» не пересчитывает волны, если ничего не изменилось. Одна позиция ниже -30 — «Mute» (красным): этот канал молчит. Громкость по каналам применяется последней (после Double Bass и Channel separation): сколько вы задали, ровно настолько канал станет громче или тише. AAC, FLAC и Opus сохраняют 7.1 (AAC — до 768 кбит/с); AC3, E-AC3, DTS и TrueHD понижают его до 5.1.
 • «➕ Core» (вкладка Audio; доступна только на дорожках с ядром): дорожка DTS-HD (Master Audio или High Resolution) содержит обычный DTS для устройств, которые не понимают HD, а дорожка Dolby Atmos (TrueHD) — TrueHD без Atmos; эта кнопка выводит ядро и отдельной дорожкой (в MKV), без перекодирования. Ещё раз — убирает.
 • В «Information» — правая кнопка мыши: «Copy» и «Select all» (также в журнале). При открытии программы вкладка Video видна полностью; линию посередине можно тянуть, и положение запоминается.
 • При нажатии PROCESS окно показывает главное (каждое видео и файл, который получится, и предупреждения); «🔍 See everything» показывает всё (видео, изображение, обрезку, каждую дорожку, субтитры и команды FFmpeg), это можно скопировать кнопкой «📋 Copy all». «Yes» — начать.
@@ -8651,8 +10037,8 @@ SUBTITLES
 
 ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ
 • Видео · «More options» (вкладка Video): открывается внутри окна, с «Back». Вверху кадр до и после; ниже полоса (щелчок и стрелки ← → = кадр за кадром; с Shift — посекундно), обрезка по частям (несколько частей склеиваются в одно видео), изображение (яркость, контраст, насыщенность, оттенок, резкость и шумоподавление) и чёрные полосы (ищутся сами, когда видео добавляется). «Auto» в Picture измеряет фильм и предлагает значения (ещё нажатие = всё обратно на 0); если результат не нравится, подправьте вручную.
-• «Play» открывает окно видео со звуком с места на полосе: оригинал или с настройками, с первой включённой звуковой дорожкой, многоканально или в стерео.
-• Звук · «Visual / Waves» (вкладка Audio): волны каждого канала до и после, на выбранном отрезке (первые 5, 10 или 30 минут или весь файл), как в Jmg AudioProcesador. Щелчок по волнам = слушать оттуда. Волны строятся сами при входе и перестраиваются при смене Presence или отрезка; каждый канал рисуется заполненным, с пиком в dBFS, а «Zoom» увеличивает тихие волны. Справа от Presence — динамический диапазон / компрессия: с ними не нужно так сильно поднимать Presence. «Detail» (x1-x8) показывает волны подробнее; двигайтесь колесом или нижней полосой, а при воспроизведении вид следует за красной линией.
+• «▶ Original» или «▶ With the settings» открывает окно видео со звуком с места на полосе: оригинал или с настройками, с первой включённой звуковой дорожкой, многоканально или в стерео.
+• Звук · «Visual / Waves» (вкладка Audio): волны каждого канала до и после, на выбранном отрезке (первые 5, 10 или 30 минут или весь файл), как в Jmg AudioProcesador. Щелчок по волнам = слушать оттуда. При первом входе с дорожкой волны строятся сами; потом — по кнопке «🔄 Generate visualization»; каждый канал рисуется заполненным, с пиком в dBFS, а «Zoom» увеличивает тихие волны. «Detail» (x1-x1024) показывает волны подробнее; двигайтесь Shift + колесом или нижней полосой, а при воспроизведении вид следует за красной линией. Два масштаба: ↕ «Zoom» (высота волн, x1-x16) и ↔ «Detail» (время, x1-x1024); отметьте нужный, и колесо мыши увеличивает или уменьшает его.
 • Эффекты складываются: «After» несёт все эффекты дорожки. Presence (голос, атмосфера, эффекты и сабвуфер) со своим «Auto» тоже там. Отмена и повтор по-прежнему внизу.
 
 OUTPUT
@@ -8663,7 +10049,33 @@ OUTPUT
 • «🔍 Search online...» (Output → Cover): ищет фильм на TMDB, показывает его постеры, чтобы выбрать один, и ставит его обложкой с именем «Название (Год)». Если рядом с видео есть cover.jpg или folder.jpg (их оставляют многие программы для рипа, Kodi или Plex), а у видео нет обложки, он используется сам. Нужен ваш собственный бесплатный ключ TMDB: в первый раз программа объяснит, как его получить (аккаунт на themoviedb.org → Настройки → API). Без подключения поиск просто не выполняется.
 
 ПОМНИТЕ
+• Настройки сохраняются надёжно: сначала во временный файл, который затем за один шаг заменяет настоящий; если пропадёт питание или программа закроется посередине, останется прежний файл целиком, а не записанный наполовину.
+• То, что создаёт программа, сначала записывается как «имя.part.расширение» и получает настоящее имя, только когда всё закончилось успешно: если посередине пропадёт питание, обрезанный файл никогда не будет носить имя готового. При запуске программа сообщает о файлах «.part», оставшихся с прошлого раза (их можно удалить).
+• Дорожки AC3 и E-AC3 декодируются как есть, без записанного в них сжатия (FFmpeg применял его сам и занижал пики): получается исходный звук.
 • «↶ Undo» и «↷ Redo» (внизу; также Ctrl+Z и Ctrl+Y): отменяют и повторяют по одному последние 50 действий (настройки, добавление или удаление видео...). «Reset» возвращает автоматические настройки открытой вкладки (Video, Audio, Subtitles или Output) активного видео; с «All» — всё с нуля: список видео, их информация, настройки и Output по умолчанию (↶ возвращает обратно). Пока открыто окно вроде «Combine videos» или «Check synchronization», кнопки главного окна не работают: у этих окон свои ↶ ↷. В дополнительных настройках («More options» и «Visual / Waves») работают нижние кнопки.
+• Разделитель между двумя верхними столбцами останавливается, когда кнопки или текст столбца перестают помещаться: они никогда не обрезаются.
+• Полосы прокрутки появляются только когда нужны, а пояснение к каждой настройке появляется при наведении мыши (во вкладках нет поясняющих текстов).
+• Панель вкладок занимает ровно столько высоты, сколько нужно содержимому каждой вкладки (без пустого места и без обрезанного); список файлов сверху получает остальное.
+• Заголовок каждого эффекта становится зелёным, когда эффект включён (изменена любая настройка: сила, срез, потолок, частоты...).
+• Зелёный цвет сразу показывает всё, что что-то делает: заголовок каждого эффекта или раздела с какой-либо настройкой (также изображение, обрезка, чёрные полосы, цвет) и кнопки, которые уже что-то исправили (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). При наведении мыши на кнопку её надпись становится зелёной.
+• Вкладки тоже становятся зелёными: открытая и та, на которую наведена мышь. По окончании папка назначения открывается с уже выделенным файлом.
+• DVD (папка VIDEO_TS или образ .iso): язык аудиодорожек и субтитров читается из файла .IFO диска (в .VOB его нет).
+• «Visual / Waves»: у Dynamic processing есть своя «⚙» (порог, атака, восстановление, колено и лимитер) с «Default»; двойной щелчок по ползунку = начальное значение, стрелки = по шагу. Описания под ним больше нет (волнам больше высоты), а при масштабировании колесом названия каналов больше не сдвигаются. При наведении на кнопку зеленеют только её буквы.
+• «Visual / Waves» с более высоким разрешением: в четыре раза больше деталей, «Detail» до x1024 (и колесом мыши).
+• «🔍 View large» (или двойной щелчок по одной из двух картинок): «до» и «после» в реальном размере рядом, чтобы рассмотреть детали. Перетаскивайте, чтобы двигаться (обе двигаются вместе); колесо мыши — масштаб (x1-x4); Esc закрывает.
+• «Encode with»: «CPU» (процессор). В «Visual / Waves» изменение эффекта останавливает воспроизведение; нажмите «🔄 Generate visualization», чтобы увидеть волны с изменением, и ▶, чтобы послушать. Во время кодирования «⬅ Back» по-прежнему работает. «Auto» изображения оставляет оттенок на 0, а при отключении всё возвращается к 0. Всплывающие подсказки исчезают сами через несколько секунд.
+• Вся мощность процессора: каждая перекодируемая звуковая дорожка идёт в своём потоке FFmpeg (раньше все в одном), поэтому несколько дорожек обрабатываются одновременно.
+• «Preview» (внизу, сразу после кнопки обработки): показывает в реальном времени, со звуком, оригинал слева и видео, закодированное с вашими настройками (кодек, качество, разрешение, изображение), справа, одного размера, начиная с места, до которого дошло кодирование. Окно можно развернуть (двойной щелчок = полный экран), чтобы рассмотреть детали; Esc или повторный щелчок по «Preview» закрывает его. Работает только во время кодирования видео (не на шагах со звуком) и показывает кодируемое видео. С медленными настройками оно идёт так быстро, как кодирует процессор.
+• «Save preset» сохраняет все настройки выбранного видео: видео, звук (каждую дорожку с её кодеком и эффектами), субтитры, обложку и вывод. «Load preset» применяет их к выбранному видео, дорожку за дорожкой по порядку. То, что относится к конкретному фильму, не сохраняется: обрезка по отрезкам, обрезка чёрных полос, задержки, синхронизация по отрезкам и имя.
+• Пресеты общие для Jmg AudioProcesador и Jmg VideoEncoder (одна папка): каждая программа применяет свою часть; звук переходит из одной в другую, а в Jmg AudioProcesador видео и субтитры не влияют.
+• При передаче файлов из одной программы в другую добавленные файлы приходят уже добавленными (со своими настройками звука).
+• То, что сейчас работает (создание, прослушивание, воспроизведение, предпросмотр), выделяется зелёным. На паузе «Resume» (в Jmg VideoEncoder — ⏸) остаётся зелёным.
+• При кодировании видео по возможности декодируется видеокартой (процессор остаётся свободным для кодека); процессорные кодеки используют все ядра.
+• «Visual / Waves»: при первом входе с дорожкой волны строятся сами; потом — по кнопке «🔄 Generate visualization» (если что-то изменить, воспроизведение останавливается и появляется подсказка). Начинаются с «Zoom» x1. Детализация как в Sound Forge: «Detail» до x1024, а начиная с x64 видимая часть читается со всеми сэмплами (до — из файла, после — с эффектами).
+• Dynamic processing: режима 0 больше нет. По умолчанию режим 2, ползунки на 0: при 0 ничего не делает; если поднять ползунок, применяется выбранный режим.
+• «Edit/Log»: вверху — что содержит видео во вкладках (видео, изображение, обрезка, каждая звуковая дорожка с её эффектами и субтитры), как в Jmg AudioProcesador; внизу — журнал.
+• «Encode with»: кроме Processor, NVIDIA и AMD, есть «INTEL» (Quick Sync, видеокарты Intel Arc и встроенная графика) и «Vulkan» (любая видеокарта с новыми драйверами; на NVIDIA и AMD их собственные кнопки дают лучшее качество). Каждый вариант включается, только если компьютер может его использовать.
+• Во вкладке «Audio» Synchronization находится справа от Double Bass; во вкладке «Subtitles» синхронизация субтитров — справа от списка; во вкладке «Output» Cover — справа, под «Also copy».
 • В свёрнутом виде программа остаётся значком у часов (в области уведомлений), который показывает ход обработки: левый щелчок = окно возвращается; правый щелчок = меню (отменить обработку, что делать по окончании — ничего, выйти или выключить ПК —, открыть папку по окончании, выход). Во вкладке Output это можно отключить, чтобы сворачивать на панель задач как обычно. Если задержать мышь над кнопкой, полем или ползунком, появляется описание, которое само исчезает через несколько секунд.
 • Дополнительные настройки («⚙» рядом с кодеком, в Video и у каждой дорожки Audio): самое важное для каждого кодека, для тех, кто хочет тонкой настройки. Видео: tune (film, animation, grain...), профиль и уровень, ключевой кадр каждые X секунд, B-кадры и опорные кадры, адаптивное квантование, синтетическое зерно плёнки в AV1, два прохода и AQ у NVIDIA, максимальное качество и предварительный анализ у AMD, профиль ProRes (от Proxy до 4444 XQ) и профиль DNxHR (от LB до 444). Звук: служебная информация AC3 и E-AC3 (уровень диалогов, Dolby Surround EX, наушники, HDCD, даунмикс) и срез верхов, VBR у MP3 и Opus, сжатие FLAC. Всё, что не трогали, остаётся автоматическим; у каждого видео и каждой дорожки свои. В списке дорожек «⚙» = с дополнительными настройками. У AC3 и E-AC3 есть также тип помещения (большое или маленькое) с уровнем сведения; у DTS — предсказание ADPCM. DTS от FFmpeg всегда с постоянным битрейтом: 768 или 1536 kbps, стандартные (при меньшем плееры выдают только шум). AC3 (Aften и FFmpeg): в 5.1 от 224 до 640 kbps; в стерео от 96 до 640 (по умолчанию 192). E-AC3: любой битрейт, вводится вручную, от 192 kbps в 5.1 (в стерео от 64; по умолчанию 192). Dolby TrueHD идёт после форматов Dolby.
 • Субтитры · «Burn into the picture»: выбранные субтитры впечатываются в видео; они видны на любом устройстве, но убрать их уже нельзя. Только одни, и видео нужно перекодировать (если оно было в Passthrough, станет H.265). Текстовые (SRT, ASS) рисуются на итоговом изображении; графические (PGS, DVD) — на оригинале (с «Black bars» → «Remove them» то, что было на полосах, обрезается).
@@ -8683,7 +10095,7 @@ FFMPEG И ЛИЦЕНЗИЯ
 Jmg VideoEncoder — свободная программа под лицензией GNU GPL v3.
 Контакт: jmgsoftwaremultimedia@gmail.com
 Поддержать проект: https://www.paypal.com/paypalme/JmgSoftware
-На создание Jmg SuiteMultimedia (этой программы и Jmg AudioProcesador 5.1) ушла огромная работа: около 45 дней, с проверками на настоящих фильмах. Создано с помощью Claude, искусственного интеллекта компании Anthropic.
+На создание Jmg SuiteMultimedia (этой программы и Jmg AudioProcesador 5.1) ушли огромная работа и самоотдача, с проверками на настоящих фильмах. Создано с помощью Claude, искусственного интеллекта компании Anthropic.
 """
 AYUDA["hi"]="""JMG VIDEOENCODER · सहायता
 
@@ -8706,9 +10118,9 @@ VIDEO (वीडियो)
 AUDIO (ऑडियो)
 • वीडियो के सभी ट्रैक: आप क्रम (⬆ ⬇), भाषा, शीर्षक, डिफ़ॉल्ट ट्रैक बदल सकते हैं और अनचाहे हटा सकते हैं (डबल-क्लिक)।
 • कोडेक: Passthrough (बिना छुए), AC3, E-AC3, DTS, AAC, MP3 (सिर्फ़ स्टीरियो: 5.1 को डाउनमिक्स किया जाता है), FLAC और Opus। «Aften Dolby Digital» (डिफ़ॉल्ट, कोडेक सूची में) AC3 को Aften से बनाता है, जो ज़्यादा डायनामिक रेंज वाली फ़िल्मों में बेहतर रेंज देता है; «AC3 · FFmpeg», FFmpeg से। इसकी सेटिंग्स दूसरे फ़ॉर्मैटों की तरह «⚙ Aften...» से (डिफ़ॉल्ट: block switching और स्थिर पूरी बैंडविड्थ): CBR या VBR, बैंडविड्थ, सटीकता, फ़िल्टर, डायनामिक रेंज (DRC और संवाद स्तर) और एम्प्लीफ़ायर के लिए जानकारी (Dolby Surround EX, Dolby Headphone, Standard या HDCD A/D कनवर्टर, पसंदीदा डाउनमिक्स और उसके स्तर)। हर डिवाइस VBR वाला AC3 नहीं पढ़ता।
-• डायनामिक रेंज / कंप्रेशन: स्लाइडर, बीच में बंद। बाईं ओर (1-10) डायनामिक रेंज: ज़्यादा कंट्रास्ट। दाईं ओर (1-10) कंप्रेशन: धीमी आवाज़ें ऊपर जाती हैं (रात में फ़िल्म देखने के लिए)। एक फ़्रंट और सराउंड के लिए, दूसरा सेंटर के लिए। सबवूफ़र को नहीं छूता। यह «Visual / Waves» (Audio टैब) में Presence के दाईं ओर है, जहाँ आप इसे तरंगों पर देखते हैं। उसके दाईं ओर «Channel separation» (-10 से +10): बाएँ-दाएँ और आगे-पीछे के बीच ज़्यादा या कम अलगाव, वॉल्यूम बढ़ाए बिना। उसका «Auto» फ़िल्म का अलगाव मापता है और फ़िल्म कितनी तेज़ है उसके हिसाब से सही मात्रा लगाता है (एक्शन में ज़्यादा, शांत फ़िल्मों में कम); सेंटर को कभी नहीं छूता। डायनामिक रेंज / कंप्रेशन का «Auto» सेंटर को नहीं छूता: वह आधार है (हाथ से बदल सकते हैं)। Presence का «Auto» सेंटर को आधार मानता है (आवाज़ नहीं बढ़ाता: सेंटर धीमा हो तो बाकी को घटाता है) और हर चैनल के वॉल्यूम वाला «Auto» फ़्रंट और सराउंड सिर्फ़ घटाता है, कभी बढ़ाता नहीं। सलाह: Channel separation को आख़िर से दूसरी सेटिंग और Volume per channel को आख़िरी सेटिंग बनाएँ।
+• «Dynamic processing» (Jmg AudioProcesador वाला, Azid के बिना; यह पुराने «Dynamic range / Compression» की जगह लेता है): यह «Visual / Waves» (Audio टैब) में «Presence» के दाईं ओर है, जहाँ इसका असर वेव में दिखता है। मोड: 0 = बंद · 1 Lift: धीमी आवाज़ें ऊपर · 2 Impact: तेज़ आवाज़ें उभरती हैं · 3 दोनों। तीन समूह, हर एक 0 से 15 (0 = कोई असर नहीं): फ़्रंट और सराउंड, सेंटर और सबवूफ़र (Double Bass इस्तेमाल करें तो सबवूफ़र 0 पर रखें)। «Limiter ceiling»: कोई भी पीक इस स्तर से ऊपर नहीं जाती; «No limit» पर असर बहुत बढ़ाने से आवाज़ फट सकती है। इसका «Auto» फ़िल्म की डायनामिक रेंज मापता है: ज़रूरत न हो तो बंद रहता है; वरना फ़्रंट और सराउंड पर Lift + Impact लगाता है (सेंटर संदर्भ है और नहीं बदलता)। यह Jmg AudioProcesador में वैसा ही जाता है और वैसा ही लौटता है। इसके दाईं ओर «Channel separation» (-15 से +15): वॉल्यूम बढ़ाए बिना बाएँ-दाएँ और आगे-पीछे के बीच अलगाव कम-ज़्यादा करता है। इसका «Auto» फ़िल्म का अलगाव मापकर उसकी हलचल के हिसाब से सही मात्रा लगाता है (एक्शन में ज़्यादा, शांत फ़िल्मों में कम); सेंटर कभी नहीं बदलता। Presence का «Auto» सेंटर को संदर्भ मानता है (आवाज़ नहीं बढ़ाता: सेंटर धीमा हो तो बाकी को घटाता है) और हर चैनल के वॉल्यूम वाला सिर्फ़ फ़्रंट और सराउंड घटाता है, कभी बढ़ाता नहीं। सलाह है कि Channel separation को आख़िर से दूसरी सेटिंग और हर चैनल के वॉल्यूम को आख़िरी सेटिंग बनाएँ। बारीक सेटिंग, 1-1 करके: Presence, Channel separation और इक्वलाइज़र -15 से +15; Dynamic processing 0 से 15; Double Bass 0 से 6।
 • हर चैनल का वॉल्यूम, डिजिटल स्मूदिंग (80 और 90 के दशक की फ़िल्मों का ज़्यादा ट्रेबल) और 3-बैंड इक्वलाइज़र (फ़्रंट, सेंटर और सराउंड)।
-• सुझाया गया क्रम: पहले Presence और/या Dynamic range, फिर बाकी इफ़ेक्ट, और हमेशा आख़िर में Volume per channel: इस तरह हर चैनल का वॉल्यूम बाकी सबके नतीजे पर सेट होता है, ज़्यादा बारीकी से।
+• सुझाया गया क्रम: पहले Presence और/या Dynamic processing, फिर बाकी इफ़ेक्ट, और हमेशा आख़िर में Volume per channel: इस तरह हर चैनल का वॉल्यूम बाकी सबके नतीजे पर सेट होता है, ज़्यादा बारीकी से।
 • हर «Auto» बाकी इफ़ेक्ट लागू करके ट्रैक को मापता है और अपने कंट्रोल सेट करता है; बिना कुछ छुए फिर से दबाने पर 0 पर लौटता है। इफ़ेक्ट चुने हुए ट्रैक के होते हैं; Passthrough के साथ ट्रैक फिर से अपने ही कोडेक से कंप्रेस होता है।
 • TrueHD और FLAC लॉसलेस हैं: kbps की जगह आप 16 या 24 बिट चुनते हैं।
 • Double Bass: सबवूफ़र का बेस स्पीकरों पर और स्पीकरों का बेस सबवूफ़र पर कॉपी करता है (सिर्फ़ सबवूफ़र वाले ट्रैकों पर), अपने «Auto» के साथ। इसका «Auto» Double Bass (1-3) लगाता है अगर स्पीकरों में गहरा बेस कम हो या सबवूफ़र कमज़ोर हो; संतुलित हों तो 0। डिफ़ॉल्ट कट: 90 Hz।
@@ -8716,7 +10128,7 @@ AUDIO (ऑडियो)
 • «▶ Check synchronization» (Synchronization में): वीडियो अपनी विंडो में, ट्रैक वैसा ही जैसा वह निकलेगा (देरी, टुकड़े और इफ़ेक्ट), आपके चुने बिंदु से या हर टुकड़े से, ताकि आप अपनी आँखों से देख सकें कि होंठ आवाज़ से मिलते हैं या नहीं। उसी पल आप बिना सुधारा ट्रैक या संदर्भ ट्रैक भी सुन सकते हैं। यह वही विंडो है जो Jmg AudioProcesador में है।
 • फ़्रेम रेट (Synchronization में): 23.976 वाली फ़िल्म में 25 fps संस्करण के ट्रैक के लिए (या उल्टा), Jmg AudioProcesador की तरह: उसकी सटीक गति बदलता है, पिच बदलकर या बिना, देरी और टुकड़ों से पहले। जब आप किसी दूसरी फ़ाइल से ऐसा ट्रैक जोड़ते हैं जो वीडियो से 4 % छोटा (या लंबा) हो, तो प्रोग्राम उसे पहचानता है, अपने-आप सेट करता है और बताता है। फिर देरी की गणना करें।
 • सुनना: Audio के «Visual / Waves» में «▶ Before» या «▶ After» (या तरंगों पर क्लिक करें); ⏸ रोकें (फिर दबाने पर आगे बढ़ता है) और ⏹ रोककर शुरुआत पर लौटाता है। मल्टीचैनल से (AV रिसीवर के लिए) या स्टीरियो में।
-• ऑडियो ट्रैक, Jmg AudioProcesador की तरह: प्रोसेस किया गया ट्रैक (इफ़ेक्ट के साथ; सिर्फ़ कोडेक या बिटरेट बदलना नहीं गिना जाता) पहले और डिफ़ॉल्ट के रूप में आता है, शीर्षक «Jmg procesada» के साथ (बदला जा सकता है), और मूल उसके बाद रखा जाता है। «🚫 Remove original» उसे हटाता है (पंक्ति हल्की लाल हो जाती है; फिर दबाने पर लौट आता है); बिना प्रोसेस वाले ट्रैक पर, उसे वीडियो से हटा देता है। «➕ Add track» किसी दूसरी फ़ाइल से ट्रैक लाता है और «➖ Delete track» उसे सूची से हटाता है (मूल फ़ाइल को नहीं छूता)। प्रति चैनल वॉल्यूम: -30 से +20 dB, दशमलव के साथ, Jmg AudioProcesador की तरह। अगर दो या अधिक प्रोसेस किए गए ट्रैक हों, तो प्रोसेस करते समय पूछा जाता है कि कौन-सा पहले और डिफ़ॉल्ट रहेगा। प्रोसेस से पहले «🔍 See everything» और Edit/Log हर ट्रैक के ऑडियो इफ़ेक्ट बताते हैं। अगर कुछ नहीं बदला, तो «Visual / Waves» तरंगें दोबारा नहीं गिनता। -30 से एक स्थान नीचे «Mute» (लाल) है: वह चैनल चुप हो जाता है। प्रति चैनल वॉल्यूम सबसे आख़िर में लगता है (Double Bass और Channel separation के बाद): आप जितना सेट करते हैं, वह चैनल ठीक उतना ही ऊपर या नीचे जाता है।
+• ऑडियो ट्रैक, Jmg AudioProcesador की तरह: प्रोसेस किया गया ट्रैक (इफ़ेक्ट के साथ; सिर्फ़ कोडेक या बिटरेट बदलना नहीं गिना जाता) पहले और डिफ़ॉल्ट के रूप में आता है, शीर्षक «Jmg procesada» के साथ (बदला जा सकता है), और मूल उसके बाद रखा जाता है। «🚫 Remove original» उसे हटाता है (पंक्ति हल्की लाल हो जाती है; फिर दबाने पर लौट आता है); बिना प्रोसेस वाले ट्रैक पर, उसे वीडियो से हटा देता है। «➕ Add track» किसी दूसरी फ़ाइल से ट्रैक लाता है और «➖ Delete track» उसे सूची से हटाता है (मूल फ़ाइल को नहीं छूता)। प्रति चैनल वॉल्यूम: -30 से +20 dB, दशमलव के साथ, Jmg AudioProcesador की तरह। अगर दो या अधिक प्रोसेस किए गए ट्रैक हों, तो प्रोसेस करते समय पूछा जाता है कि कौन-सा पहले और डिफ़ॉल्ट रहेगा। प्रोसेस से पहले «🔍 See everything» और Edit/Log हर ट्रैक के ऑडियो इफ़ेक्ट बताते हैं। अगर कुछ नहीं बदला, तो «Visual / Waves» तरंगें दोबारा नहीं गिनता। -30 से एक स्थान नीचे «Mute» (लाल) है: वह चैनल चुप हो जाता है। प्रति चैनल वॉल्यूम सबसे आख़िर में लगता है (Double Bass और Channel separation के बाद): आप जितना सेट करते हैं, वह चैनल ठीक उतना ही ऊपर या नीचे जाता है। AAC, FLAC और Opus 7.1 बनाए रखते हैं (AAC 768 kbps तक); AC3, E-AC3, DTS और TrueHD इसे 5.1 कर देते हैं।
 • «➕ Core» (Audio टैब; सिर्फ़ उन ट्रैकों पर चालू जिनमें कोर होता है): DTS-HD ट्रैक (Master Audio या High Resolution) के अंदर उन डिवाइसों के लिए एक सामान्य DTS होता है जो HD नहीं समझते, और Dolby Atmos (TrueHD) ट्रैक के अंदर Atmos के बिना एक TrueHD; यह बटन उसे अलग ट्रैक के रूप में भी निकालता है (MKV में), बिना दोबारा एन्कोड किए। फिर दबाने पर: हट जाता है।
 • «Information» में माउस का दायाँ बटन: «Copy» और «Select all» (लॉग में भी)। प्रोग्राम खुलने पर Video टैब पूरा दिखता है; बीच की रेखा खींची जा सकती है और याद रखी जाती है।
 • PROCESS दबाने पर एक विंडो ज़रूरी बातें दिखाती है (हर वीडियो और जो फ़ाइल निकलेगी, और चेतावनियाँ); «🔍 See everything» सब कुछ दिखाता है (वीडियो, तस्वीर, ट्रिमिंग, हर ट्रैक, सबटाइटल और FFmpeg कमांड) और इसे «📋 Copy all» से कॉपी किया जा सकता है। शुरू करने के लिए «Yes»।
@@ -8728,8 +10140,8 @@ SUBTITLES (सबटाइटल)
 
 एडवांस्ड विकल्प
 • वीडियो · «More options» (Video टैब): विंडो के अंदर ही खुलता है, «Back» के साथ। ऊपर पहले और बाद का फ़्रेम; नीचे पट्टी (क्लिक और ← → तीर = फ़्रेम-दर-फ़्रेम; Shift के साथ, सेकंड-दर-सेकंड), टुकड़ों में ट्रिमिंग (कई टुकड़े एक वीडियो में जुड़ जाते हैं), तस्वीर (चमक, कंट्रास्ट, सैचुरेशन, रंगत, शार्पनेस और नॉइज़ हटाना) और काली पट्टियाँ (वीडियो जोड़ते ही अपने-आप ढूँढी जाती हैं)। Picture में «Auto» फ़िल्म को मापकर मान सुझाता है (फिर दबाएँ = सब वापस 0 पर); अगर नतीजा पसंद न आए, तो हाथ से सुधारें।
-• «Play» पट्टी के बिंदु से आवाज़ के साथ वीडियो विंडो खोलता है: मूल या सेटिंग्स के साथ, पहले शामिल ऑडियो ट्रैक के साथ, मल्टीचैनल या स्टीरियो में।
-• ऑडियो · «Visual / Waves» (Audio टैब): हर चैनल की पहले और बाद की तरंगें, आपके चुने हिस्से के लिए (पहले 5, 10 या 30 मिनट या पूरी फ़ाइल), Jmg AudioProcesador की तरह। तरंगों पर क्लिक = वहीं से सुनें। अंदर आते ही तरंगें अपने-आप बनती हैं और Presence या हिस्सा बदलने पर फिर से बनती हैं; हर चैनल भरा हुआ बनता है, dBFS में अपने पीक के साथ, और «Zoom» धीमी तरंगों को बड़ा करता है। Presence के दाईं ओर, डायनामिक रेंज / कंप्रेशन: इसके साथ Presence को इतना बढ़ाने की ज़रूरत नहीं। «Detail» (x1-x8) तरंगों को ज़्यादा बारीकी से दिखाता है; पहिये या नीचे की पट्टी से चलें, और चलते समय दृश्य लाल रेखा के साथ चलता है।
+• «▶ Original» या «▶ With the settings» पट्टी के बिंदु से आवाज़ के साथ वीडियो विंडो खोलता है: मूल या सेटिंग्स के साथ, पहले शामिल ऑडियो ट्रैक के साथ, मल्टीचैनल या स्टीरियो में।
+• ऑडियो · «Visual / Waves» (Audio टैब): हर चैनल की पहले और बाद की तरंगें, आपके चुने हिस्से के लिए (पहले 5, 10 या 30 मिनट या पूरी फ़ाइल), Jmg AudioProcesador की तरह। तरंगों पर क्लिक = वहीं से सुनें। किसी ट्रैक के साथ पहली बार आने पर तरंगें अपने-आप बनती हैं; उसके बाद «🔄 Generate visualization» दबाने पर; हर चैनल भरा हुआ बनता है, dBFS में अपने पीक के साथ, और «Zoom» धीमी तरंगों को बड़ा करता है। «Detail» (x1-x1024) तरंगों को ज़्यादा बारीकी से दिखाता है; Shift + पहिये या नीचे की पट्टी से चलें, और चलते समय दृश्य लाल रेखा के साथ चलता है। दो ज़ूम: ↕ «Zoom» (तरंगों की ऊँचाई, x1-x16) और ↔ «Detail» (समय, x1-x1024); जो चाहिए उसे चुनें और माउस का पहिया उसे बढ़ाता या घटाता है।
 • इफ़ेक्ट जुड़ते जाते हैं: «After» में ट्रैक के सभी इफ़ेक्ट होते हैं। Presence (आवाज़, माहौल, इफ़ेक्ट और सबवूफ़र) अपने «Auto» के साथ भी वहीं है। Undo और Redo अब भी नीचे हैं।
 
 OUTPUT
@@ -8740,7 +10152,33 @@ OUTPUT
 • «🔍 Search online...» (Output → Cover): TMDB पर फ़िल्म खोजता है, उसके पोस्टर दिखाता है ताकि आप एक चुनें, और उसे «शीर्षक (वर्ष)» नाम के साथ कवर बना देता है। अगर वीडियो के पास cover.jpg या folder.jpg हो (जो कई रिपिंग प्रोग्राम, Kodi या Plex बनाते हैं) और वीडियो में कवर न हो, तो वह अपने-आप इस्तेमाल होता है। इसके लिए आपकी अपनी मुफ़्त TMDB key चाहिए: पहली बार प्रोग्राम बताता है कि इसे कैसे पाएँ (themoviedb.org पर खाता → Settings → API)। कनेक्शन न हो तो बस खोज नहीं होती।
 
 ध्यान रखें
+• सेटिंग्स सुरक्षित तरीके से सहेजे जाते हैं: पहले एक अस्थायी फ़ाइल में, जो फिर एक ही बार में असली फ़ाइल की जगह ले लेती है; अगर बीच में बिजली चली जाए या प्रोग्राम बंद हो जाए, तो पिछली फ़ाइल पूरी बची रहती है, कभी आधी लिखी नहीं।
+• प्रोग्राम जो फ़ाइलें बनाता है, वे पहले «नाम.part.ext» के रूप में लिखी जाती हैं और ठीक से पूरी होने पर ही असली नाम पाती हैं: अगर बीच में बिजली चली जाए, तो कटी हुई फ़ाइल कभी पूरी फ़ाइल के नाम से नहीं रहती। खोलने पर प्रोग्राम पिछली बार बची «.part» फ़ाइलों के बारे में बताता है (उन्हें हटाया जा सकता है)।
+• AC3 और E-AC3 ट्रैक जैसे हैं वैसे ही डिकोड होते हैं, उनके अंदर के कम्प्रेशन के बिना (FFmpeg पहले इसे अपने आप लगाकर पीक कम कर देता था): मूल आवाज़ मिलती है।
 • «↶ Undo» और «↷ Redo» (नीचे; Ctrl+Z और Ctrl+Y से भी): आख़िरी 50 कार्यों को एक-एक करके वापस करते और दोहराते हैं (सेटिंग्स, वीडियो जोड़ना या हटाना...)। «Reset» सक्रिय वीडियो के खुले टैब (Video, Audio, Subtitles या Output) की अपने-आप वाली सेटिंग्स वापस लगाता है; «All» के साथ, सब कुछ शून्य से: वीडियो सूची, उनकी जानकारी, उनकी सेटिंग्स और डिफ़ॉल्ट Output (↶ उसे वापस लाता है)। जब «Combine videos» या «Check synchronization» जैसी कोई विंडो खुली हो, तो मुख्य विंडो के बटन काम नहीं करते: उन विंडो के अपने ↶ ↷ हैं। एडवांस्ड विकल्पों («More options» और «Visual / Waves») में नीचे वाले बटन काम करते हैं।
+• ऊपर के दो कॉलम के बीच की पट्टी वहीं रुक जाती है जहाँ किसी कॉलम के बटन या टेक्स्ट नहीं समाते: वे कभी कटते नहीं।
+• स्क्रॉल बार केवल ज़रूरत पड़ने पर दिखते हैं, और हर सेटिंग की व्याख्या माउस ऊपर ले जाने पर दिखती है (टैब में व्याख्या वाले टेक्स्ट नहीं हैं)।
+• टैब का पैनल हर टैब की सामग्री जितनी ही ऊँचाई लेता है (न खाली जगह, न कुछ कटा हुआ); ऊपर की फ़ाइल सूची बाकी जगह लेती है।
+• हर इफ़ेक्ट का शीर्षक हरा हो जाता है जब वह चालू हो (कोई भी सेटिंग बदली हो: तीव्रता, कटऑफ़, सीमा, फ़्रीक्वेंसी...)।
+• हरा रंग एक नज़र में दिखाता है कि क्या-क्या कुछ कर रहा है: जिस इफ़ेक्ट या हिस्से में कोई सेटिंग बदली हो उसका शीर्षक (इमेज, कटिंग, काली पट्टियाँ, रंग भी) और वे बटन जिन्होंने पहले ही कुछ ठीक किया है (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...)। किसी बटन पर माउस ले जाने पर उसके अक्षर हरे हो जाते हैं।
+• टैब भी हरे होते हैं: जो खुला है और जिस पर माउस है। काम पूरा होने पर गंतव्य फ़ोल्डर फ़ाइल चुनी हुई अवस्था में खुलता है।
+• DVD (VIDEO_TS फ़ोल्डर या .iso इमेज): ऑडियो ट्रैक और सबटाइटल की भाषा डिस्क की .IFO फ़ाइल से पढ़ी जाती है (.VOB फ़ाइलों में यह नहीं होती)।
+• «Visual / Waves»: Dynamic processing का अपना «⚙» है (थ्रेशोल्ड, अटैक, रिलीज़, नी और लिमिटर), «Default» के साथ; स्लाइडर पर डबल-क्लिक = शुरुआती मान, तीर = एक-एक कदम। नीचे का विवरण अब नहीं है (वेव के लिए ज़्यादा ऊँचाई), और व्हील से ज़ूम करने पर चैनलों के नाम अब नहीं खिसकते। बटन पर माउस ले जाने पर सिर्फ़ उसके अक्षर हरे होते हैं।
+• ज़्यादा रिज़ॉल्यूशन वाला «Visual / Waves»: चार गुना ज़्यादा बारीकी और «Detail» x1024 तक (माउस व्हील से भी)।
+• «🔍 View large» (या दोनों तस्वीरों में से किसी पर डबल-क्लिक): पहले और बाद की तस्वीर असली आकार में, साथ-साथ, ताकि बारीकियाँ दिखें। खींचकर घूमें (दोनों साथ चलती हैं); माउस व्हील से ज़ूम (x1-x4); Esc से बंद।
+• «Encode with»: «CPU» (प्रोसेसर)। «Visual / Waves» में कोई इफ़ेक्ट छूने पर आवाज़ रुक जाती है; बदलाव के साथ तरंगें देखने के लिए «🔄 Generate visualization» और सुनने के लिए ▶ दबाएँ। एन्कोडिंग के दौरान भी «⬅ Back» काम करता है। इमेज का «Auto» ह्यू को 0 पर छोड़ता है और हटाने पर सब 0 पर लौट आता है। टूलटिप कुछ सेकंड बाद अपने-आप हट जाते हैं।
+• प्रोसेसर की पूरी ताक़त: दोबारा एन्कोड होने वाला हर ऑडियो ट्रैक FFmpeg के अपने थ्रेड में चलता है (पहले सब एक में), इसलिए कई ट्रैक एक साथ प्रोसेस होते हैं।
+• «Preview» (नीचे, प्रोसेस बटन के ठीक बाद): एन्कोडिंग जहाँ तक पहुँची है वहाँ से, रियल टाइम में, आवाज़ के साथ, बाईं ओर मूल और दाईं ओर आपकी सेटिंग (कोडेक, क्वालिटी, रिज़ॉल्यूशन, इमेज) से एन्कोड किया वीडियो एक ही आकार में दिखाता है। बारीकियाँ देखने के लिए उसकी विंडो बड़ी की जा सकती है (डबल-क्लिक = फ़ुल स्क्रीन); Esc या «Preview» पर फिर क्लिक करने से वह बंद होती है। सिर्फ़ वीडियो एन्कोड होते समय चालू होता है (ऑडियो वाले चरणों में नहीं) और एन्कोड हो रहा वीडियो दिखाता है। धीमी सेटिंग में यह उतनी ही तेज़ी से चलता है जितनी तेज़ी से प्रोसेसर एन्कोड करे।
+• «Save preset» चुने गए वीडियो की सभी सेटिंग्स सहेजता है: वीडियो, ऑडियो (हर ट्रैक, उसके कोडेक और इफ़ेक्ट्स के साथ), सबटाइटल, कवर और आउटपुट। «Load preset» उन्हें चुने गए वीडियो पर क्रम से ट्रैक-दर-ट्रैक लगाता है। हर फ़िल्म की अपनी चीज़ें सहेजी नहीं जातीं: हिस्सों में कटिंग, काली पट्टियों की क्रॉपिंग, डिले, हिस्सों में सिंक और नाम।
+• प्रीसेट Jmg AudioProcesador और Jmg VideoEncoder में साझा हैं (एक ही फ़ोल्डर): हर प्रोग्राम अपना हिस्सा लगाता है; ऑडियो एक से दूसरे में जाता है, और Jmg AudioProcesador में वीडियो और सबटाइटल का असर नहीं होता।
+• एक प्रोग्राम से दूसरे में फ़ाइलें भेजने पर, जो जोड़ी गई थीं वे जुड़ी हुई ही पहुँचती हैं (अपनी ऑडियो सेटिंग्स के साथ)।
+• जो चल रहा है (बनाना, सुनना, चलाना, प्रीव्यू) वह हरे रंग में दिखता है। रुकने पर «Resume» (Jmg VideoEncoder में ⏸) हरा रहता है।
+• एन्कोड करते समय, हो सके तो वीडियो ग्राफ़िक्स कार्ड से डिकोड होता है (प्रोसेसर कोडेक के लिए खाली रहता है); प्रोसेसर वाले कोडेक सभी कोर इस्तेमाल करते हैं।
+• «Visual / Waves»: किसी ट्रैक के साथ पहली बार आने पर तरंगें अपने-आप बनती हैं; उसके बाद «🔄 Generate visualization» दबाने पर बनती हैं (कुछ बदलने पर आवाज़ रुक जाती है और सूचना दिखती है)। ये «Zoom» x1 से शुरू होती हैं। Sound Forge जैसी बारीकी: «Detail» x1024 तक जाता है, और x64 से जो दिखता है वह सभी सैंपल के साथ पढ़ा जाता है (पहले वाला फ़ाइल से, बाद वाला इफ़ेक्ट के साथ)।
+• Dynamic processing: अब मोड 0 नहीं है। डिफ़ॉल्ट रूप से मोड 2 और स्लाइडर 0 पर: 0 पर कुछ नहीं होता; कोई स्लाइडर बढ़ाने पर चुना हुआ मोड लागू होता है।
+• «Edit/Log»: ऊपर, टैब वाले वीडियो में क्या-क्या है (वीडियो, इमेज, कटिंग, हर ऑडियो ट्रैक और उसके इफ़ेक्ट, सबटाइटल), जैसे Jmg AudioProcesador में; नीचे, लॉग।
+• «Encode with»: Processor, NVIDIA और AMD के अलावा «INTEL» (Quick Sync, Intel Arc और इंटीग्रेटेड ग्राफ़िक्स) और «Vulkan» (नए ड्राइवर वाला कोई भी ग्राफ़िक्स कार्ड; NVIDIA और AMD पर उनके अपने बटन ज़्यादा गुणवत्ता देते हैं)। हर विकल्प तभी चालू होता है जब PC उसे इस्तेमाल कर सके।
+• «Audio» में Synchronization, Double Bass के दाईं ओर है; «Subtitles» में सबटाइटल का सिंक सूची के दाईं ओर है; «Output» में Cover दाईं ओर, «Also copy» के नीचे है।
 • मिनिमाइज़ करने पर प्रोग्राम घड़ी के पास (सिस्टम ट्रे में) एक आइकन बनकर रहता है, जो प्रोसेस की प्रगति दिखाता है: बायाँ क्लिक = विंडो वापस आती है; दायाँ क्लिक = मेनू (प्रोसेस रद्द करें, ख़त्म होने पर क्या करें —कुछ नहीं, बाहर निकलें या पीसी बंद करें—, ख़त्म होने पर फ़ोल्डर खोलें, बाहर निकलें)। Output में इसे बंद किया जा सकता है, ताकि हमेशा की तरह टास्कबार पर मिनिमाइज़ हो। किसी बटन, बॉक्स या स्लाइडर पर माउस रोकने से उसका विवरण दिखता है, जो कुछ सेकंड में अपने-आप चला जाता है।
 • एडवांस्ड विकल्प (कोडेक के पास «⚙», Video में और हर Audio ट्रैक पर): हर कोडेक की सबसे ज़रूरी सेटिंग्स, बारीक ट्यूनिंग चाहने वालों के लिए। वीडियो: tune (film, animation, grain...), प्रोफ़ाइल और लेवल, हर X सेकंड पर एक कीफ़्रेम, B-फ़्रेम और रेफ़रेंस फ़्रेम, अनुकूली क्वांटाइज़ेशन, AV1 में कृत्रिम फ़िल्म ग्रेन, NVIDIA के दो पास और AQ, AMD की सबसे ऊँची गुणवत्ता और पूर्व-विश्लेषण, ProRes प्रोफ़ाइल (Proxy से 4444 XQ) और DNxHR प्रोफ़ाइल (LB से 444)। ऑडियो: AC3 और E-AC3 की बिटस्ट्रीम जानकारी (संवाद स्तर, Dolby Surround EX, हेडफ़ोन, HDCD, डाउनमिक्स) और ट्रेबल कट, MP3 और Opus का VBR, FLAC कंप्रेशन। जो न छुआ जाए वह अपने-आप रहता है; हर वीडियो और हर ट्रैक की अपनी सेटिंग्स। ट्रैक सूची में «⚙» = एडवांस्ड विकल्पों के साथ। AC3 और E-AC3 में कमरे का प्रकार (बड़ा या छोटा) और उसका मिक्सिंग स्तर भी है; DTS में ADPCM प्रेडिक्शन। FFmpeg का DTS हमेशा स्थिर बिटरेट पर होता है: 768 या 1536 kbps, मानक वाले (कम पर प्लेयर सिर्फ़ शोर देते हैं)। AC3 (Aften और FFmpeg): 5.1 में 224 से 640 kbps; स्टीरियो में 96 से 640 (डिफ़ॉल्ट 192)। E-AC3: कोई भी बिटरेट, हाथ से लिखा, 5.1 में 192 kbps से (स्टीरियो में 64 से; डिफ़ॉल्ट 192)। Dolby TrueHD, Dolby वालों के बाद आता है।
 • सबटाइटल · «Burn into the picture»: चुना हुआ सबटाइटल वीडियो में छाप दिया जाता है; यह किसी भी डिवाइस पर दिखता है, पर फिर हटाया नहीं जा सकता। सिर्फ़ एक, और वीडियो को फिर से एन्कोड करना होगा (अगर वह Passthrough में था, तो H.265 बन जाता है)। टेक्स्ट वाले (SRT, ASS) अंतिम तस्वीर पर बनते हैं; इमेज वाले (PGS, DVD), मूल पर («Black bars» → «Remove them» के साथ, पट्टियों पर जो हो वह कट जाता है)।
@@ -8760,7 +10198,7 @@ GNU GPL v3 लाइसेंस के तहत FFmpeg (ffmpeg.org, BtbN ब�
 Jmg VideoEncoder GNU GPL v3 लाइसेंस के तहत मुफ़्त सॉफ़्टवेयर है।
 संपर्क: jmgsoftwaremultimedia@gmail.com
 प्रोजेक्ट का समर्थन करें: https://www.paypal.com/paypalme/JmgSoftware
-Jmg SuiteMultimedia (यह प्रोग्राम और Jmg AudioProcesador 5.1) को बनाने में बहुत बड़ी मेहनत लगी है: लगभग 45 दिन, असली फ़िल्मों पर परीक्षण के साथ। Anthropic की AI, Claude की मदद से विकसित।
+Jmg SuiteMultimedia (यह प्रोग्राम और Jmg AudioProcesador 5.1) को बनाने में बहुत बड़ी मेहनत और लगन लगी है, असली फ़िल्मों पर परीक्षण के साथ। Anthropic की AI, Claude की मदद से विकसित।
 """
 
 if __name__=="__main__":

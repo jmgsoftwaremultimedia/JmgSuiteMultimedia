@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Jmg AudioProcesador 5.1 - GUI v1.6 (ES/EN)"""
+"""Jmg AudioProcesador 5.1 - GUI v1.6.1 (ES/EN)"""
 import os,sys,json,threading,subprocess,re,locale,time,math,tkinter as tk
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tkinter import ttk,filedialog,messagebox,scrolledtext
@@ -23,15 +23,46 @@ def _ico_alto(w):
         f=ttk.Style(w).lookup(_TTK_BOTON.cget(w,"style") or "TButton","font") or "TkDefaultFont"
         return int(tkf.Font(root=w,font=f).metrics("linespace"))
     except Exception:return 0
-def _ico_img(ch,w,verde=False):
+def _verde_ac():return globals().get("VERDE_JMG","#3cb95a")
+def _png_verde(b64,col):
+    """(árbitro, 26-11) el mismo icono PNG en verde (col) conservando su transparencia: lo azul pasa al verde, lo blanco sigue blanco"""
+    import zlib,struct,base64 as _b6
+    try:
+        d=_b6.b64decode(b64);p=8;ihdr=None;idat=b""
+        while p<len(d):
+            n=struct.unpack(">I",d[p:p+4])[0];t=d[p+4:p+8];c=d[p+8:p+8+n];p+=12+n
+            if t==b"IHDR":ihdr=c
+            elif t==b"IDAT":idat+=c
+        w,h,bd,ct,_c,_f,il=struct.unpack(">IIBBBBB",ihdr)
+        if bd!=8 or ct not in (2,6) or il:return b64
+        bpp=4 if ct==6 else 3;st=w*bpp;raw=zlib.decompress(idat);out=bytearray();prev=bytearray(st);q=0
+        V=[int(col[i:i+2],16) for i in (1,3,5)]
+        for y in range(h):
+            f=raw[q];q+=1;row=bytearray(raw[q:q+st]);q+=st
+            for i in range(st):
+                a=row[i-bpp] if i>=bpp else 0;b=prev[i];c=prev[i-bpp] if i>=bpp else 0
+                if f==1:row[i]=(row[i]+a)&255
+                elif f==2:row[i]=(row[i]+b)&255
+                elif f==3:row[i]=(row[i]+((a+b)>>1))&255
+                elif f==4:
+                    pa,pb,pc=abs(b-c),abs(a-c),abs(a+b-2*c);row[i]=(row[i]+(a if (pa<=pb and pa<=pc) else (b if pb<=pc else c)))&255
+            prev=bytearray(row)
+            for x in range(0,st,bpp):
+                mn=min(row[x],row[x+1],row[x+2]);k=min(1.0,(max(row[x],row[x+1],row[x+2])-mn)/153.0)
+                for j in range(3):row[x+j]=max(0,min(255,int(round(mn+(V[j]-mn)*k))))
+            out+=b"\0"+row
+        ck=lambda t,c:struct.pack(">I",len(c))+t+c+struct.pack(">I",zlib.crc32(t+c)&0xffffffff)
+        return _b6.b64encode(d[:8]+ck(b"IHDR",ihdr)+ck(b"IDAT",zlib.compress(bytes(out),9))+ck(b"IEND",b"")).decode("ascii")
+    except Exception:return b64
+def _ico_img(ch,w,verde=False,ac=False):
     """(icono, icono desactivado) de un símbolo, o None. verde: el del botón que lleva al otro programa, en el verde del logo"""
     try:
         if ch not in ICO_B64[16]:return None
-        b=_ico_tam(w);h=_ico_alto(w);v=bool(verde and ch in ICO_B64V[b]);k=(ch,b,h,v,id(w.tk))
+        b=_ico_tam(w);h=_ico_alto(w);v=bool(verde and ch in ICO_B64V[b]);k=(ch,b,h,v,id(w.tk),(_verde_ac() if ac else None))
         if k not in _ICO_IMG:
             par=[]
             for D in ((ICO_B64V if v else ICO_B64),ICO_B64D):
-                im=tk.PhotoImage(master=w,data=D[b][ch])
+                im=tk.PhotoImage(master=w,data=(_png_verde(D[b][ch],_verde_ac()) if (ac and D is not ICO_B64D) else D[b][ch]))
                 if 0<h<b:   # se quita el margen vacío de arriba y abajo (y de los lados, lo mismo): queda cuadrado y centrado
                     c=(b-h)//2;im2=tk.PhotoImage(master=w,width=h,height=h);im2.tk.call(im2,"copy",im,"-from",c,c,c+h,c+h,"-to",0,0);im=im2
                 par.append(im)
@@ -74,9 +105,20 @@ class _BotonIco(_TTK_BOTON):
         if par:
             _TTK_BOTON.configure(self,text=r,image=(par[0],"disabled",par[1]),compound=("left" if r else "image"),
                                  width=(_ico_ancho(self,par[0].width(),self._ico_w0) if r else self._ico_w0));self._ico_puesto=True
+            if str(_TTK_BOTON.cget(self,"style"))=="Act.TButton":self._ico_verde(True)   # (JMG, 27-11) encendido: el icono sigue en verde
         else:
             if self._ico_puesto:_TTK_BOTON.configure(self,image="",compound="none",width=self._ico_w0);self._ico_puesto=False
             _TTK_BOTON.configure(self,text=self._ico_t)
+    def _ico_verde(self,on):
+        """(JMG, 27-11) en verde (lo que está en marcha, la pausa puesta): el icono también, no solo el texto; (árbitro) el PNG
+        recoloreado con su transparencia, en el verde del tema"""
+        try:
+            if not self._ico_puesto:return
+            ch,r=_ico_partir(self._ico_t);vd=self._ico_t in _ICO_VERDE;par=_ico_img(ch,self,vd)
+            if not par:return
+            if on:par=(_ico_img(ch,self,vd,ac=True) or par)[:1]+par[1:]
+            _TTK_BOTON.configure(self,image=(par[0],"disabled",par[1]))
+        except Exception:pass
     def configure(self,cnf=None,**kw):
         if isinstance(cnf,str):
             r=_TTK_BOTON.configure(self,cnf)
@@ -271,13 +313,26 @@ def _estereo_cmd(c,ch):
     return c+["-af",f]
 # ---------- (JMG, 18-11) los ajustes de audio de cada pista, de un programa al otro ----------
 _TR_EF=("fl","fr","fc","lfe","bl","br","voz","amb","efc","sub","separ","eq_bass","eq_mids","eq_treble","suav","db")
+def _presets_suite(viejo=None):
+    """(JMG, 26-11) los presets, comunes a Jmg AudioProcesador y Jmg VideoEncoder: «Jmg SuiteMultimedia\\presets» al lado de la carpeta
+    de ajustes de cada uno (portable: junto a los programas; instalado: en %APPDATA%). La primera vez se copian los de antes"""
+    d=os.path.join(os.path.dirname(_data_dir().rstrip("\\/")),"Jmg SuiteMultimedia","presets")
+    try:
+        try:os.makedirs(d,exist_ok=True)
+        except OSError:return viejo or d   # (árbitro, 26-11) sin poder crear la común, la de siempre
+        if viejo and os.path.isdir(viejo) and os.path.normcase(os.path.abspath(viejo))!=os.path.normcase(os.path.abspath(d)):
+            import shutil as _sh
+            for f in os.listdir(viejo):
+                if f.lower().endswith(".json") and not os.path.exists(os.path.join(d,f)):_sh.copy2(os.path.join(viejo,f),os.path.join(d,f))
+    except Exception:pass
+    return d
 def _traspaso_ruta():
     import tempfile;return os.path.join(tempfile.gettempdir(),"jmg_traspaso_ajustes.json")
 def _traspaso_guardar(de,datos):
     """deja los ajustes de las pistas que se pasan al otro programa: {archivo: {índice de la pista en el archivo: ajustes}}"""
     try:
         p=_traspaso_ruta()
-        if datos:json.dump({"de":de,"t":time.time(),"archivos":datos},open(p,"w",encoding="utf-8"))
+        if datos:_json_seguro(p,{"de":de,"t":time.time(),"archivos":datos})
         elif os.path.isfile(p):os.remove(p)
     except Exception:pass
 def _traspaso_cargar(de,archivos):
@@ -291,11 +346,12 @@ def _traspaso_cargar(de,archivos):
         q={nc(k):v for k,v in (d.get("archivos") or {}).items() if isinstance(v,dict)}
         out={nc(a):q.pop(nc(a)) for a in archivos if nc(a) in q}
         if out:
-            if q:d["archivos"]=q;json.dump(d,open(p,"w",encoding="utf-8"))
+            if q:d["archivos"]=q;_json_seguro(p,d)
             else:os.remove(p)
         return out
     except Exception:return {}
 _PUERTO_UNICO=47391
+_AGR_AUTO=os.environ.get("JMG_AGREGAR_AUTO")=="1"   # (JMG, 20-11) solo las pruebas automáticas: lo que entra se agrega solo, como antes
 def _instancia_unica(archivos):
     """Una sola ventana: la primera instancia escucha en 127.0.0.1; las siguientes (p. ej. «Abrir con» con varios
     archivos) le pasan sus archivos y se cierran. Devuelve el socket servidor, o None si ya habia otra abierta."""
@@ -321,7 +377,7 @@ IDIOMAS={"es":"Español","en":"English"}
 TXT = {
 "es": {
 "titulo":"Jmg AudioProcesador 5.1", "ayuda":"❓ Ayuda", "acerca":"ℹ Acerca de", "contribuir":"Contribuir al proyecto (GitHub)", "idioma":"🌐 ES",
-"acerca_t":"Acerca de", "acerca_x":"Jmg AudioProcesador 5.1\nVersión 1.6\n\nHerramienta para procesar, convertir y ajustar pistas de audio multicanal usando FFmpeg.\n\nAutor: JMG\nCorreo: jmgsoftwaremultimedia@gmail.com\n\nSi te resulta útil, puedes apoyar el proyecto con un donativo (botón de abajo). ¡Gracias y que lo disfrutes!\n\nSoftware libre bajo licencia GNU GPL v3.\nUsa FFmpeg N-128094-g31855b2a70-20261025 (compilación de BtbN), licencia GNU GPL v3.\n«Jmg AudioProcesador» y el logo Jmg Software son de su autor: las versiones modificadas deben usar otro nombre.",
+"acerca_t":"Acerca de", "acerca_x":"Jmg AudioProcesador 5.1\nVersión 1.6.1\n\nHerramienta para procesar, convertir y ajustar pistas de audio multicanal usando FFmpeg.\n\nAutor: JMG\nCorreo: jmgsoftwaremultimedia@gmail.com\n\nSi te resulta útil, puedes apoyar el proyecto con un donativo (botón de abajo). ¡Gracias y que lo disfrutes!\n\nSoftware libre bajo licencia GNU GPL v3.\nUsa FFmpeg N-128094-g31855b2a70-20261025 (compilación de BtbN), licencia GNU GPL v3.\n«Jmg AudioProcesador» y el logo Jmg Software son de su autor: las versiones modificadas deben usar otro nombre.",
 "cerrar":"Cerrar", "edit_guardar":"Guardar cambios", "edit_reset":"Resetear", "edit_refrescar":"Refrescar valores",
 "sel":"📂 Seleccionar...", "add":"➕ Añadir...", "quit":"➖ Quitar", "limp":"🗑 Limpiar",
 "guardar_p":"💾 Guardar preset", "cargar_p":"📁 Cargar preset", "lbl_archivos":"Archivos (clic para ver pistas)",
@@ -350,11 +406,11 @@ TXT = {
 "eq3":"EQ 3 bandas", "eq_g":"Graves (100 Hz)", "eq_m":"Medios (1000 Hz)", "eq_a":"Agudos (5000 Hz)",
 "eq_adv":"EQ Avanzado por grupo", "eq_g_front":"Frontales", "eq_g_tras":"Traseros", "eq_g_cent":"Central", "eq_adv_info":"Elige la frecuencia de cada banda. Actúa sobre el grupo elegido; el subwoofer no se toca.",
 "delay_tit":"Delay por canal", "delay_info":"Retrasa un canal para compensar un altavoz más cercano: de 0 a 100 ms en pasos de 5 ms (5 ms ≈ 1,7 m).",
-"bm":"Bass Management (graves → subwoofer)", "int_0_10":"Intensidad 0-5:", "corte_hz":"Corte de graves (Hz):", "bm_info":"Pasa al subwoofer los graves de los demás altavoces: 1 = suave · 5 = completo. Corte = frecuencia por debajo de la cual pasan.",
-"db":"Double Bass (más graves en todos)", "db_info":"Copia los graves del subwoofer a los altavoces, y los de los altavoces al subwoofer, sin quitarlos de donde están.",
+"bm":"Bass Management", "int_0_10":"Intensidad 0-6:", "corte_hz":"Corte de graves (Hz):", "bm_info":"Pasa al subwoofer los graves de los demás altavoces: 1 = suave · 5 = completo · 6 = completo y más fuerte en el subwoofer. Corte = frecuencia por debajo de la cual pasan.",
+"db":"Double Bass", "db_info":"Copia los graves del subwoofer a los altavoces, y los de los altavoces al subwoofer, sin quitarlos de donde están.",
 "gama":"Gama dinámica", "modo":"Modo:", "valor":"Valor (-10 a +10):", "gama_info":"Aumenta el contraste: los sonidos flojos bajan y los fuertes se quedan igual. Sirve para esconder ruidos y ecos. 0 = apagado. El subwoofer no se toca.",
 "gd_front":"Frontales (FL/FR):", "gd_tras":"Traseros (BL/BR):", "gd_cent":"Central (FC):",
-"pd":"Procesado dinámico", "limp_tit":"Limpieza de audio", "limp_nr":"Reducir ruido 0-10:", "limp_clic":"Quitar clics y crujidos", "limp_clip":"Reparar saturación (clipping)", "limp_info":"Para grabaciones antiguas o con ruido de fondo (soplido, siseo). 0 = apagado. Quitar clics y reparar saturación alargan mucho el proceso: una película de 2 h tarda unos 30 min.", "pd_ft":"Front./traseros 0-10:", "pd_fc":"Central 0-10:", "pd_lfe":"Subwoofer 0-10:", "pd_grp_info":"Cada grupo por separado: 0 = sin efecto · 1-10 = intensidad. El subwoofer mejor a 0 si usas Bass Management o Double Bass.", "int_1_10":"Intensidad (1-10):", "pd_info":"Modo: 0 = apagado · 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas",
+"pd":"Procesado dinámico", "limp_tit":"Limpieza de audio", "limp_nr":"Reducir ruido 0-10:", "limp_clic":"Quitar clics y crujidos", "limp_clip":"Reparar saturación (clipping)", "limp_info":"Para grabaciones antiguas o con ruido de fondo (soplido, siseo). 0 = apagado. Quitar clics y reparar saturación alargan mucho el proceso: una película de 2 h tarda unos 30 min.", "pd_ft":"Front./traseros 0-15:", "pd_fc":"Central 0-15:", "pd_lfe":"Subwoofer 0-15:", "pd_grp_info":"Cada grupo por separado: 0 = sin efecto · 1-10 = intensidad. El subwoofer mejor a 0 si usas Bass Management o Double Bass.", "int_1_10":"Intensidad (1-10):", "pd_info":"Modo: 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas",
 "destino":"Carpeta de destino:", "junto":"Junto al original", "existe":"Si el archivo existe:",
 "downmix":"Downmix a estéreo:", "downmix_modo":"Modo:", "downmix_dolby":"Dolby", "downmix_simple":"Simple", "downmix_lfe":"Incluir subwoofer (-10 dB)",
 "downmix_info":"Convierte una pista 5.1 o 7.1 en estéreo. Dolby: los traseros quedan codificados y un amplificador con Pro Logic puede recuperarlos. Simple: suma directa de los canales. Para mono, elige 1.0 en «Canales de salida».",
@@ -391,7 +447,7 @@ TXT = {
 
 "en": {
 "titulo":"Jmg AudioProcesador 5.1", "ayuda":"❓ Help", "acerca":"ℹ About", "contribuir":"Support the project (GitHub)", "idioma":"🌐 EN",
-"acerca_t":"About", "acerca_x":"Jmg AudioProcesador 5.1\nVersion 1.6\n\nTool for processing, converting and adjusting multichannel audio tracks using FFmpeg.\n\nAuthor: JMG\nEmail: jmgsoftwaremultimedia@gmail.com\n\nIf you find it useful, you can support the project with a donation (button below). Thank you and enjoy it!\n\nFree software under the GNU GPL v3 license.\nUses FFmpeg N-128094-g31855b2a70-20261025 (BtbN build), GNU GPL v3 license.\n«Jmg AudioProcesador» and the Jmg Software logo belong to their author: modified versions must use a different name.",
+"acerca_t":"About", "acerca_x":"Jmg AudioProcesador 5.1\nVersion 1.6.1\n\nTool for processing, converting and adjusting multichannel audio tracks using FFmpeg.\n\nAuthor: JMG\nEmail: jmgsoftwaremultimedia@gmail.com\n\nIf you find it useful, you can support the project with a donation (button below). Thank you and enjoy it!\n\nFree software under the GNU GPL v3 license.\nUses FFmpeg N-128094-g31855b2a70-20261025 (BtbN build), GNU GPL v3 license.\n«Jmg AudioProcesador» and the Jmg Software logo belong to their author: modified versions must use a different name.",
 "cerrar":"Close", "edit_guardar":"Save changes", "edit_reset":"Reset", "edit_refrescar":"Refresh values",
 "sel":"📂 Select...", "add":"➕ Add...", "quit":"➖ Remove", "limp":"🗑 Clear",
 "guardar_p":"💾 Save preset", "cargar_p":"📁 Load preset", "lbl_archivos":"Files (click to see tracks)",
@@ -420,11 +476,11 @@ TXT = {
 "eq3":"EQ 3 bands", "eq_g":"Bass (100 Hz)", "eq_m":"Mids (1000 Hz)", "eq_a":"Treble (5000 Hz)",
 "eq_adv":"Advanced EQ per group", "eq_g_front":"Front", "eq_g_tras":"Surround", "eq_g_cent":"Center", "eq_adv_info":"Choose the frequency of each band. It acts on the chosen group; the subwoofer is not touched.",
 "delay_tit":"Delay per channel", "delay_info":"Delays a channel to make up for a closer speaker: from 0 to 100 ms in 5 ms steps (5 ms ≈ 1.7 m).",
-"bm":"Bass Management (bass → subwoofer)", "int_0_10":"Strength 0-5:", "corte_hz":"Crossover (Hz):", "bm_info":"Sends the bass of the other speakers to the subwoofer: 1 = soft · 5 = complete. Cutoff = frequency below which they are sent.",
-"db":"Double Bass (more bass everywhere)", "db_info":"Copies the subwoofer bass to the speakers, and the speaker bass to the subwoofer, without removing it from where it is.",
+"bm":"Bass Management", "int_0_10":"Strength 0-6:", "corte_hz":"Crossover (Hz):", "bm_info":"Sends the bass of the other speakers to the subwoofer: 1 = soft · 5 = complete · 6 = complete and stronger in the subwoofer. Cutoff = frequency below which they are sent.",
+"db":"Double Bass", "db_info":"Copies the subwoofer bass to the speakers, and the speaker bass to the subwoofer, without removing it from where it is.",
 "gama":"Dynamic range", "modo":"Mode:", "valor":"Value (-10 to +10):", "gama_info":"Increases the contrast: quiet sounds go down and loud ones stay. Useful to hide noise and echoes. 0 = off. The subwoofer is not touched.",
 "gd_front":"Front (FL/FR):", "gd_tras":"Surround (BL/BR):", "gd_cent":"Center (FC):",
-"pd":"Dynamic processing", "limp_tit":"Audio cleanup", "limp_nr":"Noise reduction 0-10:", "limp_clic":"Remove clicks and crackles", "limp_clip":"Repair clipping", "limp_info":"For old recordings or those with background noise (hiss). 0 = off. Removing clicks and repairing clipping make processing much longer: a 2-hour movie takes about 30 min.", "pd_ft":"Front/rear 0-10:", "pd_fc":"Center 0-10:", "pd_lfe":"Subwoofer 0-10:", "pd_grp_info":"Each group separately: 0 = no effect · 1-10 = strength. Keep the subwoofer at 0 if you use Bass Management or Double Bass.", "int_1_10":"Strength (1-10):", "pd_info":"Mode: 0 = off · 1 Lift: raises quiet sounds · 2 Impact: loud sounds stand out · 3 both",
+"pd":"Dynamic processing", "limp_tit":"Audio cleanup", "limp_nr":"Noise reduction 0-10:", "limp_clic":"Remove clicks and crackles", "limp_clip":"Repair clipping", "limp_info":"For old recordings or those with background noise (hiss). 0 = off. Removing clicks and repairing clipping make processing much longer: a 2-hour movie takes about 30 min.", "pd_ft":"Front/rear 0-15:", "pd_fc":"Center 0-15:", "pd_lfe":"Subwoofer 0-15:", "pd_grp_info":"Each group separately: 0 = no effect · 1-10 = strength. Keep the subwoofer at 0 if you use Bass Management or Double Bass.", "int_1_10":"Strength (1-10):", "pd_info":"Mode: 1 Lift: raises quiet sounds · 2 Impact: loud sounds stand out · 3 both",
 "destino":"Output folder:", "junto":"Next to original", "existe":"If file exists:",
 "downmix":"Downmix to stereo:", "downmix_modo":"Mode:", "downmix_dolby":"Dolby", "downmix_simple":"Simple", "downmix_lfe":"Include subwoofer (-10 dB)",
 "downmix_info":"Converts a 5.1 or 7.1 track to stereo. Dolby: the surrounds stay encoded and an amplifier with Pro Logic can recover them. Simple: direct sum of the channels. For mono, choose 1.0 in «Output channels».",
@@ -489,6 +545,154 @@ LOGO_B64="iVBORw0KGgoAAAANSUhEUgAAAEsAAAAaCAYAAAD/nKG4AAAP/0lEQVR42t2ZebRU1ZXGf/
 WEB_URL="https://github.com/jmgsoftwaremultimedia"   # (JMG, 22-11) su espacio en GitHub, «como mi página web»: el logo de la ventana principal
 DONAR_URL="https://github.com/jmgsoftwaremultimedia"  # el enlace de «Acerca de» y el del recordatorio (JMG, 13-11: su página de GitHub, donde pondrá el botón de contribuir; se cambia aquí)
 APOYO_DIAS=45   # (JMG, 13-11) cada cuántos días sale el recordatorio de contribuir
+_PART_LOCK=threading.Lock()
+_FF_SIN_VALOR={"-y","-n","-nostdin","-hide_banner","-nostats","-stats","-an","-vn","-sn","-dn","-shortest","-copyts","-re","-accurate_seek",
+               "-noaccurate_seek","-autorotate","-noautorotate","-ignore_unknown","-copy_unknown","-benchmark","-xerror","-start_at_zero"}
+def _part_de(ruta):
+    """(JMG, 20-11) «nombre.ext» -> «nombre.part.ext» (la extensión no cambia: FFmpeg sigue sabiendo el formato)"""
+    b,e=os.path.splitext(ruta);return b+".part"+e
+def _es_final(ruta):
+    """una ruta de archivo de verdad (no una tubería, ni un patrón %d, ni la carpeta temporal del sistema)"""
+    try:
+        s=str(ruta)
+        if not s or s in ("-","NUL","/dev/null") or ":" in s[2:] or "%" in os.path.basename(s) or not os.path.isabs(s):return False
+        if ".part." in os.path.basename(s):return False
+        if os.environ.get("JMG_PART_TEMP")=="1":return True
+        import tempfile as _tf
+        t=os.path.normcase(os.path.abspath(_tf.gettempdir()));return not os.path.normcase(os.path.abspath(s)).startswith(t+os.sep)
+    except Exception:return False
+def _a_medias_ruta():return os.path.join(_data_dir(),"a_medias.json")
+def _a_medias(part,poner):
+    """registro de lo que se está escribiendo (si se va la luz, al arrancar se avisa)"""
+    with _PART_LOCK:
+        try:l=json.load(open(_a_medias_ruta(),encoding="utf-8"))
+        except Exception:l=[]
+        if not isinstance(l,list):l=[]
+        l=[x for x in l if x!=part]+([part] if poner else [])
+        try:_json_seguro(_a_medias_ruta(),l)
+        except Exception:pass
+def _es_num(s):
+    try:float(s);return True
+    except Exception:return False
+def _part_cmd(cmd):
+    """(JMG, 20-11) la orden de FFmpeg con cada salida que es un archivo de verdad cambiada a «.part» -> (orden, [(bueno, part)]).
+    Una salida: lo que no es el valor de una opción. Si el archivo ya existe y la orden no lleva -y, no se toca (FFmpeg decide)"""
+    try:
+        c=list(cmd);pares=[]
+        for i in range(1,len(c)):
+            a=c[i]
+            if not isinstance(a,str) or a.startswith("-") or not _es_final(a):continue
+            pr=c[i-1]
+            if isinstance(pr,str) and pr.startswith("-") and not _es_num(pr) and pr not in _FF_SIN_VALOR:continue
+            if os.path.exists(a) and "-y" not in c:continue
+            p=_part_de(a);c[i]=p;pares.append((a,p))
+        for a,p in pares:_a_medias(p,True)
+        return c,pares
+    except Exception:return list(cmd),[]
+def _part_fin(pares,ok):
+    """bien: cada «.part» pasa a su nombre de golpe (os.replace; Windows o el antivirus pueden tardar en soltarlo); mal: se borra"""
+    for a,p in pares:
+        try:
+            if ok and os.path.isfile(p):
+                for i in range(40):
+                    try:os.replace(p,a);_ULTIMOS.append(a);del _ULTIMOS[:-50];break
+                    except PermissionError:
+                        if i==39:raise
+                        time.sleep(0.25)
+            elif os.path.isfile(p):
+                for i in range(10):
+                    try:os.remove(p);break
+                    except OSError:time.sleep(0.3)
+        except Exception:
+            ok=False
+            try:os.remove(p)
+            except Exception:pass
+        _a_medias(p,False)
+    return ok
+def _a_medias_aviso(app):
+    """(JMG, 20-11) al arrancar: lo que se quedó a medias la última vez (se fue la luz o se cerró mientras procesaba) se avisa"""
+    try:
+        with _PART_LOCK:
+            try:l=json.load(open(_a_medias_ruta(),encoding="utf-8"))
+            except Exception:l=[]
+            if not isinstance(l,list):l=[]
+            q=[x for x in l if isinstance(x,str) and os.path.isfile(x)]
+            if l:_json_seguro(_a_medias_ruta(),[])
+        if not q:return
+        V_=app._vt
+        for x in q:app._ls("[!] "+V_("A medias (de la última vez): ","Unfinished (from last time): ")+x)
+        app._toast(T("warn_tit"),V_(f"La última vez se cortó mientras se procesaba (¿se fue la luz o se cerró el programa?) y quedaron {len(q)} archivo(s) sin terminar. Llevan «.part» en el nombre y se pueden borrar:\n",
+                                    f"Last time the processing was cut off (power cut, or the program was closed?) and {len(q)} unfinished file(s) were left. They have «.part» in their name and can be deleted:\n")
+                   +"\n".join(os.path.basename(x) for x in q[:4])+("\n..." if len(q)>4 else ""),seg=15)
+    except Exception:pass
+_DRC_CACHE={}
+_EXT_SIN_AC3={".wav",".flac",".w64",".rf64",".mp3",".aac",".m4a",".opus",".ogg",".dts",".dtshd",".thd",".mlp",".png",".jpg",".jpeg",
+              ".bmp",".txt",".srt",".ass",".ssa",".sup",".sub",".idx",".wv",".ape",".aif",".aiff",".caf",".pcm",".raw",".bat",".ps1"}
+def _tiene_ac3(ruta):
+    """(JMG, 20-11) ¿lleva el archivo audio AC3 o E-AC3? (ffprobe, en caché)"""
+    try:
+        e=os.path.splitext(str(ruta))[1].lower()
+        if e in (".ac3",".eac3",".ec3"):return os.path.isfile(ruta)
+        if e in _EXT_SIN_AC3 or not os.path.isfile(ruta):return False
+        st=os.stat(ruta);k=(os.path.normcase(os.path.abspath(ruta)),st.st_size,int(st.st_mtime))
+        if k in _DRC_CACHE:return _DRC_CACHE[k]
+        r=rh([FFPROBE,"-v","error","-select_streams","a","-show_entries","stream=codec_name","-of","csv=p=0",ruta],timeout=60)
+        v=any(x.strip().lower() in ("ac3","eac3") for x in (r.stdout or "").splitlines());_DRC_CACHE[k]=v;return v
+    except Exception:return False
+def _sin_drc(cmd):
+    """(JMG, 20-11) AC3/E-AC3 sin la compresión que FFmpeg aplica por su cuenta (drc_scale=1 por defecto, bajaba los picos hasta 4 dB):
+    «-drc_scale 0» delante de cada entrada AC3/E-AC3 que no lleve ya su ajuste. El «none» de Azid: el sonido original"""
+    try:
+        if not isinstance(cmd,list) or not cmd:return cmd
+        n=os.path.basename(str(cmd[0])).lower()
+        if not (n.startswith("ffmpeg") or n.startswith("ffplay")):return cmd
+        c=list(cmd)
+        if n.startswith("ffplay") and "-i" not in c:
+            return c[:-1]+["-drc_scale","0",c[-1]] if len(c)>1 and "-drc_scale" not in c and _tiene_ac3(str(c[-1])) else c
+        out=[c[0]];ini=1
+        for j in range(1,len(c)):
+            a=c[j]
+            if a=="-i" and j+1<len(c) and isinstance(c[j+1],str) and "-drc_scale" not in c[ini:j] and _tiene_ac3(c[j+1]):out+=["-drc_scale","0"]
+            out.append(a)
+            if c[j-1]=="-i":ini=j+1
+        return out
+    except Exception:return cmd
+class _PopenJmg(subprocess.Popen):
+    """todas las órdenes de FFmpeg / FFplay del programa pasan por _sin_drc"""
+    _jmg=True
+    def __init__(self,args,*a,**k):super().__init__(_sin_drc(args),*a,**k)
+if not getattr(subprocess.Popen,"_jmg",False):subprocess.Popen=_PopenJmg
+VERDE_JMG="#3cb95a"   # (JMG, 21-11) nuestro verde (el de los «Auto» puestos): el título de un efecto puesto
+class _SBAuto(ttk.Scrollbar):
+    """(JMG, 21-11) la barra de desplazamiento sale solo cuando hace falta (pestañas, listas y textos de los dos programas)"""
+    def set(self,lo,hi):
+        try:
+            sobra=float(lo)<=0.0 and float(hi)>=1.0;mg=self.winfo_manager()
+            if sobra and mg:
+                if mg=="pack":
+                    sl=self.master.pack_slaves();i=sl.index(self);info=self.pack_info();info.pop("in",None)
+                    self._jmg_pk=(info,sl[i+1] if i+1<len(sl) else None);self.pack_forget()
+                elif mg=="grid":self._jmg_pk=("grid",None);self.grid_remove()
+            elif not sobra and not mg and getattr(self,"_jmg_pk",None):
+                info,sig=self._jmg_pk;self._jmg_pk=None
+                if info=="grid":self.grid()
+                else:
+                    if sig is not None and sig.winfo_exists() and sig.winfo_manager()=="pack" and sig.master is self.master:info["before"]=sig
+                    self.pack(**info)
+        except Exception:pass
+        super().set(lo,hi)
+if not getattr(ttk.Scrollbar,"_jmg",False):_SBAuto._jmg=True;ttk.Scrollbar=_SBAuto
+def _json_seguro(ruta,obj,**kw):
+    """(JMG, 20-11) guardar sin riesgo: se escribe a un temporal al lado y se cambia por el bueno de golpe (os.replace); si se va la
+    luz o se cierra a mitad, queda el archivo de antes entero, nunca uno a medias"""
+    t=ruta+".tmp"
+    try:
+        with open(t,"w",encoding="utf-8") as f:json.dump(obj,f,**kw);f.flush();os.fsync(f.fileno())
+        os.replace(t,ruta)
+    except Exception:
+        try:os.remove(t)
+        except Exception:pass
+        raise
 def _apoyo_ruta():
     """(JMG, 13-11) el recordatorio de contribuir es de la suite: un solo archivo para los dos programas"""
     a=_app_dir()
@@ -507,7 +711,7 @@ def _apoyo_leer():
     except Exception:return {}
 def _apoyo_guardar(j):
     try:
-        with open(_apoyo_ruta(),"w",encoding="utf-8") as f:json.dump(j,f)
+        _json_seguro(_apoyo_ruta(),j)
     except Exception:pass
 def _apoyo_hecho():
     """se ha abierto la página de contribuir: el recordatorio no vuelve a salir (en ninguno de los dos programas)"""
@@ -524,8 +728,8 @@ def _apoyo_toca():
     return (hoy-d0).days>=APOYO_DIAS
 _EXT_MM="*.mkv *.mp4 *.avi *.mov *.m2ts *.ts *.webm *.flac *.wav *.m4a *.ac3 *.eac3 *.dts *.mka"
 if sys.platform!="win32":_EXT_MM+=" "+_EXT_MM.upper()   # en Linux el filtro distingue mayusculas
-VERSION_PROG="1.6"   # la de construir.bat; el aviso de versión nueva la compara con la última Release de GitHub
-SUITE_VER="1.2"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
+VERSION_PROG="1.6.1"   # la de construir.bat; el aviso de versión nueva la compara con la última Release de GitHub
+SUITE_VER="1.2.1"   # Jmg SuiteMultimedia (los dos programas en una sola instalación): el aviso de versión nueva compara esta
 REPO_GH="jmgsoftwaremultimedia/JmgSuiteMultimedia"
 CONTACTO_MAIL="jmgsoftwaremultimedia@gmail.com"   # el logotipo abre un correo nuevo a esta direccion
 PMAR="#d4edda";PNOM="#f0f0f0";TMAR="#1a5c2a";TNOM="#666666"
@@ -558,7 +762,7 @@ AYUDA={}
 AYUDA["es"]="""JMG AUDIOPROCESADOR 5.1 · AYUDA
 
 CÓMO SE USA
-1. Añade archivos con «Seleccionar» o «Añadir», o arrastrándolos a la lista de archivos. Los archivos sin pistas de audio no se añaden.
+1. Añade archivos con «Seleccionar» o «Añadir», o arrastrándolos a la lista de archivos. Los archivos sin pistas de audio no se añaden. Después, «➕ Agregar» (a la derecha, debajo de la lista de pistas) pasa los archivos seleccionados a la lista de pistas (llevan ✔): solo esos se procesan.
 2. Haz clic en una pista (Ctrl+clic para varias). Cada pista guarda sus propios ajustes. «Aplicar a todas» copia los de la pista activa a las demás seleccionadas.
 3. Ajusta las pestañas y comprueba el resultado en Visualización.
 4. Pulsa PROCESAR: sale lo esencial y «🔍 Ver todo» enseña cada pista con su formato y sus efectos (se puede copiar). Tus archivos originales nunca se modifican. «Cancelar» detiene el proceso y borra lo que quedó a medias.
@@ -566,7 +770,7 @@ CÓMO SE USA
 VOLUMEN
 • Master: sube o baja todo. Debajo, el volumen de cada canal. Master y cada canal llegan hasta -30 dB; una posición más abajo es «Mute» (en rojo): en silencio. El volumen por canal se aplica el último (tras Bass Management, Double Bass y Separación de canales): lo que pones es exactamente lo que sube o baja ese canal.
 • «Ajustar Master»: mide la pista y sube el Master hasta el objetivo sin pasar el límite de picos (anticlipping automático). Nunca baja el volumen: si ya está alto, se queda en 0 dB.
-• «Auto» de «Volumen por canal»: mide el volumen de cada canal de las pistas seleccionadas y mueve sus deslizadores para dejar un equilibrio de cine: el central no se toca, los frontales quedan unos 3 dB por debajo de él, los surrounds unos 7 dB y el subwoofer unos 6 dB (como mucho ±6 dB; el subwoofer, ±3 dB). Después puedes retocarlos a mano. Los frontales y los surrounds solo se bajan si van demasiado fuertes, nunca se suben: hay películas que no piden tanto estéreo ni surround.
+• «Auto» de «Volumen por canal»: mide el volumen de cada canal de las pistas seleccionadas y mueve sus deslizadores para dejar un equilibrio de cine, compensado entre todos los canales: el central no se toca, los frontales quedan unos 1,5 dB por debajo de él y los surrounds unos 3 dB; el subwoofer queda siempre un poco por debajo de todos los demás (unos 2 dB por debajo del más flojo). Los frontales y los surrounds bajan como mucho 6 dB; el subwoofer, de -6 a +3 dB. Después puedes retocarlos a mano. Los frontales y los surrounds solo se bajan si van demasiado fuertes, nunca se suben: hay películas que no piden tanto estéreo ni surround.
 • «Auto» del EQ avanzado: mide graves, medios y agudos de frontales, traseros y central y los acerca entre sí (como mucho ±3 dB). Queda en el EQ Avanzado por grupo, donde puedes retocarlo. El subwoofer no se toca.
 • Normalización: Loudnorm mide el volumen y lo ajusta exacto al objetivo, sin comprimir (un limitador cuida los picos). «Normalizar» mide ya y el ajuste se aplica al PROCESAR, en una sola pasada; si no has medido antes, se mide al procesar. DynAudNorm iguala las partes flojas y fuertes. SpeechNorm iguala los diálogos (actúa solo sobre el canal central, donde está la voz).
 • Sincronización: cambio de framerate (con o sin cambio de tono) y delay inicial (de -6000 a +6000 ms).
@@ -575,7 +779,7 @@ VOLUMEN
 • «Suavizado digital» (0-5): quita el exceso de agudos de muchas películas y doblajes de los 80 y 90 (eses y brillo metálico) con un filtro que corta los agudos, no un ecualizador, en todos los canales menos el subwoofer. 0 = sin efecto. «Auto» mide los agudos del central y elige la intensidad.
 
 PRESENCIA / EQ
-• Presencia: realza la voz (canal central), la música/ambiente, los efectos o el subwoofer. Techo limitador opcional. «Separación de canales» (a la derecha, -10 a +10): más o menos separación entre izquierda y derecha y entre delante y detrás, sin subir el volumen. Su «Auto» mide la separación de la película y pone la que le va según lo movida que sea (más en las de acción, menos en las tranquilas); el central nunca se toca. Se recomienda que el penúltimo ajuste sea la Separación de canales y el último, el Volumen por canal.
+• Presencia: realza la voz (canal central), la música/ambiente, los efectos o el subwoofer. Techo limitador opcional. «Separación de canales» (a la derecha, -15 a +15): más o menos separación entre izquierda y derecha y entre delante y detrás, sin subir el volumen. Su «Auto» mide la separación de la película y pone la que le va según lo movida que sea (más en las de acción, menos en las tranquilas); el central nunca se toca. Se recomienda que el penúltimo ajuste sea la Separación de canales y el último, el Volumen por canal. (19-11) Ajustes finos, de 1 en 1 y más suaves (el 15 da lo que antes el 10): Presencia, Separación de canales y ecualizadores de -15 a +15; Gama dinámica y Procesado dinámico de 0 a 15; Double Bass y Bass Management de 0 a 6 (de 1 en 1).
 • EQ de 3 bandas y EQ avanzado por grupo (frontales, traseros, central) con frecuencia libre.
 • Delay por canal: de 0 a 100 ms en pasos de 5 ms (5 ms ≈ 1,7 m).
 • Limpieza de audio: reducir el ruido de fondo (1-2 = sutil), quitar clics y reparar saturación (estos dos son lentos). Su «Auto» solo pone algo si encuentra un ruido de fondo de verdad; en un archivo limpio lo deja en 0 y te avisa de que no necesita corrección.
@@ -587,12 +791,13 @@ DINÁMICA / BASS
 • Bass Management: pasa los graves de los altavoces al subwoofer (1 = suave, 5 = completo). Double Bass: duplica los graves en los dos sentidos, del subwoofer a los altavoces y de los altavoces al subwoofer. Los dos suben claramente el subwoofer, con protección contra la saturación. Su «Auto» pone el Double Bass (1-3) si a los altavoces les faltan graves profundos o si el subwoofer va flojo; si están equilibrados, 0. Corte por defecto: 90 Hz.
 • Gama dinámica: los sonidos flojos bajan y aumenta el contraste.
 • Procesado dinámico: 1 Elevación (sube lo bajo), 2 Impacto (lo fuerte destaca), 3 las dos. Intensidad por grupo. Pon el subwoofer a 0 si usas Bass Management o Double Bass.
+• Modo Azid, junto al «Auto» del Procesado dinámico: como en BeLight (Azid de DSPguru), usa la compresión que el propio AC3/E-AC3 lleva dentro. Tiene una sola opción, «Inversa»: la compresión que trae el propio AC3/E-AC3, al revés: los sonidos fuertes suben y los débiles bajan (más dinámica). En «Original» no se toca. Recomendado para las películas de DVD, que traen esos datos; en DTS, TrueHD, FLAC... no cambia nada (el registro lo dice). No se mezcla con Presencia, Separación de canales, Gama dinámica, normalizaciones ni limpieza: al ponerlo se apagan, y si tocas uno, vuelve a «Original». Los volúmenes, los ecualizadores, el suavizado, la sincronía, el Procesado dinámico (solo el modo 1), el Bass Management y el Double Bass sí se pueden usar con él. La salida puede ser cualquier formato menos «Passthrough» (copia la pista sin procesarla), que no sale en la lista mientras uses Azid; al elegir un modo, una ventana lo recuerda.
 • «Auto» en Bass Management, Double Bass, Gama dinámica y Procesado dinámico: igual, según lo que mide (volumen del subwoofer y rango dinámico). Si la película ya está bien, lo deja en 0 y te lo dice.
 
 VISUALIZACIÓN
-• Se genera sola al entrar y se actualiza si cambias algún ajuste. Compara ANTES y DESPUÉS canal por canal.
+• La primera vez que entras con una pista se genera sola; después, al pulsar «Generar visualización». Compara ANTES y DESPUÉS canal por canal.
 • Escuchar antes o después, Pausa/Continuar y Parar. Clic en un canal = escuchar solo ese canal (otro clic = todos).
-• Rueda = zoom · arrastrar = desplazar · doble clic = x1 · barra espaciadora = empezar y parar. Con zoom, la onda avanza sola mientras suena, con el cursor en el centro. Tramo: el archivo entero o los primeros 5, 10 o 30 minutos. Si cambias de tramo mientras se genera, empieza el nuevo sin esperar; si te vas a otra pestaña, se interrumpe y al volver se genera sola.
+• Rueda = zoom · arrastrar = desplazar · doble clic = x1 · barra espaciadora = empezar y parar. Con zoom, la onda avanza sola mientras suena, con el cursor en el centro. Tramo: el archivo entero o los primeros 5, 10 o 30 minutos. Si cambias de tramo mientras se genera, empieza el nuevo sin esperar; si te vas a otra pestaña, termina igual. Dos zooms, como en Jmg VideoEncoder: ↔ (el tiempo, x1-x4096) y ↕ (la altura de las ondas, x1-x16); marca el que quieras y la rueda del ratón lo sube o lo baja (doble clic = x1).
 • Editor (casilla «✎ Editar el archivo»): para rematar a mano una pista WAV, W64 o FLAC de una sola pista, como la combinada. Arrastra sobre un canal para marcar ese trozo (en vertical, varios canales; después, arrastrando sus bordes, lo agrandas o lo encoges), escribe los dB (por ejemplo -40 para dejarlo casi mudo) y pulsa «Aplicar». También puedes escribir los tiempos en «De» y «a». Rueda = zoom. Para mover la onda con zoom: arrastra con la manita en la regla de arriba o en los nombres de los canales, usa la barra de abajo, las flechas ← → (con Mayús, más rápido) o arrastra con el botón derecho. Clic derecho = quitar la selección. Con un trozo marcado, «■ Parar» vuelve al principio de lo marcado.
 • «▶ Oír la selección» escucha solo el trozo y los canales marcados, con los cambios puestos, en cualquier minuto. Con cambios sin guardar, los botones pasan a «Escuchar SIN CAMBIOS» y «Escuchar CON CAMBIOS»: este último, y el clic en un canal, suenan con tus cambios desde cualquier punto. «↶ Deshacer» y «↷ Rehacer» van paso a paso.
 • Al minimizar, el programa queda como un icono junto al reloj (la bandeja del sistema), que dice cómo va el proceso: clic izquierdo = vuelve la ventana; clic derecho = menú (cancelar el proceso, qué hacer al terminar —nada, salir o apagar el PC—, abrir la carpeta al terminar, salir). En Salida se puede quitar, para minimizar a la barra de tareas como siempre. Al dejar el ratón sobre un botón, una casilla o un deslizador sale una descripción, que se va sola a los pocos segundos.
@@ -605,7 +810,7 @@ SALIDA
 • Canales: por defecto, los mismos que la entrada. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (estéreo Dolby o Simple) o 1.0 (mono). Los canales que sobran se suman a los que quedan.
 • Los originales 7.1 salen en 5.1: los laterales se suman a los traseros.
 • Origen estéreo: 2.0 se queda en estéreo; 5.1 hace Upmix (con «Quitar voz» de frontales y traseros). Con Upmix solo se usan la Separación de canales, los volúmenes y los ecualizadores; lo demás (Presencia, normalizaciones, Gama, Procesado, Bass Management, Double Bass, Suavizado y Limpieza) se desactiva.
-• Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV por canal), RF64, W64 (Sound Forge), TrueHD y Passthrough (copia sin convertir). MP3 en 2.0 y 1.0. «Aften Dolby Digital» (por defecto) hace el AC3 con Aften, que da mejor gama dinámica en las películas que tienen mucha; «AC3», con FFmpeg. Sus ajustes, con «⚙ Aften...» como los de los demás formatos (por defecto, conmutación de bloques y ancho de banda fijo completo): CBR o VBR, ancho de banda, precisión, filtros, gama dinámica (DRC y nivel de diálogo) y la información del flujo para el amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Estándar o HDCD, downmix preferido y sus niveles). Un AC3 VBR no lo leen todos los aparatos.
+• Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV por canal), RF64, W64 (Sound Forge), TrueHD y Passthrough (copia sin convertir). MP3 en 2.0 y 1.0. «Aften Dolby Digital» (por defecto) hace el AC3 con Aften, que da mejor gama dinámica en las películas que tienen mucha; «AC3», con FFmpeg. Sus ajustes, con «⚙ Aften...» como los de los demás formatos (por defecto, conmutación de bloques y ancho de banda fijo completo): CBR o VBR, ancho de banda, precisión, filtros, gama dinámica (DRC y nivel de diálogo) y la información del flujo para el amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Estándar o HDCD, downmix preferido y sus niveles). Un AC3 VBR no lo leen todos los aparatos. En Combinar, la salida 7.1 admite AAC, FLAC, WAV, W64 y RF64; AC3, E-AC3, DTS y TrueHD llegan como mucho a 5.1. El procesado normal sale como mucho en 5.1.
 • «🎬 VideoEncoder» (arriba, detrás de «Crear ISO»): pasa los archivos seleccionados de la lista (o todos) a Jmg VideoEncoder. Si está abierto, van a su lista; si no, se abre con ellos. Si no lo encuentra, te pide que lo busques una vez. Después, este programa se cierra (los dos no se quedan abiertos a la vez). Los ajustes de audio de cada pista que tienen los dos programas (volúmenes, Presencia, ecualizador, Separación, Gama, sincronía y formato) pasan también. Sin archivos, solo cambia al otro programa.
 • «MKV con vídeo»: copia el vídeo, los subtítulos, los capítulos y las portadas, y añade las pistas procesadas. «Solo audio»: un archivo por pista. Debajo, «Nombre del archivo»: el nombre de lo que sale de cada archivo (↺ vuelve al automático) y dónde se guardará.
 • «Núcleo aparte» (en Salida, junto al formato; con «MKV con vídeo»): solo se activa en las pistas que lo llevan, y es de cada pista. Una DTS-HD (Master Audio o High Resolution) lleva dentro un DTS normal para los aparatos que no entienden el HD, y una Dolby Atmos (TrueHD) lleva un TrueHD sin Atmos; marcado, sale también como pista aparte, sin recomprimir y detrás de las originales.
@@ -635,7 +840,27 @@ A TENER EN CUENTA
 • Gama dinámica y Procesado dinámico: solo uno a la vez, y las normalizaciones los desactivan. Presencia funciona con todos los efectos, menos con Upmix. El programa lo hace solo.
 • ⚠ Techo limitador «Sin límite»: puede saturar si subes mucho los efectos. Para ir sobre seguro, elige -1 dBFS.
 • «Resetear» limpia la pestaña abierta («Todo» = todo). Con los presets guardas y cargas tus ajustes.
-• «↶ Deshacer» y «↷ Rehacer» (abajo, junto a «Resetear»): deshacen y rehacen, una a una, las últimas 50 acciones: cambios de ajustes de cualquier pista, añadir o quitar archivos, eliminar pistas, títulos... En Visualización deshacen y rehacen los cambios del editor (lo silenciado o bajado). También con Ctrl+Z y Ctrl+Y.
+• Los ajustes y los presets se guardan de forma segura: primero en un archivo temporal, que luego sustituye al bueno de una sola vez; si se va la luz o el programa se cierra a mitad, queda el de antes entero, nunca uno a medias.
+• Lo que sale del programa se escribe primero como «nombre.part.ext» y solo cuando termina bien pasa a su nombre: si se va la luz a mitad, nunca queda un archivo cortado con nombre de terminado. Al abrir, el programa avisa de los «.part» que quedaron de la última vez (se pueden borrar).
+• Las pistas AC3 y E-AC3 se decodifican tal cual, sin la compresión que llevan dentro (FFmpeg la aplicaba por su cuenta y bajaba los picos): llega el sonido original.
+• «↶ Deshacer» y «↷ Rehacer» (abajo, junto a «Resetear»): deshacen y rehacen, una a una, las últimas 50 acciones: cambios de ajustes de cualquier pista, añadir o quitar archivos, eliminar pistas, títulos... En Visualización deshacen y rehacen los cambios del editor (lo silenciado o bajado). También con Ctrl+Z y Ctrl+Y. Cuando el editor no tiene nada que deshacer o rehacer, deshacen y rehacen los demás cambios, como en las otras pestañas.
+• La barra que separa las dos columnas de arriba se para cuando los botones o el texto de una columna ya no caben: nunca se cortan.
+• Las barras de desplazamiento solo salen cuando hacen falta, y la explicación de cada ajuste sale al pasar el ratón por encima (las pestañas no llevan textos de explicación).
+• El panel de las pestañas toma la altura justa de lo que lleva cada pestaña (ni sobra hueco ni falta nada); la lista de archivos de arriba se queda con el resto.
+• El título de cada efecto se pone en verde cuando está puesto (con cualquier ajuste cambiado: intensidad, corte, techo, frecuencias...).
+• En verde se ve de un vistazo todo lo que está haciendo algo: el título de cada efecto o apartado con algún ajuste hecho (también imagen, recorte, bandas negras, color) y los botones que ya han corregido algo (📏 Ajustar Master, ▶ Normalizar, 🎯 Calcular delay, ✂ Corregir por tramos, 🔧 Más opciones...). Al pasar el ratón por encima de un botón, sus letras se ponen en verde.
+• Las pestañas también se ponen en verde: la que está abierta y aquella sobre la que pasas el ratón. Al terminar, la carpeta de destino se abre con el archivo ya seleccionado.
+• Al elegir o añadir un archivo, en «Pistas del archivo» ya se ve la información de sus pistas de audio (en gris); para procesarlas, pulsa «➕ Agregar».
+• DVD (carpeta VIDEO_TS o imagen .iso): al ripear, cada pista de audio lleva su idioma, leído del archivo .IFO del disco (los .VOB no lo traen).
+• Visualización: al entrar, las pestañas se ocultan para dejar más sitio; «⬅ Volver» (arriba a la izquierda) lleva a la pestaña de antes, como en Jmg VideoEncoder.
+• Edit/Log, para expertos: debajo del resumen salen todos los parámetros de la pista activa («clave = valor») y los filtros de FFmpeg que se van a usar. Cambia los valores que quieras y pulsa «Guardar cambios» (clic derecho en el editor) antes de procesar.
+• «⚙» (la rueda), a la izquierda del título de la Gama dinámica y del Procesado dinámico, y en «Combinar pistas» en la gama dinámica (quitar el eco) y en «Silenciar voces del original» (la puerta): abre sus ajustes avanzados para afinar más, como en Ocenaudio. Cada uno con su deslizador, su casilla y lo que hace a cada lado: umbral, ataque, liberación, rodilla y ganancia, el ataque y la liberación del limitador; en la puerta, unir huecos, empezar antes, cola, bajada, subida y golpes que se respetan. «auto» = lo calcula el programa. «↺ Por defecto» deja los de fábrica. Se guardan con cada pista y el título se pone en verde. La salida de «Combinar pistas» es solo FLAC o WAV.
+• En las ventanas «⚙»: doble clic en un deslizador (o en su casilla) lo devuelve a su valor inicial, y las flechas del teclado lo mueven paso a paso. Al pasar el ratón por un botón, solo sus letras se ponen en verde (el botón no se ilumina). En Edit/Log, la línea «ffmpeg_filtros = ...» son los filtros de FFmpeg de la pista: se pueden cambiar y «Guardar cambios» los aplica; se usan al procesar mientras no cambies otros ajustes de la pista (si los cambias, vuelven los del programa y el registro lo dice).
+• Al cambiar un ajuste estando en Visualización, lo que suena se para y la vista se queda como estaba hasta que pulses «Generar visualización»; pulsa ▶ para oírlo con el cambio. Mientras procesa, «⬅ Volver» sigue funcionando. Las descripciones flotantes se van solas a los pocos segundos.
+• Toda la potencia del procesador: una pista larga (más de 6 minutos) se procesa en varios trozos a la vez (hasta la mitad de los núcleos) y se unen sin costura; cada trozo empieza 64 s antes y acaba 30 s después para que los efectos suenen igual que de una vez. Solo se hace si los efectos no cambian el tiempo (sin tramos, retraso ni cambio de velocidad).
+• Visualización: la primera vez que entras con una pista se genera sola; después, al pulsar «Generar visualización» (al cambiar un ajuste, lo que suena se para y se avisa). Detalle como en Sound Forge: el zoom ↔ llega a x4096 y, con zoom, lo que se ve se lee del archivo con todas sus muestras (antes y después).
+• Procesado dinámico: ya no tiene el modo 0. Por defecto, el modo 2 y los deslizadores a 0: a 0 no hace nada; al subir un deslizador se aplica el modo elegido.
+• En «Presencia / EQ», el Suavizado digital está a la derecha del EQ de 3 bandas; en «Dinámica / Bass», el Procesado dinámico está a la derecha del Bass Management, con «Modo Azid» junto a su «Auto».
 • El EQ de 3 bandas y el EQ avanzado no se usan a la vez: mientras uno tiene algo puesto, el otro queda desactivado. Lo mismo con el Master y el volumen por canal. Tampoco van juntos el Suavizado digital con los ecualizadores ni con la Limpieza de audio, ni la Limpieza de audio con los ecualizadores, la Gama dinámica o el Procesado dinámico. Los «Auto» apagan lo que no va junto y el aviso te dice qué.
 • «Abrir la carpeta de destino al terminar» (pestaña Salida): al acabar de procesar, abre la carpeta donde han quedado los archivos.
 • Si algo falla, mira la pestaña Edit/Log. El texto del log se puede seleccionar con el ratón y copiar (Ctrl+C o clic derecho → Copiar / Copiar todo el log).
@@ -648,6 +873,10 @@ A TENER EN CUENTA
 • Blu-ray: el idioma de cada pista de audio y de cada subtítulo se lee de la lista de reproducción del disco (los archivos .m2ts no lo traen).
 • Mientras trabaja (procesar, combinar, ripear, extraer, crear ISO...), el PC no entra en suspensión; la pantalla sí puede apagarse.
 • Todos los deslizadores, también los de Combinar, se mueven con las flechas del teclado: haz clic en el deslizador y pulsa ← → (de uno en uno).
+• «Guardar preset» guarda todos los ajustes, también los avanzados de la pista (Aften, opciones del códec y filtros a mano), y «Cargar preset» los pone todos.
+• Los presets son comunes a Jmg AudioProcesador y Jmg VideoEncoder (la misma carpeta): cada programa pone lo suyo; el audio pasa de uno a otro y, en Jmg AudioProcesador, el vídeo y los subtítulos no afectan.
+• Al pasar archivos de un programa al otro, los que estaban agregados llegan agregados (con sus ajustes de audio).
+• Lo que está en marcha (generar, escuchar, reproducir, previsualizar) se pone en verde. En pausa, «Continuar» (en Jmg VideoEncoder, ⏸) se queda en verde.
 
 FFMPEG Y LICENCIA
 Usa FFmpeg (ffmpeg.org), versión N-128094-g31855b2a70-20261025 (compilación de BtbN), con licencia GNU GPL v3 (bin\\LICENSE.txt).
@@ -656,12 +885,12 @@ Contacto: jmgsoftwaremultimedia@gmail.com
 Apoya el proyecto: https://www.paypal.com/paypalme/JmgSoftware
 
 UN TRABAJO ENORME
-• Realizar Jmg SuiteMultimedia (este programa y Jmg VideoEncoder) ha costado un trabajo enorme: unos 45 días, con pruebas en películas reales. Se ha desarrollado con la ayuda de Claude, la inteligencia artificial de Anthropic.
+• Realizar Jmg SuiteMultimedia (este programa y Jmg VideoEncoder) ha sido un enorme trabajo y dedicación, con pruebas en películas reales. Se ha desarrollado con la ayuda de Claude, la inteligencia artificial de Anthropic.
 """
 AYUDA["en"]="""JMG AUDIOPROCESADOR 5.1 · HELP
 
 HOW TO USE IT
-1. Add files with «Select» or «Add», or drag them onto the file list. Files without audio tracks are not added.
+1. Add files with «Select» or «Add», or drag them onto the file list. Files without audio tracks are not added. Then «➕ Add to queue» (on the right, below the track list) passes the selected files to the track list (they get a ✔): only those are processed.
 2. Click a track (Ctrl+click for several). Each track keeps its own settings. «Apply to all» copies the active track's settings to the other selected tracks.
 3. Adjust the tabs and check the result in Visualization.
 4. Press PROCESS: the essentials appear and «🔍 See everything» shows each track with its format and effects (it can be copied). Your original files are never modified. «Cancel» stops the process and deletes anything left half-written.
@@ -669,7 +898,7 @@ HOW TO USE IT
 VOLUME
 • Master: raises or lowers everything. Below it, the volume of each channel. Master and each channel go down to -30 dB; one more step down is «Mute» (in red): silent. Volume per channel is applied last (after Bass Management, Double Bass and Channel separation): what you set is exactly how much that channel goes up or down.
 • «Set Master»: measures the track and raises the Master up to the target without exceeding the peak limit (automatic anti-clipping). It never lowers the volume: if the track is already loud, it stays at 0 dB.
-• «Auto» of «Volume per channel»: measures the loudness of each channel of the selected tracks and moves their sliders to a cinema balance: the center is not touched, the fronts end up about 3 dB below it, the surrounds about 7 dB and the subwoofer about 6 dB (at most ±6 dB; subwoofer ±3 dB). You can then adjust them by hand. Fronts and surrounds are only lowered when they are too loud, never raised: some movies do not ask for so much stereo or surround.
+• «Auto» of «Volume per channel»: measures the loudness of each channel of the selected tracks and moves their sliders to a cinema balance, evened out across all channels: the center is not touched, the fronts end up about 1.5 dB below it and the surrounds about 3 dB; the subwoofer always ends up a little below all the others (about 2 dB below the quietest). Fronts and surrounds go down 6 dB at most; the subwoofer, from -6 to +3 dB. You can then adjust them by hand. Fronts and surrounds are only lowered when they are too loud, never raised: some movies do not ask for so much stereo or surround.
 • «Auto» of the advanced EQ: measures the bass, mids and treble of the fronts, surrounds and center and brings them closer together (at most ±3 dB). It stays in the Advanced EQ per group, where you can adjust it. The subwoofer is not touched.
 • Normalization: Loudnorm measures the loudness and sets it exactly to the target, without compressing (a limiter takes care of the peaks). «Normalize» measures now and the adjustment is applied when you PROCESS, in a single pass; if you haven't measured before, it is measured while processing. DynAudNorm evens out quiet and loud parts. SpeechNorm evens out the dialogue (it acts only on the center channel, where the voice is).
 • Synchronization: framerate conversion (with or without pitch change) and initial delay (-6000 to +6000 ms).
@@ -678,7 +907,7 @@ VOLUME
 • «Digital smoothing» (0-5): removes the excess treble of many movies and dubs from the 80s and 90s (harsh S sounds and metallic shine) with a filter that cuts the treble, not an equalizer, on all channels except the subwoofer. 0 = no effect. «Auto» measures the treble of the center and chooses the amount.
 
 PRESENCE / EQ
-• Presence: brings out the voice (center channel), music/ambience, effects or the subwoofer. Optional limiter ceiling. «Channel separation» (to its right, -10 to +10): more or less separation between left and right and between front and back, without raising the volume. Its «Auto» measures the movie's separation and sets the right amount for how busy it is (more for action, less for calm movies); the center is never touched. It is recommended that the second-to-last adjustment be Channel separation and the last one, the Volume per channel.
+• Presence: brings out the voice (center channel), music/ambience, effects or the subwoofer. Optional limiter ceiling. «Channel separation» (to its right, -15 to +15): more or less separation between left and right and between front and back, without raising the volume. Its «Auto» measures the movie's separation and sets the right amount for how busy it is (more for action, less for calm movies); the center is never touched. It is recommended that the second-to-last adjustment be Channel separation and the last one, the Volume per channel. Fine adjustments, in steps of 1 and gentler (15 gives what 10 used to): Presence, Channel separation and equalizers from -15 to +15; Dynamic range and Dynamic processing from 0 to 15; Double Bass and Bass Management from 0 to 6 (in steps of 1).
 • 3-band EQ and advanced EQ per group (front, rear, center) with free frequency.
 • Delay per channel: 0 to 100 ms in 5 ms steps (5 ms ≈ 1.7 m).
 • Audio cleanup: background noise reduction (1-2 = subtle), click removal and clipping repair (these two are slow). Its «Auto» only sets something if it finds real background noise; on a clean file it leaves it at 0 and tells you it needs no correction.
@@ -690,12 +919,13 @@ DYNAMICS / BASS
 • Bass Management: moves the speakers' low frequencies to the subwoofer (1 = soft, 5 = full). Double Bass: doubles the lows both ways, from the subwoofer to the speakers and from the speakers to the subwoofer. Both clearly raise the subwoofer, protected against clipping. Its «Auto» sets Double Bass (1-3) if the speakers lack deep bass or the subwoofer is weak; if they are balanced, 0. Default cut: 90 Hz.
 • Dynamic range: quiet sounds go down and contrast increases.
 • Dynamic processing: 1 Lift (raises quiet parts), 2 Impact (loud parts stand out), 3 both. Strength per group. Set the subwoofer to 0 if you use Bass Management or Double Bass.
+• Azid mode, next to Dynamic processing's «Auto»: as in BeLight (DSPguru's Azid), it uses the compression that the AC3/E-AC3 itself carries. It has a single option, «Inverse»: the compression the AC3/E-AC3 itself carries, turned around: loud sounds go up and quiet ones go down (more dynamics). «Original» leaves it untouched. Recommended for DVD movies, which carry that data; with DTS, TrueHD, FLAC... it changes nothing (the log says so). It does not mix with Presence, Channel separation, Dynamic range, normalizations or cleanup: turning it on switches them off, and touching one sets it back to «Original». Volumes, equalizers, smoothing, sync, Dynamic processing (mode 1 only), Bass Management and Double Bass can be used with it. The output can be any format except «Passthrough» (it copies the track without processing it), which is not in the list while you use Azid; when you choose a mode, a window reminds you.
 • «Auto» in Bass Management, Double Bass, Dynamic range and Dynamic processing: the same, according to what it measures (subwoofer level and dynamic range). If the movie is already fine, it leaves 0 and tells you.
 
 VISUALIZATION
-• It is generated automatically when you open the tab and updated if you change any setting. Compares BEFORE and AFTER channel by channel.
+• The first time you come in with a track it is generated by itself; after that, when you press «Generate visualization». Compares BEFORE and AFTER channel by channel.
 • Play before or after, Pause/Resume and Stop. Click a channel = hear only that channel (click again = all).
-• Wheel = zoom · drag = pan · double-click = x1 · space bar = start and stop. When zoomed, the waveform moves by itself while playing, with the cursor in the center. Segment: the whole file or the first 5, 10 or 30 minutes. If you change the segment while it is generating, the new one starts without waiting; if you go to another tab, it is interrupted and generates by itself when you come back.
+• Wheel = zoom · drag = pan · double-click = x1 · space bar = start and stop. When zoomed, the waveform moves by itself while playing, with the cursor in the center. Segment: the whole file or the first 5, 10 or 30 minutes. If you change the segment while it is generating, the new one starts without waiting; if you go to another tab, it still finishes. Two zooms, as in Jmg VideoEncoder: ↔ (time, x1-x4096) and ↕ (wave height, x1-x16); tick the one you want and the mouse wheel raises or lowers it (double-click = x1).
 • Editor («✎ Edit the file» box): to finish by hand a single-track WAV, W64 or FLAC file, such as the combined track. Drag on a channel to mark that piece (vertically, several channels; then drag its edges to enlarge or shrink it), type the dB (for example -40 to leave it almost silent) and press «Apply». You can also type the times in «From» and «to». Wheel = zoom. To move the waveform when zoomed: drag with the hand on the top ruler or the channel names, use the bottom bar, the ← → arrows (with Shift, faster) or drag with the right button. Right click = clear the selection. With a piece marked, «■ Stop» goes back to the start of the marked piece.
 • «▶ Hear the selection» plays only the marked piece and channels, with the changes applied, at any minute. With unsaved changes, the buttons become «Play WITHOUT CHANGES» and «Play WITH CHANGES»: the latter, and clicking on a channel, play with your changes from any point. «↶ Undo» and «↷ Redo» go step by step.
 • When minimized, the program stays as an icon next to the clock (the system tray), which shows how the process is going: left click = the window comes back; right click = menu (cancel the process, what to do when done —nothing, exit or shut down the PC—, open the folder when done, exit). In Output it can be turned off, to minimize to the taskbar as usual. Leaving the mouse over a button, box or slider shows a description, which goes away by itself after a few seconds.
@@ -708,7 +938,7 @@ OUTPUT
 • Channels: by default, the same as the input. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (Dolby or Simple stereo) or 1.0 (mono). Unused channels are added into the remaining ones.
 • 7.1 sources are output as 5.1: the side channels are mixed into the rear ones.
 • Stereo source: 2.0 stays stereo; 5.1 performs an Upmix (with «Remove voice» from front and rear). With Upmix only Channel separation, the volumes and the equalizers are used; the rest (Presence, normalizations, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing and Cleanup) is disabled.
-• Formats: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (one WAV per channel), RF64, W64 (Sound Forge), TrueHD and Passthrough (copy without converting). MP3 for 2.0 and 1.0. «Aften Dolby Digital» (default) makes the AC3 with Aften, which gives better dynamic range in movies that have a lot; «AC3», with FFmpeg. Its settings, with «⚙ Aften...» like the other formats' ones (by default, block switching and fixed full bandwidth): CBR or VBR, bandwidth, accuracy, filters, dynamic range (DRC and dialogue level) and the bitstream information for the amplifier (Dolby Surround EX, Dolby Headphone, Standard or HDCD A/D converter, preferred downmix and its levels). Not every device reads a VBR AC3.
+• Formats: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (one WAV per channel), RF64, W64 (Sound Forge), TrueHD and Passthrough (copy without converting). MP3 for 2.0 and 1.0. «Aften Dolby Digital» (default) makes the AC3 with Aften, which gives better dynamic range in movies that have a lot; «AC3», with FFmpeg. Its settings, with «⚙ Aften...» like the other formats' ones (by default, block switching and fixed full bandwidth): CBR or VBR, bandwidth, accuracy, filters, dynamic range (DRC and dialogue level) and the bitstream information for the amplifier (Dolby Surround EX, Dolby Headphone, Standard or HDCD A/D converter, preferred downmix and its levels). Not every device reads a VBR AC3. In Combine, 7.1 output allows AAC, FLAC, WAV, W64 and RF64; AC3, E-AC3, DTS and TrueHD go up to 5.1 at most. Normal processing outputs up to 5.1.
 • «🎬 VideoEncoder» (at the top, after «Create ISO»): sends the selected files in the list (or all of them) to Jmg VideoEncoder. If it is open, they go to its list; if not, it opens with them. If it is not found, it asks you to look for it once. Then this program closes (both do not stay open at the same time). The audio settings of each track that both programs share (volumes, Presence, EQ, separation, dynamic range, sync and format) go along too. With no files, it just switches to the other program.
 • «MKV with video»: copies the video, subtitles, chapters and covers, and adds the processed tracks. «Audio only»: one file per track. Below, «File name»: the name of what comes out of each file (↺ goes back to the automatic one) and where it will be saved.
 • «Core as a separate track» (in Output, next to the format; with «MKV with video»): it is only enabled on tracks that have one, and it is set per track. A DTS-HD track (Master Audio or High Resolution) carries a regular DTS inside for devices that do not understand HD, and a Dolby Atmos (TrueHD) track carries a TrueHD without Atmos; ticked, it also comes out as a separate track, not re-encoded, after the originals.
@@ -738,7 +968,27 @@ GOOD TO KNOW
 • Dynamic range and Dynamic processing: only one at a time, and normalizations disable them. Presence works with all effects, except with Upmix. The program does this automatically.
 • ⚠ Limiter ceiling «No limit»: it may clip if you push the effects hard. To be safe, choose -1 dBFS.
 • «Reset» clears the open tab («All» = everything). Presets save and load your settings.
-• «↶ Undo» and «↷ Redo» (at the bottom, next to «Reset»): undo and redo, one by one, the last 50 actions: setting changes on any track, adding or removing files, deleting tracks, titles... In Visualization they undo and redo the editor changes (what you silenced or lowered). Also with Ctrl+Z and Ctrl+Y.
+• Settings and presets are saved safely: first to a temporary file, which then replaces the real one in a single step; if the power goes out or the program closes halfway, the previous file stays whole, never a half-written one.
+• What the program creates is first written as «name.part.ext» and only gets its real name when it finishes well: if the power goes out halfway, a cut file never keeps the name of a finished one. On opening, the program warns about the «.part» files left from last time (they can be deleted).
+• AC3 and E-AC3 tracks are decoded as they are, without the compression they carry inside (FFmpeg used to apply it on its own and lowered the peaks): you get the original sound.
+• «↶ Undo» and «↷ Redo» (at the bottom, next to «Reset»): undo and redo, one by one, the last 50 actions: setting changes on any track, adding or removing files, deleting tracks, titles... In Visualization they undo and redo the editor changes (what you silenced or lowered). Also with Ctrl+Z and Ctrl+Y. When the editor has nothing to undo or redo, they undo and redo the other changes, as in the other tabs.
+• The bar between the two top columns stops when a column's buttons or text no longer fit: they are never cut off.
+• Scroll bars only appear when needed, and each setting's explanation appears when you hover the mouse over it (the tabs carry no explanation texts).
+• The tabs panel takes just the height of what each tab holds (no empty space, nothing missing); the file list at the top gets the rest.
+• Each effect's title turns green when it is on (with any setting changed: amount, crossover, ceiling, frequencies...).
+• Green shows at a glance everything that is doing something: the title of each effect or section with some setting made (also picture, trimming, black bars, color) and the buttons that have already corrected something (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). When you hover the mouse over a button, its letters turn green.
+• Tabs also turn green: the open one and the one you hover over. When processing ends, the destination folder opens with the file already selected.
+• When you select or add a file, «Tracks of the file» already shows its audio tracks (in gray); to process them, press «➕ Add to queue».
+• DVD (VIDEO_TS folder or .iso image): when ripping, each audio track gets its language, read from the disc's .IFO file (the .VOB files do not carry it).
+• Visualization: when you enter it, the tabs are hidden to leave more room; «⬅ Back» (top left) takes you to the previous tab, as in Jmg VideoEncoder.
+• Edit/Log, for experts: below the summary you get all the active track's parameters («key = value») and the FFmpeg filters that will be used. Change the values you want and press «Save changes» (right-click in the editor) before processing.
+• «⚙» (the gear), to the left of the Dynamic range and Dynamic processing titles, and in «Combine tracks» on the dynamic range (echo removal) and on «Silence voices of the original» (the gate): opens their advanced settings for finer tuning, as in Ocenaudio. Each one with its slider, its box and what it does on each side: threshold, attack, release, knee and gain, the limiter's attack and release; on the gate, join gaps, start earlier, tail, fade down, fade up and hits that are kept. «auto» = the program works it out. «↺ Default» restores the factory values. They are saved with each track and the title turns green. «Combine tracks» outputs only FLAC or WAV.
+• In the «⚙» windows: double-click a slider (or its box) to return it to its initial value, and the keyboard arrows move it step by step. When you hover over a button, only its letters turn green (the button does not light up). In Edit/Log, the «ffmpeg_filtros = ...» line is the track's FFmpeg filters: you can change them and «Save changes» applies them; they are used when processing as long as you do not change other settings of the track (if you do, the program's ones come back and the log says so).
+• When you change a setting while in Visualization, playback stops and the view stays as it was until you press «Generate visualization»; press ▶ to hear it with the change. While processing, «⬅ Back» still works. Tooltips go away by themselves after a few seconds.
+• Full processor power: a long track (over 6 minutes) is processed in several pieces at once (up to half the cores) and joined seamlessly; each piece starts 64 s earlier so the effects sound the same as in one go. Only done when the effects do not change timing (no parts, delay or speed change).
+• Visualization: the first time you come in with a track it is generated by itself; after that, when you press «Generate visualization» (if you change a setting, playback stops and you are told). Detail as in Sound Forge: the ↔ zoom reaches x4096 and, when zoomed, what you see is read from the file with all its samples (before and after).
+• Dynamic processing: there is no mode 0 any more. By default, mode 2 with the sliders at 0: at 0 it does nothing; raising a slider applies the chosen mode.
+• In «Presence / EQ», Digital smoothing is to the right of the 3-band EQ; in «Dynamics / Bass», Dynamic processing is to the right of Bass Management, with «Azid mode» next to its «Auto».
 • The 3-band EQ and the advanced EQ are not used together: while one has something set, the other is disabled. The same goes for Master and the volume per channel. Digital smoothing does not go with the equalizers or with Audio cleanup either, nor Audio cleanup with the equalizers, Dynamic range or Dynamic processing. The «Auto» buttons switch off what does not go together and the notice tells you what.
 • «Open the destination folder when finished» (Output tab): when processing ends, it opens the folder where the files were saved.
 • If something goes wrong, check the Edit/Log tab. The log text can be selected with the mouse and copied (Ctrl+C or right-click → Copy / Copy the whole log).
@@ -751,6 +1001,10 @@ GOOD TO KNOW
 • Blu-ray: the language of each audio track and subtitle is read from the disc's playlist (the .m2ts files do not carry it).
 • While it is working (processing, combining, ripping, extracting, creating an ISO...), the PC does not go to sleep; the screen can still turn off.
 • Every slider, including those in Combine, moves with the keyboard arrows: click the slider and press ← → (one step at a time).
+• «Save preset» saves all the settings, including the track's advanced ones (Aften, codec options and manual filters), and «Load preset» applies them all.
+• Presets are shared by Jmg AudioProcesador and Jmg VideoEncoder (the same folder): each program applies its own part; the audio goes from one to the other and, in Jmg AudioProcesador, the video and subtitles have no effect.
+• When passing files from one program to the other, the ones that were added arrive added (with their audio settings).
+• Whatever is running (generating, listening, playing, previewing) turns green. When paused, «Resume» (in Jmg VideoEncoder, ⏸) stays green.
 
 FFMPEG AND LICENSE
 Uses FFmpeg (ffmpeg.org), version N-128094-g31855b2a70-20261025 (BtbN build), licensed under GNU GPL v3 (bin\\LICENSE.txt).
@@ -759,14 +1013,14 @@ Contact: jmgsoftwaremultimedia@gmail.com
 Support the project: https://www.paypal.com/paypalme/JmgSoftware
 
 A HUGE AMOUNT OF WORK
-• Making Jmg SuiteMultimedia (this program and Jmg VideoEncoder) has taken a huge amount of work: about 45 days, with tests on real movies. It was developed with the help of Claude, Anthropic's artificial intelligence.
+• Making Jmg SuiteMultimedia (this program and Jmg VideoEncoder) has been a huge amount of work and dedication, with tests on real movies. It was developed with the help of Claude, Anthropic's artificial intelligence.
 """
 AYUDA["fr"]="""JMG AUDIOPROCESADOR 5.1 · AIDE
 
 (L'interface est en anglais : les noms des boutons sont indiqués tels qu'ils apparaissent.)
 
 UTILISATION
-1. Ajoutez des fichiers avec «Select» ou «Add», ou glissez-les dans la liste des fichiers. Les fichiers sans piste audio ne sont pas ajoutés.
+1. Ajoutez des fichiers avec «Select» ou «Add», ou glissez-les dans la liste des fichiers. Les fichiers sans piste audio ne sont pas ajoutés. Ensuite, «➕ Add to queue» (à droite, sous la liste des pistes) passe les fichiers sélectionnés dans la liste des pistes (ils portent un ✔) : seuls ceux-là sont traités.
 2. Cliquez sur une piste (Ctrl+clic pour plusieurs). Chaque piste garde ses propres réglages. «Apply to all» copie les réglages de la piste active vers les autres pistes sélectionnées.
 3. Réglez les onglets et vérifiez le résultat dans Visualization.
 4. Appuyez sur PROCESS : l'essentiel s'affiche et «🔍 See everything» montre chaque piste avec son format et ses effets (copiable). Vos fichiers originaux ne sont jamais modifiés. «Cancel» arrête le traitement et supprime ce qui est resté à moitié écrit.
@@ -774,7 +1028,7 @@ UTILISATION
 VOLUME
 • Master : monte ou baisse tout. En dessous, le volume de chaque canal. Le Master et chaque canal descendent jusqu'à -30 dB ; une position de plus vers le bas, c'est «Mute» (en rouge) : silence. Le volume par canal s'applique en dernier (après Bass Management, Double Bass et Channel separation) : ce que vous réglez est exactement ce que ce canal monte ou baisse.
 • «Set Master» : mesure la piste et monte le Master jusqu'à la cible sans dépasser la limite de crête (anti-écrêtage automatique). Il ne baisse jamais le volume : si la piste est déjà forte, il reste à 0 dB.
-• «Auto» de «Volume per channel» : mesure le volume de chaque canal des pistes sélectionnées et déplace leurs curseurs vers un équilibre de cinéma : le central n'est pas modifié, les frontaux se placent environ 3 dB en dessous, les surrounds environ 7 dB et le subwoofer environ 6 dB (±6 dB au maximum ; subwoofer ±3 dB). Vous pouvez ensuite les retoucher à la main. Les frontaux et les surrounds sont seulement baissés s'ils sont trop forts, jamais montés : certains films ne demandent pas autant de stéréo ni de surround.
+• «Auto» de «Volume per channel» : mesure le volume de chaque canal des pistes sélectionnées et déplace leurs curseurs vers un équilibre de cinéma, compensé entre tous les canaux : le central n'est pas touché, les avant finissent environ 1,5 dB en dessous et les surrounds environ 3 dB ; le subwoofer reste toujours un peu en dessous de tous les autres (environ 2 dB sous le plus faible). Les avant et les surrounds baissent de 6 dB au plus ; le subwoofer, de -6 à +3 dB. Vous pouvez ensuite les retoucher à la main. Les avant et les surrounds ne sont baissés que s'ils sont trop forts, jamais montés : certains films ne demandent pas autant de stéréo ni de surround.
 • «Auto» de l'EQ avancé : mesure les graves, les médiums et les aigus des frontaux, des arrière et du central et les rapproche (±3 dB au maximum). Le résultat reste dans l'EQ avancé par groupe, où vous pouvez le retoucher. Le subwoofer n'est pas modifié.
 • Normalisation : Loudnorm mesure le volume et l'ajuste exactement à l'objectif, sans compresser (un limiteur protège les crêtes). «Normalize» mesure tout de suite et l'ajustement est appliqué au traitement, en une seule passe ; sans mesure préalable, la mesure se fait pendant le traitement. DynAudNorm égalise les passages faibles et forts. SpeechNorm égalise les dialogues (il n'agit que sur le canal central, celui de la voix).
 • Synchronisation : conversion de framerate (avec ou sans changement de hauteur) et délai initial (de -6000 à +6000 ms).
@@ -783,7 +1037,7 @@ VOLUME
 • «Digital smoothing» (0-5) : retire l'excès d'aigus de nombreux films et doublages des années 80 et 90 (sifflantes et brillance métallique) avec un filtre qui coupe les aigus, pas un égaliseur, sur tous les canaux sauf le caisson de basses. 0 = sans effet. «Auto» mesure les aigus du central et choisit l'intensité.
 
 PRESENCE / EQ
-• Presence : met en avant la voix (canal central), la musique/ambiance, les effets ou le caisson de basses. Plafond du limiteur en option. «Channel separation» (à droite, -10 à +10) : plus ou moins de séparation entre gauche et droite et entre l'avant et l'arrière, sans monter le volume. Son «Auto» mesure la séparation du film et met celle qui lui convient selon son rythme (plus pour l'action, moins pour les films calmes) ; le central n'est jamais touché. Il est conseillé de régler en avant-dernier la Channel separation et en dernier le Volume per channel.
+• Presence : met en avant la voix (canal central), la musique/ambiance, les effets ou le caisson de basses. Plafond du limiteur en option. «Channel separation» (à droite, -15 à +15) : plus ou moins de séparation entre gauche et droite et entre l'avant et l'arrière, sans monter le volume. Son «Auto» mesure la séparation du film et met celle qui lui convient selon son rythme (plus pour l'action, moins pour les films calmes) ; le central n'est jamais touché. Il est conseillé de régler en avant-dernier la Channel separation et en dernier le Volume per channel. Réglages fins, par pas de 1 et plus doux (15 donne ce que donnait 10) : Presence, Channel separation et égaliseurs de -15 à +15 ; Dynamic range et Dynamic processing de 0 à 15 ; Double Bass et Bass Management de 0 à 6 (par pas de 1).
 • Égaliseur 3 bandes et égaliseur avancé par groupe (avant, arrière, centre) avec fréquence libre.
 • Délai par canal : de 0 à 100 ms par pas de 5 ms (5 ms ≈ 1,7 m).
 • Audio cleanup : réduction du bruit de fond (1-2 = subtil), suppression des clics et réparation de la saturation (ces deux-là sont lents). Son «Auto» ne règle quelque chose que s'il trouve un vrai bruit de fond ; sur un fichier propre, il le laisse à 0 et vous indique qu'il n'a pas besoin de correction.
@@ -795,12 +1049,13 @@ DYNAMICS / BASS
 • Bass Management : envoie les graves des enceintes au caisson (1 = doux, 5 = complet). Double Bass : double les graves dans les deux sens, du caisson vers les enceintes et des enceintes vers le caisson. Les deux augmentent nettement le caisson, avec une protection contre la saturation. Son «Auto» règle le Double Bass (1-3) si les enceintes manquent de graves profonds ou si le caisson est faible ; s'ils sont équilibrés, 0. Coupure par défaut : 90 Hz.
 • Dynamic range : les sons faibles baissent et le contraste augmente.
 • Dynamic processing : 1 Lift (remonte les passages faibles), 2 Impact (les passages forts ressortent), 3 les deux. Intensité par groupe. Mettez le caisson à 0 si vous utilisez Bass Management ou Double Bass.
+• Azid mode, à côté du «Auto» de Dynamic processing : comme dans BeLight (Azid de DSPguru), il utilise la compression que l'AC3/E-AC3 contient lui-même. Il n'a qu'une option, «Inverse» : la compression que contient l'AC3/E-AC3, à l'envers : les sons forts montent et les faibles baissent (plus de dynamique). «Original» n'y touche pas. Recommandé pour les films DVD, qui contiennent ces données ; avec DTS, TrueHD, FLAC... rien ne change (le journal l'indique). Il ne se combine pas avec Presence, la séparation des canaux, Dynamic range, les normalisations ni le nettoyage : l'activer les désactive, et en toucher un le remet sur «Original». Les volumes, les égaliseurs, le lissage, la synchro, Dynamic processing (mode 1 uniquement), Bass Management et Double Bass restent utilisables avec lui. La sortie peut être n'importe quel format sauf «Passthrough» (copie la piste sans la traiter), qui n'apparaît pas dans la liste tant que vous utilisez Azid ; en choisissant un mode, une fenêtre le rappelle.
 • «Auto» dans Bass Management, Double Bass, Dynamic range et Dynamic processing : pareil, selon la mesure (niveau du caisson et plage dynamique). Si le film convient déjà, il laisse 0 et vous le dit.
 
 VISUALIZATION
-• Elle se génère seule à l'ouverture de l'onglet et se met à jour si vous changez un réglage. Compare AVANT et APRÈS canal par canal.
+• La première fois que vous entrez avec une piste, elle se génère seule ; ensuite, en appuyant sur «Generate visualization». Compare AVANT et APRÈS canal par canal.
 • Écouter avant ou après, Pause/Resume et Stop. Clic sur un canal = écouter uniquement ce canal (nouveau clic = tous).
-• Molette = zoom · glisser = déplacer · double-clic = x1 · barre d'espace = démarrer et arrêter. Avec le zoom, la forme d'onde avance seule pendant l'écoute, le curseur au centre. Segment : le fichier entier ou les 5, 10 ou 30 premières minutes. Si vous changez de segment pendant la génération, le nouveau démarre sans attendre ; si vous passez à un autre onglet, elle s'interrompt et reprend seule à votre retour.
+• Molette = zoom · glisser = déplacer · double-clic = x1 · barre d'espace = démarrer et arrêter. Avec le zoom, la forme d'onde avance seule pendant l'écoute, le curseur au centre. Segment : le fichier entier ou les 5, 10 ou 30 premières minutes. Si vous changez de segment pendant la génération, le nouveau démarre sans attendre ; si vous passez à un autre onglet, elle se termine quand même. Deux zooms, comme dans Jmg VideoEncoder : ↔ (le temps, x1-x4096) et ↕ (hauteur des ondes, x1-x16) ; cochez celui que vous voulez et la molette l'augmente ou le diminue (double-clic = x1).
 • Éditeur (case «✎ Edit the file») : pour finir à la main un fichier WAV, W64 ou FLAC à une seule piste, comme la piste combinée. Faites glisser sur un canal pour marquer ce morceau (à la verticale, plusieurs canaux ; faites ensuite glisser ses bords pour l'agrandir ou le réduire), saisissez les dB (par exemple -40 pour le rendre presque muet) et appuyez sur «Apply». Vous pouvez aussi saisir les temps dans «From» et «to». Molette = zoom. Pour déplacer la forme d'onde avec le zoom : faites glisser la main sur la règle du haut ou sur les noms des canaux, utilisez la barre du bas, les flèches ← → (avec Maj, plus vite) ou glissez avec le bouton droit. Clic droit = retirer la sélection. Avec un morceau marqué, «■ Stop» revient au début du morceau marqué.
 • «▶ Hear the selection» fait écouter seulement le morceau et les canaux marqués, avec les changements, à n'importe quelle minute. Avec des changements non enregistrés, les boutons deviennent «Play WITHOUT CHANGES» et «Play WITH CHANGES» : ce dernier, et le clic sur un canal, jouent avec vos changements depuis n'importe quel point. «↶ Undo» et «↷ Redo» avancent pas à pas.
 • Une fois réduit, le programme reste en icône près de l'horloge (zone de notification), qui indique l'avancement : clic gauche = la fenêtre revient ; clic droit = menu (annuler le traitement, que faire à la fin —rien, quitter ou éteindre le PC—, ouvrir le dossier à la fin, quitter). Dans Output on peut le désactiver, pour réduire dans la barre des tâches comme d'habitude. En laissant la souris sur un bouton, une case ou un curseur, une description apparaît et disparaît seule après quelques secondes.
@@ -813,7 +1068,7 @@ OUTPUT
 • Canaux : par défaut, les mêmes que l'entrée. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (stéréo Dolby ou Simple) ou 1.0 (mono). Les canaux en trop sont additionnés aux canaux restants.
 • Les sources 7.1 sortent en 5.1 : les canaux latéraux sont additionnés aux canaux arrière.
 • Source stéréo : 2.0 reste en stéréo ; 5.1 fait un Upmix (avec «Remove voice» des avants et arrières). Avec Upmix, seuls Channel separation, les volumes et les égaliseurs s'utilisent ; le reste (Presence, normalisations, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing et Audio cleanup) est désactivé.
-• Formats : AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV par canal), RF64, W64 (Sound Forge), TrueHD et Passthrough (copie sans conversion). MP3 en 2.0 et 1.0. «Aften Dolby Digital» (par défaut) fait l'AC3 avec Aften, qui donne une meilleure dynamique dans les films qui en ont beaucoup ; «AC3», avec FFmpeg. Ses réglages, avec «⚙ Aften...» comme ceux des autres formats (par défaut, commutation de blocs et bande passante fixe complète) : CBR ou VBR, bande passante, précision, filtres, dynamique (DRC et niveau de dialogue) et les informations du flux pour l'amplificateur (Dolby Surround EX, Dolby Headphone, convertisseur A/D Standard ou HDCD, downmix préféré et ses niveaux). Tous les appareils ne lisent pas un AC3 VBR.
+• Formats : AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (un WAV par canal), RF64, W64 (Sound Forge), TrueHD et Passthrough (copie sans conversion). MP3 en 2.0 et 1.0. «Aften Dolby Digital» (par défaut) fait l'AC3 avec Aften, qui donne une meilleure dynamique dans les films qui en ont beaucoup ; «AC3», avec FFmpeg. Ses réglages, avec «⚙ Aften...» comme ceux des autres formats (par défaut, commutation de blocs et bande passante fixe complète) : CBR ou VBR, bande passante, précision, filtres, dynamique (DRC et niveau de dialogue) et les informations du flux pour l'amplificateur (Dolby Surround EX, Dolby Headphone, convertisseur A/D Standard ou HDCD, downmix préféré et ses niveaux). Tous les appareils ne lisent pas un AC3 VBR. Dans Combine, la sortie 7.1 accepte AAC, FLAC, WAV, W64 et RF64 ; AC3, E-AC3, DTS et TrueHD vont au maximum jusqu'au 5.1. Le traitement normal sort au maximum en 5.1.
 • «🎬 VideoEncoder» (en haut, après «Create ISO») : envoie les fichiers sélectionnés de la liste (ou tous) à Jmg VideoEncoder. S'il est ouvert, ils vont dans sa liste ; sinon, il s'ouvre avec eux. S'il est introuvable, il vous demande de le chercher une fois. Ensuite, ce programme se ferme (les deux ne restent pas ouverts en même temps). Les réglages audio de chaque piste communs aux deux programmes (volumes, Presence, égaliseur, séparation, plage dynamique, synchro et format) suivent aussi. Sans fichiers, il passe simplement à l'autre programme.
 • «MKV with video» : copie la vidéo, les sous-titres, les chapitres et les pochettes, et ajoute les pistes traitées. «Audio only» : un fichier par piste. En dessous, «File name» : le nom de ce qui sort de chaque fichier (↺ revient au nom automatique) et où il sera enregistré.
 • «Core as a separate track» (dans Output, à côté du format ; avec «MKV with video») : il ne s'active que sur les pistes qui en ont un, et il se règle piste par piste. Une piste DTS-HD (Master Audio ou High Resolution) contient un DTS normal pour les appareils qui ne comprennent pas le HD, et une piste Dolby Atmos (TrueHD) un TrueHD sans Atmos ; coché, il sort aussi comme piste séparée, sans réencodage, après les originales.
@@ -843,7 +1098,27 @@ COMBINE (DOUBLAGES ET SYNCHRONISATION)
 • Dynamic range et Dynamic processing : un seul à la fois, et les normalisations les désactivent. Presence fonctionne avec tous les effets, sauf avec Upmix. Le programme le fait tout seul.
 • ⚠ Plafond du limiteur «No limit» : risque de saturation si vous poussez beaucoup les effets. Par sécurité, choisissez -1 dBFS.
 • «Reset» efface l'onglet ouvert («All» = tout). Les presets enregistrent et chargent vos réglages.
-• «↶ Undo» et «↷ Redo» (en bas, à côté de «Reset») : annulent et rétablissent, une par une, les 50 dernières actions : réglages de n'importe quelle piste, ajout ou retrait de fichiers, suppression de pistes, titres... Dans Visualization, ils annulent et rétablissent les modifications de l'éditeur (ce qui a été coupé ou baissé). Aussi avec Ctrl+Z et Ctrl+Y.
+• Les réglages et les presets sont enregistrés en toute sécurité : d'abord dans un fichier temporaire, qui remplace ensuite le vrai en une seule fois ; en cas de coupure de courant ou de fermeture en cours de route, l'ancien fichier reste intact, jamais à moitié écrit.
+• Ce que crée le programme s'écrit d'abord sous le nom «nom.part.ext» et ne prend son vrai nom que s'il se termine bien : en cas de coupure de courant, un fichier coupé ne garde jamais le nom d'un fichier terminé. À l'ouverture, le programme signale les «.part» restés de la dernière fois (on peut les supprimer).
+• Les pistes AC3 et E-AC3 sont décodées telles quelles, sans la compression qu'elles contiennent (FFmpeg l'appliquait de lui-même et abaissait les crêtes) : on obtient le son d'origine.
+• «↶ Undo» et «↷ Redo» (en bas, à côté de «Reset») : annulent et rétablissent, une par une, les 50 dernières actions : réglages de n'importe quelle piste, ajout ou retrait de fichiers, suppression de pistes, titres... Dans Visualization, ils annulent et rétablissent les modifications de l'éditeur (ce qui a été coupé ou baissé). Aussi avec Ctrl+Z et Ctrl+Y. Quand l'éditeur n'a rien à annuler ou rétablir, ils annulent et rétablissent les autres changements, comme dans les autres onglets.
+• La barre entre les deux colonnes du haut s'arrête quand les boutons ou le texte d'une colonne ne tiennent plus : ils ne sont jamais coupés.
+• Les barres de défilement n'apparaissent que si nécessaire, et l'explication de chaque réglage s'affiche au survol de la souris (les onglets n'ont pas de textes d'explication).
+• Le panneau des onglets prend juste la hauteur de ce que contient chaque onglet (ni espace vide ni rien de coupé) ; la liste des fichiers en haut prend le reste.
+• Le titre de chaque effet passe au vert quand il est activé (avec n'importe quel réglage modifié : intensité, coupure, plafond, fréquences...).
+• Le vert montre d'un coup d'œil tout ce qui agit : le titre de chaque effet ou section avec un réglage fait (aussi image, découpe, bandes noires, couleur) et les boutons qui ont déjà corrigé quelque chose (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Au survol d'un bouton, ses lettres passent au vert.
+• Les onglets passent aussi au vert : celui qui est ouvert et celui que survole la souris. À la fin, le dossier de destination s'ouvre avec le fichier déjà sélectionné.
+• Quand vous choisissez ou ajoutez un fichier, «Tracks of the file» montre déjà ses pistes audio (en gris) ; pour les traiter, appuyez sur «➕ Add to queue».
+• DVD (dossier VIDEO_TS ou image .iso) : à l'extraction, chaque piste audio reçoit sa langue, lue dans le fichier .IFO du disque (les .VOB ne la contiennent pas).
+• Visualisation : en y entrant, les onglets se masquent pour laisser plus de place ; «⬅ Back» (en haut à gauche) ramène à l'onglet précédent, comme dans Jmg VideoEncoder.
+• Edit/Log, pour les experts : sous le résumé apparaissent tous les paramètres de la piste active («clé = valeur») et les filtres FFmpeg qui seront utilisés. Modifiez les valeurs voulues et appuyez sur «Save changes» (clic droit dans l'éditeur) avant de traiter.
+• «⚙» (la roue), à gauche des titres de la plage dynamique et de Dynamic processing, et dans «Combine tracks» sur la plage dynamique (suppression de l'écho) et sur «Silence voices of the original» (la porte) : ouvre leurs réglages avancés pour affiner, comme dans Ocenaudio. Chacun avec son curseur, sa case et ce qu'il fait de chaque côté : seuil, attaque, relâchement, genou et gain, l'attaque et le relâchement du limiteur ; pour la porte, joindre les trous, commencer avant, queue, descente, montée et coups conservés. «auto» = le programme le calcule. «↺ Default» remet les valeurs d'usine. Ils sont enregistrés avec chaque piste et le titre passe au vert. «Combine tracks» ne sort qu'en FLAC ou WAV.
+• Dans les fenêtres «⚙» : un double clic sur un curseur (ou sur sa case) le remet à sa valeur initiale, et les flèches du clavier le déplacent pas à pas. Au survol d'un bouton, seules ses lettres passent au vert (le bouton ne s'allume pas). Dans Edit/Log, la ligne «ffmpeg_filtros = ...» contient les filtres FFmpeg de la piste : on peut les modifier et «Save changes» les applique ; ils servent au traitement tant que vous ne changez pas d'autres réglages de la piste (sinon, ceux du programme reviennent et le journal l'indique).
+• Si vous changez un réglage dans la Visualisation, la lecture s'arrête et la vue reste telle quelle jusqu'à ce que vous appuyiez sur «Generate visualization» ; appuyez sur ▶ pour l'écouter avec le changement. Pendant le traitement, «⬅ Back» fonctionne toujours. Les infobulles disparaissent seules après quelques secondes.
+• Toute la puissance du processeur : une piste longue (plus de 6 minutes) est traitée en plusieurs morceaux à la fois (jusqu'à la moitié des cœurs) puis raccordée sans couture ; chaque morceau commence 64 s plus tôt pour que les effets sonnent comme en une fois. Seulement si les effets ne modifient pas le temps (sans tronçons, retard ni changement de vitesse).
+• Visualisation : la première fois que vous entrez avec une piste, elle se génère seule ; ensuite, en appuyant sur «Generate visualization» (si vous changez un réglage, la lecture s'arrête et un message le signale). Détail comme dans Sound Forge : le zoom ↔ va jusqu'à x4096 et, avec le zoom, ce que vous voyez est lu dans le fichier avec tous ses échantillons (avant et après).
+• Dynamic processing : il n'y a plus de mode 0. Par défaut, le mode 2 avec les curseurs à 0 : à 0 il ne fait rien ; en montant un curseur, le mode choisi s'applique.
+• Dans «Presence / EQ», Digital smoothing est à droite de l'EQ 3 bandes ; dans «Dynamics / Bass», Dynamic processing est à droite de Bass Management, avec «Azid mode» à côté de son «Auto».
 • L'EQ 3 bandes et l'EQ avancé ne s'utilisent pas ensemble : tant que l'un a un réglage, l'autre est désactivé. De même pour Master et le volume par canal. Digital smoothing ne va pas non plus avec les égaliseurs ni avec Audio cleanup, ni Audio cleanup avec les égaliseurs, Dynamic range ou Dynamic processing. Les boutons «Auto» éteignent ce qui ne va pas ensemble et le message vous indique quoi.
 • «Open the destination folder when finished» (onglet Output) : à la fin du traitement, ouvre le dossier où se trouvent les fichiers.
 • En cas de problème, consultez l'onglet Edit/Log. Le texte du log peut être sélectionné à la souris et copié (Ctrl+C ou clic droit → Copy / Copy the whole log).
@@ -856,6 +1131,10 @@ COMBINE (DOUBLAGES ET SYNCHRONISATION)
 • Blu-ray : la langue de chaque piste audio et de chaque sous-titre est lue dans la liste de lecture du disque (les fichiers .m2ts ne la contiennent pas).
 • Pendant qu'il travaille (traitement, combinaison, extraction, création d'ISO...), le PC ne se met pas en veille ; l'écran peut tout de même s'éteindre.
 • Tous les curseurs, y compris ceux de Combine, se déplacent avec les flèches du clavier : cliquez sur le curseur et appuyez sur ← → (pas à pas).
+• «Save preset» enregistre tous les réglages, y compris les réglages avancés de la piste (Aften, options du codec et filtres manuels), et «Load preset» les applique tous.
+• Les presets sont communs à Jmg AudioProcesador et Jmg VideoEncoder (le même dossier) : chaque programme applique sa partie ; l'audio passe de l'un à l'autre et, dans Jmg AudioProcesador, la vidéo et les sous-titres n'ont aucun effet.
+• En passant des fichiers d'un programme à l'autre, ceux qui étaient ajoutés arrivent ajoutés (avec leurs réglages audio).
+• Ce qui est en cours (générer, écouter, lire, prévisualiser) passe en vert. En pause, «Resume» (dans Jmg VideoEncoder, ⏸) reste en vert.
 
 FFMPEG ET LICENCE
 Utilise FFmpeg (ffmpeg.org), version N-128094-g31855b2a70-20261025 (compilation BtbN), sous licence GNU GPL v3 (bin\\LICENSE.txt).
@@ -864,14 +1143,14 @@ Contact : jmgsoftwaremultimedia@gmail.com
 Soutenir le projet : https://www.paypal.com/paypalme/JmgSoftware
 
 UN TRAVAIL ÉNORME
-• Réaliser Jmg SuiteMultimedia (ce programme et Jmg VideoEncoder) a demandé un travail énorme : environ 45 jours, avec des essais sur de vrais films. Il a été développé avec l'aide de Claude, l'intelligence artificielle d'Anthropic.
+• Réaliser Jmg SuiteMultimedia (ce programme et Jmg VideoEncoder) a été un travail et un dévouement énormes, avec des essais sur de vrais films. Il a été développé avec l'aide de Claude, l'intelligence artificielle d'Anthropic.
 """
 AYUDA["de"]="""JMG AUDIOPROCESADOR 5.1 · HILFE
 
 (Die Oberfläche ist auf Englisch: Die Schaltflächen sind so genannt, wie sie dort erscheinen.)
 
 SO GEHT'S
-1. Dateien mit «Select» oder «Add» hinzufügen oder in die Dateiliste ziehen. Dateien ohne Audiospur werden nicht hinzugefügt.
+1. Dateien mit «Select» oder «Add» hinzufügen oder in die Dateiliste ziehen. Dateien ohne Audiospur werden nicht hinzugefügt. Danach übernimmt «➕ Add to queue» (rechts, unter der Spurliste) die ausgewählten Dateien in die Spurliste (mit ✔): nur diese werden verarbeitet.
 2. Eine Spur anklicken (Strg+Klick für mehrere). Jede Spur behält ihre eigenen Einstellungen. «Apply to all» überträgt die Einstellungen der aktiven Spur auf die anderen ausgewählten Spuren.
 3. Die Registerkarten einstellen und das Ergebnis unter Visualization prüfen.
 4. PROCESS drücken: das Wesentliche erscheint, «🔍 See everything» zeigt jede Spur mit Format und Effekten (kopierbar). Ihre Originaldateien werden nie verändert. «Cancel» bricht ab und löscht halb geschriebene Dateien.
@@ -879,7 +1158,7 @@ SO GEHT'S
 VOLUME
 • Master: hebt oder senkt alles. Darunter die Lautstärke jedes Kanals. Master und jeder Kanal gehen bis -30 dB herunter; eine Stufe tiefer ist «Mute» (rot): stumm. Die Lautstärke pro Kanal wird zuletzt angewendet (nach Bass Management, Double Bass und Channel separation): Was Sie einstellen, ist genau, um wie viel dieser Kanal lauter oder leiser wird.
 • «Set Master»: misst die Spur und hebt den Master bis zum Zielwert an, ohne die Spitzengrenze zu überschreiten (automatischer Übersteuerungsschutz). Die Lautstärke wird nie gesenkt: Ist die Spur schon laut, bleibt es bei 0 dB.
-• «Auto» bei «Volume per channel»: misst die Lautstärke jedes Kanals der gewählten Spuren und stellt ihre Regler auf eine Kino-Balance: Der Center bleibt unverändert, die Frontkanäle liegen etwa 3 dB darunter, die Surrounds etwa 7 dB und der Subwoofer etwa 6 dB (höchstens ±6 dB; Subwoofer ±3 dB). Danach können Sie sie von Hand nachstellen. Front- und Surroundkanäle werden nur abgesenkt, wenn sie zu laut sind, nie angehoben: Manche Filme verlangen nicht so viel Stereo oder Surround.
+• «Auto» bei «Volume per channel»: misst die Lautstärke jedes Kanals der gewählten Spuren und stellt ihre Regler auf eine Kino-Balance, ausgeglichen über alle Kanäle: Der Center bleibt unverändert, die Frontkanäle liegen etwa 1,5 dB darunter, die Surrounds etwa 3 dB; der Subwoofer bleibt immer etwas unter allen anderen (etwa 2 dB unter dem leisesten). Front und Surrounds werden höchstens um 6 dB abgesenkt; der Subwoofer von -6 bis +3 dB. Danach können Sie sie von Hand nachstellen. Front und Surrounds werden nur abgesenkt, wenn sie zu laut sind, nie angehoben: Manche Filme brauchen nicht so viel Stereo oder Surround.
 • «Auto» des erweiterten EQ: misst Bässe, Mitten und Höhen von Front, Surround und Center und gleicht sie einander an (höchstens ±3 dB). Das Ergebnis steht im erweiterten EQ pro Gruppe, wo Sie es nachstellen können. Der Subwoofer bleibt unverändert.
 • Normalisierung: Loudnorm misst die Lautheit und stellt sie exakt auf den Zielwert ein, ohne zu komprimieren (ein Limiter schützt die Spitzen). «Normalize» misst sofort, die Anpassung wird beim Verarbeiten in einem einzigen Durchgang angewendet; ohne vorherige Messung wird beim Verarbeiten gemessen. DynAudNorm gleicht leise und laute Stellen an. SpeechNorm gleicht die Dialoge an (wirkt nur auf den Center-Kanal, wo die Stimme liegt).
 • Synchronisierung: Framerate-Umrechnung (mit oder ohne Tonhöhenänderung) und Anfangsverzögerung (-6000 bis +6000 ms).
@@ -888,7 +1167,7 @@ VOLUME
 • «Digital smoothing» (0-5): entfernt die überschüssigen Höhen vieler Filme und Synchronfassungen der 80er und 90er (scharfe S-Laute und metallischer Glanz) mit einem Filter, der die Höhen abschneidet, kein Equalizer, auf allen Kanälen außer dem Subwoofer. 0 = keine Wirkung. «Auto» misst die Höhen des Centers und wählt die Stärke.
 
 PRESENCE / EQ
-• Presence: hebt die Stimme (Center-Kanal), Musik/Atmosphäre, Effekte oder den Subwoofer hervor. Optionale Limiter-Obergrenze. «Channel separation» (rechts daneben, -10 bis +10): mehr oder weniger Trennung zwischen links und rechts und zwischen vorne und hinten, ohne die Lautstärke anzuheben. Sein «Auto» misst die Trennung des Films und stellt je nach Tempo die passende ein (mehr bei Action, weniger bei ruhigen Filmen); der Center wird nie angetastet. Empfohlen: als vorletzte Einstellung die Channel separation und als letzte das Volume per channel.
+• Presence: hebt die Stimme (Center-Kanal), Musik/Atmosphäre, Effekte oder den Subwoofer hervor. Optionale Limiter-Obergrenze. «Channel separation» (rechts daneben, -15 bis +15): mehr oder weniger Trennung zwischen links und rechts und zwischen vorne und hinten, ohne die Lautstärke anzuheben. Sein «Auto» misst die Trennung des Films und stellt je nach Tempo die passende ein (mehr bei Action, weniger bei ruhigen Filmen); der Center wird nie angetastet. Empfohlen: als vorletzte Einstellung die Channel separation und als letzte das Volume per channel. Feineinstellung in Schritten von 1, sanfter (15 ergibt, was früher 10 ergab): Presence, Channel separation und Equalizer von -15 bis +15; Dynamic range und Dynamic processing von 0 bis 15; Double Bass und Bass Management von 0 bis 6 (in Schritten von 1).
 • 3-Band-EQ und erweiterter EQ pro Gruppe (vorne, hinten, Center) mit freier Frequenz.
 • Verzögerung pro Kanal: 0 bis 100 ms in 5-ms-Schritten (5 ms ≈ 1,7 m).
 • Audio cleanup: Hintergrundrauschen verringern (1-2 = dezent), Klicks entfernen und Übersteuerung reparieren (diese beiden sind langsam). Ihr «Auto» stellt nur etwas ein, wenn es echtes Hintergrundrauschen findet; bei einer sauberen Datei bleibt es auf 0 und meldet, dass keine Korrektur nötig ist.
@@ -900,12 +1179,13 @@ DYNAMICS / BASS
 • Bass Management: leitet die tiefen Frequenzen der Lautsprecher zum Subwoofer (1 = sanft, 5 = vollständig). Double Bass: verdoppelt den Bass in beide Richtungen, vom Subwoofer zu den Lautsprechern und von den Lautsprechern zum Subwoofer. Beide heben den Subwoofer deutlich an, mit Schutz gegen Übersteuerung. Sein «Auto» setzt Double Bass (1-3), wenn den Lautsprechern tiefer Bass fehlt oder der Subwoofer schwach ist; sind sie ausgewogen, 0. Standard-Trennfrequenz: 90 Hz.
 • Dynamic range: leise Klänge werden leiser, der Kontrast nimmt zu.
 • Dynamic processing: 1 Lift (hebt leise Stellen an), 2 Impact (laute Stellen treten hervor), 3 beides. Stärke pro Gruppe. Den Subwoofer auf 0 stellen, wenn Bass Management oder Double Bass genutzt wird.
+• Azid mode, neben dem «Auto» von Dynamic processing: wie in BeLight (Azid von DSPguru) nutzt es die Kompression, die das AC3/E-AC3 selbst mitbringt. Es hat nur eine Option, «Inverse»: die im AC3/E-AC3 enthaltene Kompression, umgekehrt: laute Klänge werden lauter, leise leiser (mehr Dynamik). «Original» lässt alles unverändert. Empfohlen für DVD-Filme, die diese Daten enthalten; bei DTS, TrueHD, FLAC... ändert sich nichts (das Protokoll sagt es). Es lässt sich nicht mit Presence, Kanaltrennung, Dynamic range, Normalisierungen oder Bereinigung kombinieren: Beim Einschalten werden sie ausgeschaltet, und wird einer berührt, springt es auf «Original» zurück. Lautstärken, Equalizer, Glättung, Synchronisation, Dynamic processing (nur Modus 1), Bass Management und Double Bass bleiben damit nutzbar. Die Ausgabe kann jedes Format sein außer «Passthrough» (kopiert die Spur unbearbeitet), das nicht in der Liste steht, solange Azid aktiv ist; beim Wählen eines Modus erinnert ein Fenster daran.
 • «Auto» bei Bass Management, Double Bass, Dynamic range und Dynamic processing: ebenso, nach der Messung (Subwoofer-Pegel und Dynamikumfang). Passt der Film schon, bleibt es bei 0 und Sie erfahren es.
 
 VISUALIZATION
-• Wird beim Öffnen der Registerkarte automatisch erstellt und aktualisiert, wenn sich eine Einstellung ändert. Vergleicht VORHER und NACHHER Kanal für Kanal.
+• Beim ersten Öffnen mit einer Spur wird sie von selbst erstellt; danach mit «Generate visualization». Vergleicht VORHER und NACHHER Kanal für Kanal.
 • Vorher oder nachher anhören, Pause/Resume und Stop. Klick auf einen Kanal = nur diesen Kanal hören (erneuter Klick = alle).
-• Mausrad = Zoom · Ziehen = Verschieben · Doppelklick = x1 · Leertaste = starten und stoppen. Bei Zoom läuft die Wellenform während der Wiedergabe von selbst mit, der Cursor bleibt in der Mitte. Abschnitt: die ganze Datei oder die ersten 5, 10 oder 30 Minuten. Wechseln Sie den Abschnitt während der Erzeugung, beginnt der neue sofort; wechseln Sie die Registerkarte, wird sie unterbrochen und beim Zurückkehren von selbst neu erzeugt.
+• Mausrad = Zoom · Ziehen = Verschieben · Doppelklick = x1 · Leertaste = starten und stoppen. Bei Zoom läuft die Wellenform während der Wiedergabe von selbst mit, der Cursor bleibt in der Mitte. Abschnitt: die ganze Datei oder die ersten 5, 10 oder 30 Minuten. Wechseln Sie den Abschnitt während der Erzeugung, beginnt der neue sofort; wechseln Sie die Registerkarte, wird sie trotzdem fertig. Zwei Zooms wie in Jmg VideoEncoder: ↔ (die Zeit, x1-x4096) und ↕ (Höhe der Wellen, x1-x16); markieren Sie den gewünschten, und das Mausrad vergrößert oder verkleinert ihn (Doppelklick = x1).
 • Editor (Kästchen «✎ Edit the file»): um eine WAV-, W64- oder FLAC-Datei mit nur einer Spur, etwa die kombinierte Spur, von Hand fertigzustellen. Ziehen Sie über einen Kanal, um dieses Stück zu markieren (senkrecht mehrere Kanäle; danach können Sie es an den Rändern vergrößern oder verkleinern), geben Sie die dB ein (zum Beispiel -40 für fast stumm) und drücken Sie «Apply». Die Zeiten können Sie auch bei «From» und «to» eingeben. Rad = Zoom. Wellenform bei Zoom verschieben: mit der Hand auf dem oberen Lineal oder den Kanalnamen ziehen, die untere Leiste, die Pfeiltasten ← → (mit Umschalt schneller) oder Ziehen mit der rechten Taste. Rechtsklick = Auswahl aufheben. Ist ein Stück markiert, springt «■ Stop» an den Anfang des markierten Stücks zurück.
 • «▶ Hear the selection» spielt nur das markierte Stück und die markierten Kanäle mit den Änderungen ab, an jeder Stelle des Films. Bei ungespeicherten Änderungen heißen die Tasten «Play WITHOUT CHANGES» und «Play WITH CHANGES»: Letztere und der Klick auf einen Kanal spielen von jeder Stelle mit Ihren Änderungen. «↶ Undo» und «↷ Redo» gehen Schritt für Schritt.
 • Minimiert bleibt das Programm als Symbol neben der Uhr (Infobereich), das den Fortschritt zeigt: Linksklick = das Fenster kommt zurück; Rechtsklick = Menü (Vorgang abbrechen, was am Ende passiert —nichts, beenden oder PC herunterfahren—, Ordner am Ende öffnen, beenden). Unter Output lässt es sich abschalten, um wie gewohnt in die Taskleiste zu minimieren. Bleibt die Maus über einer Schaltfläche, einem Kästchen oder einem Regler, erscheint eine Beschreibung, die nach ein paar Sekunden von selbst verschwindet.
@@ -918,7 +1198,7 @@ OUTPUT
 • Kanäle: standardmäßig dieselben wie die Quelle. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (Dolby- oder Simple-Stereo) oder 1.0 (Mono). Überzählige Kanäle werden zu den verbleibenden addiert.
 • 7.1-Quellen werden als 5.1 ausgegeben: Die seitlichen Kanäle werden zu den hinteren addiert.
 • Stereoquelle: 2.0 bleibt Stereo; 5.1 erzeugt ein Upmix (mit «Remove voice» für vorne und hinten). Mit Upmix werden nur Channel separation, die Lautstärken und die Equalizer verwendet; der Rest (Presence, Normalisierungen, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing und Audio cleanup) ist deaktiviert.
-• Formate: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (ein WAV pro Kanal), RF64, W64 (Sound Forge), TrueHD und Passthrough (Kopie ohne Umwandlung). MP3 bei 2.0 und 1.0. «Aften Dolby Digital» (Standard) erzeugt das AC3 mit Aften, das bei Filmen mit großer Dynamik die bessere Dynamik liefert; «AC3» mit FFmpeg. Seine Einstellungen über «⚙ Aften...» wie bei den anderen Formaten (standardmäßig Blockumschaltung und feste volle Bandbreite): CBR oder VBR, Bandbreite, Genauigkeit, Filter, Dynamik (DRC und Dialogpegel) und die Bitstream-Informationen für den Verstärker (Dolby Surround EX, Dolby Headphone, A/D-Wandler Standard oder HDCD, bevorzugter Downmix und seine Pegel). Nicht jedes Gerät liest ein VBR-AC3.
+• Formate: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (ein WAV pro Kanal), RF64, W64 (Sound Forge), TrueHD und Passthrough (Kopie ohne Umwandlung). MP3 bei 2.0 und 1.0. «Aften Dolby Digital» (Standard) erzeugt das AC3 mit Aften, das bei Filmen mit großer Dynamik die bessere Dynamik liefert; «AC3» mit FFmpeg. Seine Einstellungen über «⚙ Aften...» wie bei den anderen Formaten (standardmäßig Blockumschaltung und feste volle Bandbreite): CBR oder VBR, Bandbreite, Genauigkeit, Filter, Dynamik (DRC und Dialogpegel) und die Bitstream-Informationen für den Verstärker (Dolby Surround EX, Dolby Headphone, A/D-Wandler Standard oder HDCD, bevorzugter Downmix und seine Pegel). Nicht jedes Gerät liest ein VBR-AC3. In Combine erlaubt die 7.1-Ausgabe AAC, FLAC, WAV, W64 und RF64; AC3, E-AC3, DTS und TrueHD gehen höchstens bis 5.1. Die normale Verarbeitung gibt höchstens 5.1 aus.
 • «🎬 VideoEncoder» (oben, hinter «Create ISO»): übergibt die gewählten Dateien der Liste (oder alle) an Jmg VideoEncoder. Ist es geöffnet, kommen sie in seine Liste; sonst wird es mit ihnen geöffnet. Wird es nicht gefunden, werden Sie einmal gebeten, es zu suchen. Danach schließt sich dieses Programm (beide bleiben nicht gleichzeitig geöffnet). Die Audioeinstellungen jeder Spur, die beide Programme haben (Lautstärken, Presence, EQ, Kanaltrennung, Dynamikumfang, Synchronität und Format), werden mit übergeben. Ohne Dateien wechselt er einfach zum anderen Programm.
 • «MKV with video»: kopiert Video, Untertitel, Kapitel und Cover und fügt die bearbeiteten Spuren hinzu. «Audio only»: eine Datei pro Spur. Darunter «File name»: der Name dessen, was aus jeder Datei entsteht (↺ zurück zum automatischen Namen), und wo es gespeichert wird.
 • «Core as a separate track» (in Output, neben dem Format; mit «MKV with video»): Er ist nur bei Spuren aktiv, die einen Kern haben, und gilt pro Spur. Eine DTS-HD-Spur (Master Audio oder High Resolution) enthält ein normales DTS für Geräte, die kein HD verstehen, und eine Dolby-Atmos-Spur (TrueHD) ein TrueHD ohne Atmos; angehakt kommt er zusätzlich als eigene Spur heraus, ohne Neukodierung, hinter den Originalen.
@@ -948,7 +1228,27 @@ GUT ZU WISSEN
 • Dynamic range und Dynamic processing: immer nur eines davon, und Normalisierungen schalten sie ab. Presence funktioniert mit allen Effekten, außer mit Upmix. Das Programm erledigt das selbst.
 • ⚠ Limiter-Obergrenze «No limit»: kann übersteuern, wenn die Effekte stark aufgedreht sind. Sicherer ist -1 dBFS.
 • «Reset» leert die geöffnete Registerkarte («All» = alles). Mit Presets speichern und laden Sie Ihre Einstellungen.
-• «↶ Undo» und «↷ Redo» (unten, neben «Reset»): machen die letzten 50 Aktionen einzeln rückgängig bzw. wieder her: Einstellungen jeder Spur, Dateien hinzufügen oder entfernen, Spuren löschen, Titel... In Visualization machen sie die Änderungen des Editors rückgängig bzw. wieder her (Stummgeschaltetes oder Abgesenktes). Auch mit Strg+Z und Strg+Y.
+• Einstellungen und Presets werden sicher gespeichert: zuerst in eine temporäre Datei, die dann die echte in einem Schritt ersetzt; fällt der Strom aus oder schließt sich das Programm mittendrin, bleibt die vorherige Datei vollständig erhalten, nie eine halb geschriebene.
+• Was das Programm erzeugt, wird zuerst als «name.part.ext» geschrieben und erhält seinen echten Namen erst, wenn es gut fertig wird: fällt mittendrin der Strom aus, trägt eine abgebrochene Datei nie den Namen einer fertigen. Beim Öffnen weist das Programm auf «.part»-Dateien vom letzten Mal hin (sie können gelöscht werden).
+• AC3- und E-AC3-Spuren werden so dekodiert, wie sie sind, ohne die darin enthaltene Kompression (FFmpeg wandte sie von sich aus an und senkte die Spitzen): Sie erhalten den Originalklang.
+• «↶ Undo» und «↷ Redo» (unten, neben «Reset»): machen die letzten 50 Aktionen einzeln rückgängig bzw. wieder her: Einstellungen jeder Spur, Dateien hinzufügen oder entfernen, Spuren löschen, Titel... In Visualization machen sie die Änderungen des Editors rückgängig bzw. wieder her (Stummgeschaltetes oder Abgesenktes). Auch mit Strg+Z und Strg+Y. Wenn der Editor nichts rückgängig zu machen oder wiederherzustellen hat, wirken sie auf die übrigen Änderungen, wie in den anderen Registerkarten.
+• Der Trennbalken zwischen den beiden oberen Spalten stoppt, sobald die Schaltflächen oder der Text einer Spalte nicht mehr passen: Sie werden nie abgeschnitten.
+• Bildlaufleisten erscheinen nur bei Bedarf, und die Erklärung jeder Einstellung erscheint, wenn man mit der Maus darüberfährt (die Registerkarten enthalten keine Erklärungstexte).
+• Der Registerkartenbereich nimmt genau die Höhe dessen ein, was jede Registerkarte enthält (kein leerer Platz, nichts fehlt); die Dateiliste oben bekommt den Rest.
+• Der Titel jedes Effekts wird grün, wenn er eingeschaltet ist (mit irgendeiner geänderten Einstellung: Stärke, Trennfrequenz, Obergrenze, Frequenzen...).
+• Grün zeigt auf einen Blick alles, was etwas bewirkt: den Titel jedes Effekts oder Bereichs mit einer vorgenommenen Einstellung (auch Bild, Zuschnitt, schwarze Balken, Farbe) und die Schaltflächen, die schon etwas korrigiert haben (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Fährt man mit der Maus über eine Schaltfläche, werden ihre Buchstaben grün.
+• Auch die Registerkarten werden grün: die geöffnete und die, über der die Maus steht. Am Ende öffnet sich der Zielordner mit der Datei bereits ausgewählt.
+• Wenn Sie eine Datei auswählen oder hinzufügen, zeigt «Tracks of the file» bereits ihre Audiospuren (grau); um sie zu verarbeiten, drücken Sie «➕ Add to queue».
+• DVD (VIDEO_TS-Ordner oder .iso-Abbild): beim Rippen erhält jede Audiospur ihre Sprache, gelesen aus der .IFO-Datei der Disc (die .VOB-Dateien enthalten sie nicht).
+• Visualisierung: beim Öffnen werden die Registerkarten ausgeblendet, um mehr Platz zu lassen; «⬅ Back» (oben links) führt zur vorherigen Registerkarte zurück, wie in Jmg VideoEncoder.
+• Edit/Log, für Experten: unter der Zusammenfassung stehen alle Parameter der aktiven Spur («Schlüssel = Wert») und die FFmpeg-Filter, die verwendet werden. Ändern Sie die gewünschten Werte und drücken Sie vor der Verarbeitung «Save changes» (Rechtsklick im Editor).
+• «⚙» (das Zahnrad) links von den Titeln Dynamikumfang und Dynamic processing sowie in «Combine tracks» beim Dynamikumfang (Echo entfernen) und bei «Silence voices of the original» (das Gate): öffnet die erweiterten Einstellungen zum Feinabstimmen, wie in Ocenaudio. Jede mit Regler, Feld und dem, was sie auf jeder Seite bewirkt: Schwelle, Attack, Release, Knie und Verstärkung, Attack und Release des Limiters; beim Gate Lücken verbinden, früher beginnen, Ausklang, Absenken, Anheben und erhaltene Schläge. «auto» = das Programm berechnet es. «↺ Default» stellt die Werkswerte wieder her. Sie werden mit jeder Spur gespeichert und der Titel wird grün. «Combine tracks» gibt nur FLAC oder WAV aus.
+• In den «⚙»-Fenstern: ein Doppelklick auf einen Regler (oder sein Feld) setzt ihn auf den Anfangswert zurück, und die Pfeiltasten bewegen ihn schrittweise. Beim Überfahren einer Schaltfläche werden nur ihre Buchstaben grün (sie leuchtet nicht auf). In Edit/Log ist die Zeile «ffmpeg_filtros = ...» die FFmpeg-Filterkette der Spur: Sie können sie ändern, «Save changes» übernimmt sie; sie wird beim Verarbeiten verwendet, solange Sie keine anderen Einstellungen der Spur ändern (sonst gelten wieder die des Programms und das Protokoll meldet es).
+• Wenn Sie in der Visualisierung eine Einstellung ändern, stoppt die Wiedergabe und die Ansicht bleibt, bis Sie «Generate visualization» drücken; drücken Sie ▶, um es mit der Änderung zu hören. Während der Verarbeitung funktioniert «⬅ Back» weiterhin. Tooltips verschwinden nach einigen Sekunden von selbst.
+• Volle Prozessorleistung: eine lange Spur (über 6 Minuten) wird in mehreren Stücken gleichzeitig verarbeitet (bis zur Hälfte der Kerne) und nahtlos zusammengefügt; jedes Stück beginnt 64 s früher, damit die Effekte genauso klingen wie in einem Durchgang. Nur wenn die Effekte das Timing nicht ändern (keine Abschnitte, Verzögerung oder Tempoänderung).
+• Visualisierung: Beim ersten Öffnen mit einer Spur wird sie von selbst erzeugt, danach mit «Generate visualization» (ändern Sie eine Einstellung, stoppt die Wiedergabe und ein Hinweis erscheint). Details wie in Sound Forge: Der ↔-Zoom reicht bis x4096, und mit Zoom wird das Sichtbare mit allen Samples aus der Datei gelesen (vorher und nachher).
+• Dynamic processing: es gibt keinen Modus 0 mehr. Standard: Modus 2 mit den Reglern auf 0; bei 0 passiert nichts, wird ein Regler erhöht, gilt der gewählte Modus.
+• In «Presence / EQ» steht Digital smoothing rechts vom 3-Band-EQ; in «Dynamics / Bass» steht Dynamic processing rechts von Bass Management, mit «Azid mode» neben seinem «Auto».
 • Der 3-Band-EQ und der erweiterte EQ werden nicht zusammen verwendet: Solange einer eingestellt ist, ist der andere deaktiviert. Dasselbe gilt für Master und die Lautstärke pro Kanal. Auch Digital smoothing passt nicht zu den Equalizern oder zu Audio cleanup, und Audio cleanup nicht zu den Equalizern, Dynamic range oder Dynamic processing. Die «Auto»-Tasten schalten aus, was nicht zusammenpasst, und der Hinweis sagt Ihnen, was.
 • «Open the destination folder when finished» (Registerkarte Output): Nach der Verarbeitung wird der Ordner geöffnet, in dem die Dateien gespeichert wurden.
 • Wenn etwas schiefgeht: Registerkarte Edit/Log ansehen. Der Log-Text lässt sich mit der Maus markieren und kopieren (Strg+C oder Rechtsklick → Copy / Copy the whole log).
@@ -961,6 +1261,10 @@ GUT ZU WISSEN
 • Blu-ray: Die Sprache jeder Audiospur und jedes Untertitels wird aus der Wiedergabeliste der Disc gelesen (die .m2ts-Dateien enthalten sie nicht).
 • Während das Programm arbeitet (Verarbeiten, Kombinieren, Rippen, Extrahieren, ISO erstellen...), geht der PC nicht in den Energiesparmodus; der Bildschirm kann sich trotzdem ausschalten.
 • Alle Regler, auch die in Combine, lassen sich mit den Pfeiltasten bewegen: auf den Regler klicken und ← → drücken (schrittweise).
+• «Save preset» speichert alle Einstellungen, auch die erweiterten der Spur (Aften, Codec-Optionen und manuelle Filter), und «Load preset» wendet sie alle an.
+• Die Presets sind für Jmg AudioProcesador und Jmg VideoEncoder gemeinsam (derselbe Ordner): Jedes Programm übernimmt seinen Teil; der Ton geht von einem zum anderen, und in Jmg AudioProcesador wirken Video und Untertitel nicht.
+• Beim Übergeben von Dateien an das andere Programm kommen die hinzugefügten auch dort hinzugefügt an (mit ihren Audioeinstellungen).
+• Was gerade läuft (Erstellen, Anhören, Abspielen, Vorschau), wird grün. In der Pause bleibt «Resume» (in Jmg VideoEncoder ⏸) grün.
 
 FFMPEG UND LIZENZ
 Verwendet FFmpeg (ffmpeg.org), Version N-128094-g31855b2a70-20261025 (Build von BtbN), lizenziert unter GNU GPL v3 (bin\\LICENSE.txt).
@@ -969,14 +1273,14 @@ Kontakt: jmgsoftwaremultimedia@gmail.com
 Projekt unterstützen: https://www.paypal.com/paypalme/JmgSoftware
 
 EINE RIESIGE ARBEIT
-• Jmg SuiteMultimedia (dieses Programm und Jmg VideoEncoder) zu entwickeln war eine riesige Arbeit: etwa 45 Tage, mit Tests an echten Filmen. Es wurde mit Hilfe von Claude entwickelt, der künstlichen Intelligenz von Anthropic.
+• Jmg SuiteMultimedia (dieses Programm und Jmg VideoEncoder) zu entwickeln war eine riesige Arbeit und Hingabe, mit Tests an echten Filmen. Es wurde mit Hilfe von Claude entwickelt, der künstlichen Intelligenz von Anthropic.
 """
 AYUDA["pt"]="""JMG AUDIOPROCESADOR 5.1 · AJUDA
 
 (A interface está em inglês: os botões aparecem com o nome que têm no programa.)
 
 COMO USAR
-1. Adicione ficheiros com «Select» ou «Add», ou arrastando-os para a lista de ficheiros. Ficheiros sem faixas de áudio não são adicionados.
+1. Adicione ficheiros com «Select» ou «Add», ou arrastando-os para a lista de ficheiros. Ficheiros sem faixas de áudio não são adicionados. Depois, «➕ Add to queue» (à direita, por baixo da lista de faixas) passa os ficheiros selecionados para a lista de faixas (ficam com ✔): só esses são processados.
 2. Clique numa faixa (Ctrl+clique para várias). Cada faixa guarda as suas próprias definições. «Apply to all» copia as definições da faixa ativa para as outras faixas selecionadas.
 3. Ajuste os separadores e confira o resultado em Visualization.
 4. Carregue em PROCESS: aparece o essencial e «🔍 See everything» mostra cada faixa com o formato e os efeitos (pode copiar-se). Os ficheiros originais nunca são modificados. «Cancel» interrompe o processo e apaga o que ficou a meio.
@@ -984,7 +1288,7 @@ COMO USAR
 VOLUME
 • Master: sobe ou desce tudo. Por baixo, o volume de cada canal. O Master e cada canal descem até -30 dB; uma posição mais abaixo é «Mute» (a vermelho): em silêncio. O volume por canal aplica-se em último lugar (depois de Bass Management, Double Bass e Channel separation): o que define é exatamente o que esse canal sobe ou desce.
 • «Set Master»: mede a faixa e sobe o Master até ao objetivo sem ultrapassar o limite de picos (anti-clipping automático). Nunca baixa o volume: se a faixa já está alta, fica em 0 dB.
-• «Auto» de «Volume per channel»: mede o volume de cada canal das faixas selecionadas e move os seus controlos para um equilíbrio de cinema: o central não é alterado, os frontais ficam cerca de 3 dB abaixo dele, os surrounds cerca de 7 dB e o subwoofer cerca de 6 dB (no máximo ±6 dB; subwoofer ±3 dB). Depois pode retocá-los à mão. Os frontais e os surrounds só se baixam se estiverem demasiado altos, nunca se sobem: há filmes que não pedem tanto estéreo nem surround.
+• «Auto» de «Volume per channel»: mede o volume de cada canal das faixas selecionadas e move os seus controlos para um equilíbrio de cinema, compensado entre todos os canais: o central não é alterado, as frontais ficam cerca de 1,5 dB abaixo dele e os surrounds cerca de 3 dB; o subwoofer fica sempre um pouco abaixo de todos os outros (cerca de 2 dB abaixo do mais fraco). As frontais e os surrounds descem no máximo 6 dB; o subwoofer, de -6 a +3 dB. Depois pode retocá-los à mão. As frontais e os surrounds só descem se estiverem demasiado fortes, nunca sobem: há filmes que não pedem tanto estéreo nem surround.
 • «Auto» do EQ avançado: mede graves, médios e agudos dos frontais, traseiros e central e aproxima-os entre si (no máximo ±3 dB). O resultado fica no EQ avançado por grupo, onde o pode retocar. O subwoofer não é alterado.
 • Normalização: o Loudnorm mede o volume e ajusta-o exatamente ao objetivo, sem comprimir (um limitador protege os picos). «Normalize» mede já e o ajuste aplica-se ao processar, numa só passagem; se não mediu antes, mede-se durante o processamento. O DynAudNorm iguala as partes baixas e fortes. O SpeechNorm iguala os diálogos (atua só no canal central, onde está a voz).
 • Sincronização: conversão de framerate (com ou sem mudança de tom) e atraso inicial (de -6000 a +6000 ms).
@@ -993,7 +1297,7 @@ VOLUME
 • «Digital smoothing» (0-5): retira o excesso de agudos de muitos filmes e dobragens dos anos 80 e 90 (sibilantes e brilho metálico) com um filtro que corta os agudos, não um equalizador, em todos os canais menos o subwoofer. 0 = sem efeito. «Auto» mede os agudos do central e escolhe a intensidade.
 
 PRESENCE / EQ
-• Presence: realça a voz (canal central), a música/ambiente, os efeitos ou o subwoofer. Teto do limitador opcional. «Channel separation» (à direita, -10 a +10): mais ou menos separação entre esquerda e direita e entre a frente e trás, sem subir o volume. O seu «Auto» mede a separação do filme e põe a que lhe convém conforme seja mais ou menos movimentado (mais nos de ação, menos nos calmos); o central nunca se toca. Recomenda-se que o penúltimo ajuste seja a Channel separation e o último, o Volume per channel.
+• Presence: realça a voz (canal central), a música/ambiente, os efeitos ou o subwoofer. Teto do limitador opcional. «Channel separation» (à direita, -15 a +15): mais ou menos separação entre esquerda e direita e entre a frente e trás, sem subir o volume. O seu «Auto» mede a separação do filme e põe a que lhe convém conforme seja mais ou menos movimentado (mais nos de ação, menos nos calmos); o central nunca se toca. Recomenda-se que o penúltimo ajuste seja a Channel separation e o último, o Volume per channel. Ajustes finos, de 1 em 1 e mais suaves (o 15 dá o que antes dava o 10): Presence, Channel separation e equalizadores de -15 a +15; Dynamic range e Dynamic processing de 0 a 15; Double Bass e Bass Management de 0 a 6 (de 1 em 1).
 • Equalizador de 3 bandas e equalizador avançado por grupo (frente, trás, centro) com frequência livre.
 • Atraso por canal: de 0 a 100 ms em passos de 5 ms (5 ms ≈ 1,7 m).
 • Audio cleanup: reduzir o ruído de fundo (1-2 = subtil), remover cliques e reparar saturação (estes dois são lentos). O seu «Auto» só coloca algo se encontrar um ruído de fundo real; num ficheiro limpo deixa-o em 0 e avisa que não precisa de correção.
@@ -1005,12 +1309,13 @@ DYNAMICS / BASS
 • Bass Management: envia os graves das colunas para o subwoofer (1 = suave, 5 = completo). Double Bass: duplica os graves nos dois sentidos, do subwoofer para as colunas e das colunas para o subwoofer. Os dois sobem claramente o subwoofer, com proteção contra a saturação. O seu «Auto» põe o Double Bass (1-3) se faltarem graves profundos às colunas ou se o subwoofer estiver fraco; se estiverem equilibrados, 0. Corte por defeito: 90 Hz.
 • Dynamic range: os sons fracos descem e o contraste aumenta.
 • Dynamic processing: 1 Lift (sobe as partes baixas), 2 Impact (as partes fortes destacam-se), 3 as duas. Intensidade por grupo. Ponha o subwoofer a 0 se usar Bass Management ou Double Bass.
+• Azid mode, junto ao «Auto» de Dynamic processing: como no BeLight (Azid da DSPguru), usa a compressão que o próprio AC3/E-AC3 traz. Tem uma só opção, «Inverse»: a compressão que o próprio AC3/E-AC3 traz, ao contrário: os sons fortes sobem e os fracos descem (mais dinâmica). «Original» não mexe em nada. Recomendado para os filmes em DVD, que trazem esses dados; em DTS, TrueHD, FLAC... não muda nada (o registo indica-o). Não se mistura com Presence, separação de canais, Dynamic range, normalizações nem limpeza: ao ligá-lo desligam-se, e se tocar num, volta a «Original». Os volumes, os equalizadores, a suavização, a sincronização, Dynamic processing (só o modo 1), Bass Management e Double Bass podem ser usados com ele. A saída pode ser qualquer formato exceto «Passthrough» (copia a faixa sem a processar), que não aparece na lista enquanto usar Azid; ao escolher um modo, uma janela lembra-o.
 • «Auto» em Bass Management, Double Bass, Dynamic range e Dynamic processing: o mesmo, segundo o que mede (nível do subwoofer e gama dinâmica). Se o filme já estiver bem, deixa 0 e avisa-o.
 
 VISUALIZATION
-• Gera-se sozinha ao abrir o separador e atualiza-se se mudar alguma definição. Compara ANTES e DEPOIS canal a canal.
+• Na primeira vez que entra com uma faixa gera-se sozinha; depois, ao carregar em «Generate visualization». Compara ANTES e DEPOIS canal a canal.
 • Ouvir antes ou depois, Pause/Resume e Stop. Clique num canal = ouvir só esse canal (outro clique = todos).
-• Roda = zoom · arrastar = deslocar · duplo clique = x1 · barra de espaços = começar e parar. Com zoom, a onda avança sozinha durante a audição, com o cursor ao centro. Segmento: o ficheiro inteiro ou os primeiros 5, 10 ou 30 minutos. Se mudar de segmento durante a geração, o novo começa sem esperar; se passar para outro separador, é interrompida e volta a gerar-se sozinha ao regressar.
+• Roda = zoom · arrastar = deslocar · duplo clique = x1 · barra de espaços = começar e parar. Com zoom, a onda avança sozinha durante a audição, com o cursor ao centro. Segmento: o ficheiro inteiro ou os primeiros 5, 10 ou 30 minutos. Se mudar de segmento durante a geração, o novo começa sem esperar; se passar para outro separador, termina na mesma. Dois zooms, como no Jmg VideoEncoder: ↔ (o tempo, x1-x4096) e ↕ (altura das ondas, x1-x16); marque o que quiser e a roda do rato aumenta-o ou diminui-o (duplo clique = x1).
 • Editor (caixa «✎ Edit the file»): para rematar à mão um ficheiro WAV, W64 ou FLAC de uma só faixa, como a faixa combinada. Arraste sobre um canal para marcar esse pedaço (na vertical, vários canais; depois, arrastando os seus limites, aumenta-o ou reduz-o), escreva os dB (por exemplo -40 para o deixar quase mudo) e prima «Apply». Também pode escrever os tempos em «From» e «to». Roda = zoom. Para mover a onda com zoom: arraste com a mão na régua de cima ou nos nomes dos canais, use a barra de baixo, as setas ← → (com Shift, mais depressa) ou arraste com o botão direito. Clique direito = retirar a seleção. Com um pedaço marcado, «■ Stop» volta ao início do pedaço marcado.
 • «▶ Hear the selection» reproduz só o pedaço e os canais marcados, com as alterações, em qualquer minuto. Com alterações por guardar, os botões passam a «Play WITHOUT CHANGES» e «Play WITH CHANGES»: este último, e o clique num canal, soam com as suas alterações a partir de qualquer ponto. «↶ Undo» e «↷ Redo» avançam passo a passo.
 • Ao minimizar, o programa fica como um ícone junto ao relógio (área de notificação), que mostra como vai o processo: clique esquerdo = a janela volta; clique direito = menu (cancelar o processo, o que fazer no fim —nada, sair ou desligar o PC—, abrir a pasta no fim, sair). Em Output pode desligar-se, para minimizar para a barra de tarefas como sempre. Deixando o rato sobre um botão, caixa ou controlo, aparece uma descrição, que desaparece sozinha após alguns segundos.
@@ -1023,7 +1328,7 @@ OUTPUT
 • Canais: por defeito, os mesmos da entrada. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (estéreo Dolby ou Simple) ou 1.0 (mono). Os canais que sobram são somados aos que ficam.
 • Origens 7.1 saem em 5.1: os canais laterais são somados aos traseiros.
 • Origem estéreo: 2.0 fica em estéreo; 5.1 faz Upmix (com «Remove voice» da frente e de trás). Com Upmix só se usam Channel separation, os volumes e os equalizadores; o resto (Presence, normalizações, Dynamic range, Dynamic processing, Bass Management, Double Bass, Smoothing e Audio cleanup) fica desativado.
-• Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (um WAV por canal), RF64, W64 (Sound Forge), TrueHD e Passthrough (cópia sem conversão). MP3 em 2.0 e 1.0. «Aften Dolby Digital» (por defeito) faz o AC3 com o Aften, que dá melhor gama dinâmica nos filmes que têm muita; «AC3», com o FFmpeg. Os seus ajustes, com «⚙ Aften...» como os dos outros formatos (por defeito, comutação de blocos e largura de banda fixa completa): CBR ou VBR, largura de banda, precisão, filtros, gama dinâmica (DRC e nível de diálogo) e a informação do fluxo para o amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Standard ou HDCD, downmix preferido e os seus níveis). Nem todos os aparelhos leem um AC3 VBR.
+• Formatos: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (um WAV por canal), RF64, W64 (Sound Forge), TrueHD e Passthrough (cópia sem conversão). MP3 em 2.0 e 1.0. «Aften Dolby Digital» (por defeito) faz o AC3 com o Aften, que dá melhor gama dinâmica nos filmes que têm muita; «AC3», com o FFmpeg. Os seus ajustes, com «⚙ Aften...» como os dos outros formatos (por defeito, comutação de blocos e largura de banda fixa completa): CBR ou VBR, largura de banda, precisão, filtros, gama dinâmica (DRC e nível de diálogo) e a informação do fluxo para o amplificador (Dolby Surround EX, Dolby Headphone, conversor A/D Standard ou HDCD, downmix preferido e os seus níveis). Nem todos os aparelhos leem um AC3 VBR. Em Combine, a saída 7.1 admite AAC, FLAC, WAV, W64 e RF64; AC3, E-AC3, DTS e TrueHD chegam no máximo a 5.1. O processamento normal sai no máximo em 5.1.
 • «🎬 VideoEncoder» (em cima, depois de «Create ISO»): passa os ficheiros selecionados da lista (ou todos) para o Jmg VideoEncoder. Se estiver aberto, vão para a lista dele; se não, abre-se com eles. Se não o encontrar, pede-lhe que o procure uma vez. Depois, este programa fecha-se (os dois não ficam abertos ao mesmo tempo). As definições de áudio de cada faixa que os dois programas têm (volumes, Presence, equalizador, separação, gama dinâmica, sincronia e formato) também passam. Sem ficheiros, apenas muda para o outro programa.
 • «MKV with video»: copia o vídeo, as legendas, os capítulos e as capas, e acrescenta as faixas processadas. «Audio only»: um ficheiro por faixa. Por baixo, «File name»: o nome do que sai de cada ficheiro (↺ volta ao automático) e onde será guardado.
 • «Core as a separate track» (em Output, junto ao formato; com «MKV with video»): só se ativa nas faixas que o têm, e é de cada faixa. Uma faixa DTS-HD (Master Audio ou High Resolution) leva dentro um DTS normal para os aparelhos que não entendem o HD, e uma Dolby Atmos (TrueHD) leva um TrueHD sem Atmos; marcado, sai também como faixa à parte, sem recomprimir e depois das originais.
@@ -1053,7 +1358,27 @@ A TER EM CONTA
 • Dynamic range e Dynamic processing: só um de cada vez, e as normalizações desativam-nos. Presence funciona com todos os efeitos, exceto com Upmix. O programa faz isso sozinho.
 • ⚠ Teto do limitador «No limit»: pode saturar se puxar muito pelos efeitos. Para ir pelo seguro, escolha -1 dBFS.
 • «Reset» limpa o separador aberto («All» = tudo). Os presets guardam e carregam as suas definições.
-• «↶ Undo» e «↷ Redo» (em baixo, junto a «Reset»): desfazem e refazem, uma a uma, as últimas 50 ações: definições de qualquer faixa, adicionar ou remover ficheiros, eliminar faixas, títulos... Em Visualization, anulam e refazem as alterações do editor (o que foi silenciado ou baixado). Também com Ctrl+Z e Ctrl+Y.
+• As definições e os presets são guardados de forma segura: primeiro num ficheiro temporário, que depois substitui o verdadeiro de uma só vez; se faltar a luz ou o programa fechar a meio, fica o anterior inteiro, nunca um a meio.
+• O que o programa cria é escrito primeiro como «nome.part.ext» e só recebe o nome verdadeiro quando termina bem: se faltar a luz a meio, um ficheiro cortado nunca fica com o nome de um terminado. Ao abrir, o programa avisa dos «.part» que ficaram da última vez (podem ser apagados).
+• As faixas AC3 e E-AC3 são descodificadas tal como estão, sem a compressão que trazem dentro (o FFmpeg aplicava-a por conta própria e baixava os picos): chega o som original.
+• «↶ Undo» e «↷ Redo» (em baixo, junto a «Reset»): desfazem e refazem, uma a uma, as últimas 50 ações: definições de qualquer faixa, adicionar ou remover ficheiros, eliminar faixas, títulos... Em Visualization, anulam e refazem as alterações do editor (o que foi silenciado ou baixado). Também com Ctrl+Z e Ctrl+Y. Quando o editor não tem nada para desfazer ou refazer, desfazem e refazem as outras alterações, como nos outros separadores.
+• A barra entre as duas colunas de cima para quando os botões ou o texto de uma coluna já não cabem: nunca ficam cortados.
+• As barras de deslocamento só aparecem quando são precisas, e a explicação de cada definição aparece ao passar o rato por cima (os separadores não têm textos de explicação).
+• O painel dos separadores fica com a altura certa do que cada separador tem (sem espaço vazio nem nada em falta); a lista de ficheiros em cima fica com o resto.
+• O título de cada efeito fica verde quando está ligado (com qualquer definição alterada: intensidade, corte, teto, frequências...).
+• O verde mostra de relance tudo o que está a fazer algo: o título de cada efeito ou secção com alguma definição feita (também imagem, corte, barras negras, cor) e os botões que já corrigiram algo (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). Ao passar o rato por cima de um botão, as letras ficam verdes.
+• Os separadores também ficam verdes: o que está aberto e aquele sobre o qual passa o rato. No fim, a pasta de destino abre com o ficheiro já selecionado.
+• Ao escolher ou adicionar um ficheiro, «Tracks of the file» já mostra as suas faixas de áudio (a cinzento); para as processar, prima «➕ Add to queue».
+• DVD (pasta VIDEO_TS ou imagem .iso): ao ripar, cada faixa de áudio leva o seu idioma, lido do ficheiro .IFO do disco (os .VOB não o trazem).
+• Visualização: ao entrar, os separadores ocultam-se para deixar mais espaço; «⬅ Back» (em cima à esquerda) leva ao separador anterior, como no Jmg VideoEncoder.
+• Edit/Log, para especialistas: por baixo do resumo aparecem todos os parâmetros da faixa ativa («chave = valor») e os filtros do FFmpeg que vão ser usados. Altere os valores que quiser e prima «Save changes» (clique direito no editor) antes de processar.
+• «⚙» (a roda), à esquerda dos títulos da gama dinâmica e do Dynamic processing, e em «Combine tracks» na gama dinâmica (tirar o eco) e em «Silence voices of the original» (a porta): abre as definições avançadas para afinar mais, como no Ocenaudio. Cada uma com o seu controlo, a sua caixa e o que faz de cada lado: limiar, ataque, libertação, joelho e ganho, o ataque e a libertação do limitador; na porta, unir intervalos, começar antes, cauda, descida, subida e pancadas respeitadas. «auto» = o programa calcula. «↺ Default» repõe os valores de fábrica. Guardam-se com cada faixa e o título fica verde. «Combine tracks» só sai em FLAC ou WAV.
+• Nas janelas «⚙»: duplo clique num controlo (ou na sua caixa) devolve-o ao valor inicial, e as setas do teclado movem-no passo a passo. Ao passar o rato por um botão, só as letras ficam verdes (o botão não se ilumina). Em Edit/Log, a linha «ffmpeg_filtros = ...» são os filtros do FFmpeg da faixa: pode alterá-los e «Save changes» aplica-os; usam-se ao processar enquanto não mudar outras definições da faixa (se mudar, voltam os do programa e o registo diz isso).
+• Ao mudar um ajuste dentro da Visualização, o som para e a vista fica como estava até carregar em «Generate visualization»; carregue em ▶ para o ouvir com a mudança. Durante o processamento, «⬅ Back» continua a funcionar. As descrições flutuantes desaparecem sozinhas após alguns segundos.
+• Toda a potência do processador: uma faixa longa (mais de 6 minutos) é processada em vários pedaços ao mesmo tempo (até metade dos núcleos) e unida sem costura; cada pedaço começa 64 s antes para que os efeitos soem igual a uma só vez. Só se faz se os efeitos não mudarem o tempo (sem troços, atraso nem mudança de velocidade).
+• Visualização: na primeira vez que entra com uma faixa gera-se sozinha; depois, ao carregar em «Generate visualization» (ao mudar um ajuste, o som para e aparece um aviso). Detalhe como no Sound Forge: o zoom ↔ chega a x4096 e, com zoom, o que se vê é lido do ficheiro com todas as amostras (antes e depois).
+• Dynamic processing: já não tem o modo 0. Por defeito, o modo 2 com os controlos a 0: a 0 não faz nada; ao subir um controlo aplica-se o modo escolhido.
+• Em «Presence / EQ», Digital smoothing fica à direita do EQ de 3 bandas; em «Dynamics / Bass», Dynamic processing fica à direita de Bass Management, com «Azid mode» junto ao seu «Auto».
 • O EQ de 3 bandas e o EQ avançado não se usam ao mesmo tempo: enquanto um tiver algo definido, o outro fica desativado. O mesmo com o Master e o volume por canal. O Digital smoothing também não vai com os equalizadores nem com o Audio cleanup, nem o Audio cleanup com os equalizadores, o Dynamic range ou o Dynamic processing. Os «Auto» desligam o que não vai junto e o aviso diz-lhe o quê.
 • «Open the destination folder when finished» (separador Output): no fim do processamento, abre a pasta onde ficaram os ficheiros.
 • Se algo falhar, veja o separador Edit/Log. O texto do log pode ser selecionado com o rato e copiado (Ctrl+C ou clique direito → Copy / Copy the whole log).
@@ -1066,6 +1391,10 @@ A TER EM CONTA
 • Blu-ray: o idioma de cada faixa de áudio e de cada legenda é lido da lista de reprodução do disco (os ficheiros .m2ts não o trazem).
 • Enquanto trabalha (processar, combinar, ripar, extrair, criar ISO...), o PC não entra em suspensão; o ecrã pode desligar-se na mesma.
 • Todos os controlos deslizantes, também os de Combine, se movem com as setas do teclado: clique no controlo e prima ← → (passo a passo).
+• «Save preset» guarda todos os ajustes, também os avançados da faixa (Aften, opções do codec e filtros manuais), e «Load preset» aplica-os todos.
+• Os presets são comuns ao Jmg AudioProcesador e ao Jmg VideoEncoder (a mesma pasta): cada programa aplica a sua parte; o áudio passa de um para o outro e, no Jmg AudioProcesador, o vídeo e as legendas não têm efeito.
+• Ao passar ficheiros de um programa para o outro, os que estavam adicionados chegam adicionados (com os seus ajustes de áudio).
+• O que está em curso (gerar, ouvir, reproduzir, pré-visualizar) fica a verde. Em pausa, «Resume» (no Jmg VideoEncoder, ⏸) fica a verde.
 
 FFMPEG E LICENÇA
 Usa o FFmpeg (ffmpeg.org), versão N-128094-g31855b2a70-20261025 (compilação de BtbN), com licença GNU GPL v3 (bin\\LICENSE.txt).
@@ -1074,14 +1403,14 @@ Contacto: jmgsoftwaremultimedia@gmail.com
 Apoie o projeto: https://www.paypal.com/paypalme/JmgSoftware
 
 UM TRABALHO ENORME
-• Realizar o Jmg SuiteMultimedia (este programa e o Jmg VideoEncoder) custou um trabalho enorme: cerca de 45 dias, com testes em filmes reais. Foi desenvolvido com a ajuda do Claude, a inteligência artificial da Anthropic.
+• Realizar o Jmg SuiteMultimedia (este programa e o Jmg VideoEncoder) foi um enorme trabalho e dedicação, com testes em filmes reais. Foi desenvolvido com a ajuda do Claude, a inteligência artificial da Anthropic.
 """
 AYUDA["zh"]="""JMG AUDIOPROCESADOR 5.1 · 帮助
 
 （程序界面为英文，按钮名称按界面中的英文显示。）
 
 使用方法
-1. 用「Select」或「Add」添加文件，也可以直接拖入文件列表。没有音轨的文件不会被添加。
+1. 用「Select」或「Add」添加文件，也可以直接拖入文件列表。没有音轨的文件不会被添加。 然后，「➕ Add to queue」（在右侧，音轨列表下方）将选中的文件放入音轨列表（带 ✔）：只处理这些文件。
 2. 点击一条音轨（按住 Ctrl 点击可多选）。每条音轨保存各自的设置。「Apply to all」会把当前音轨的设置复制到其他已选音轨。
 3. 调整各个选项卡，并在 Visualization 中检查效果。
 4. 点击 PROCESS：显示要点，「🔍 See everything」显示每条音轨的格式和效果（可复制）。原始文件永远不会被修改。「Cancel」会停止处理，并删除未写完的文件。
@@ -1089,7 +1418,7 @@ AYUDA["zh"]="""JMG AUDIOPROCESADOR 5.1 · 帮助
 VOLUME（音量）
 • Master：整体提高或降低音量。下方是每个声道的音量。 Master 和每个声道最低到 -30 dB；再往下一格是「Mute」（红色）：静音。 每声道音量最后应用（在 Bass Management、Double Bass 和 Channel separation 之后）：设置多少，该声道就正好升高或降低多少。
 • 「Set Master」：测量音轨，把 Master 提高到目标值，同时不超过峰值上限（自动防削波）。它从不降低音量：如果音轨已经很响，就保持 0 dB。
-• 「Volume per channel」的「Auto」：测量所选音轨每个声道的音量，并移动对应滑块，得到影院式的平衡：中置不变，前置比它低约 3 dB，环绕低约 7 dB，低音炮低约 6 dB（最多 ±6 dB；低音炮 ±3 dB）。之后可以手动微调。前置和环绕声道只会在过响时降低，从不提高：有些影片并不需要那么多立体声或环绕声。
+• 「Volume per channel」的「Auto」：测量所选音轨每个声道的音量，并移动对应滑块，得到各声道之间更均衡的影院式平衡：中置不变，前置比它低约 1.5 dB，环绕低约 3 dB；低音炮始终比其他所有声道稍低一点（比最小的那个低约 2 dB）。前置和环绕最多降低 6 dB；低音炮为 -6 到 +3 dB。之后可以手动微调。前置和环绕声道只会在过响时降低，从不提高：有些影片并不需要那么多立体声或环绕声。
 • 高级均衡器的「Auto」：测量前置、环绕和中置的低音、中音和高音，并使它们彼此接近（最多 ±3 dB）。结果保存在“按组高级 EQ”中，可以继续微调。低音炮不变。
 • 响度标准化：Loudnorm 先测量响度，再精确调整到目标值，不做压缩（由限幅器保护峰值）。「Normalize」会立即测量，调整在处理时一次完成；如果事先没有测量，会在处理时测量。DynAudNorm 让弱音和强音更均衡。SpeechNorm 让对白更均衡（只作用于人声所在的中置声道）。
 • 同步：帧率转换（变调或不变调）和起始延迟（-6000 到 +6000 毫秒）。
@@ -1098,7 +1427,7 @@ VOLUME（音量）
 • 「Digital smoothing」（0-5）：去除许多 80 和 90 年代影片及配音中过多的高音（刺耳的齿音和金属感），使用切除高音的滤波器（不是均衡器），作用于除低音声道以外的所有声道。0 = 无效果。「Auto」测量中置的高音并选择强度。
 
 PRESENCE / EQ（临场感 / 均衡器）
-• Presence：突出人声（中置声道）、音乐/环境声、音效或低音炮。可选限幅器上限。「Channel separation」（右侧，-10 到 +10）：增强或减弱左右之间以及前后之间的分离感，不提高音量。它的「Auto」会测量影片的分离度，并按影片的激烈程度设置合适的值（动作片多一些，平静的影片少一些）；中置声道从不改动。建议倒数第二步调整 Channel separation，最后一步调整 Volume per channel。
+• Presence：突出人声（中置声道）、音乐/环境声、音效或低音炮。可选限幅器上限。「Channel separation」（右侧，-15 到 +15）：增强或减弱左右之间以及前后之间的分离感，不提高音量。它的「Auto」会测量影片的分离度，并按影片的激烈程度设置合适的值（动作片多一些，平静的影片少一些）；中置声道从不改动。建议倒数第二步调整 Channel separation，最后一步调整 Volume per channel。 精细调节，每步 1，更柔和（15 相当于以前的 10）：Presence、Channel separation 和均衡器为 -15 到 +15；Dynamic range 和 Dynamic processing 为 0 到 15；Double Bass 和 Bass Management 为 0 到 6（每步 1）。
 • 3 段均衡器，以及按声道组（前置、后置、中置）可自由设定频率的高级均衡器。
 • 各声道延迟：0 到 100 毫秒，每步 5 毫秒（5 毫秒 ≈ 1.7 米）。
 • Audio cleanup（音频清理）：降低背景噪声（1-2 = 轻微）、去除咔嗒声、修复削波（后两项速度较慢）。它的「Auto」只有在找到真正的背景噪声时才会设置；文件干净时保持为 0，并提示无需修正。
@@ -1110,12 +1439,13 @@ DYNAMICS / BASS（动态 / 低音）
 • Bass Management：把各扬声器的低频送到低音炮（1 = 轻微，5 = 全部）。Double Bass：双向加倍低音，既把低音炮的低频复制到各扬声器，也把各扬声器的低频复制到低音炮。两者都会明显提高低音炮音量，并有防削波保护。其「Auto」在扬声器缺少深沉低频或低音炮偏弱时设置 Double Bass（1-3）；两者平衡时为 0。默认分频点：90 Hz。
 • Dynamic range：较弱的声音被压低，对比度增加。
 • Dynamic processing：1 Lift（提升弱音部分），2 Impact（突出强音部分），3 两者兼用。可按声道组调节强度。使用 Bass Management 或 Double Bass 时，请把低音炮设为 0。
+• Azid mode（在 Dynamic processing 的「Auto」旁边）：与 BeLight（DSPguru 的 Azid）相同，使用 AC3/E-AC3 自身携带的压缩信息。只有一个选项「Inverse」：把 AC3/E-AC3 自带的压缩反过来用：响的声音更响，弱的声音更弱（动态更大）。「Original」不做任何改动。推荐用于 DVD 电影（带有这些数据）；DTS、TrueHD、FLAC 等不会有任何变化（日志会说明）。它不能与 Presence、声道分离、Dynamic range、响度标准化或清理同时使用：开启它时这些效果会关闭；若调整其中任何一个，它会回到「Original」。音量、均衡器、平滑、同步、Dynamic processing（仅模式 1）、Bass Management 和 Double Bass 可以与它一起使用。输出可以是任何格式，但「Passthrough」除外（它不处理而直接复制音轨）；使用 Azid 时该选项不会出现在列表中。选择模式时，会有窗口提示。
 • Bass Management、Double Bass、Dynamic range 和 Dynamic processing 中的「Auto」：同样按测量结果（低音炮电平和动态范围）调整。如果影片已经合适，就保持 0 并告诉您。
 
 VISUALIZATION（可视化）
-• 打开该选项卡时自动生成；更改任何设置后会自动更新。逐声道对比处理前（BEFORE）和处理后（AFTER）。
+• 第一次带着某条音轨进入时会自动生成；之后按「Generate visualization」才会生成。逐声道对比处理前（BEFORE）和处理后（AFTER）。
 • 试听处理前或处理后、Pause/Resume（暂停/继续）和 Stop（停止）。点击某个声道 = 只听该声道（再点一次 = 全部）。
-• 滚轮 = 缩放 · 拖动 = 平移 · 双击 = x1 · 空格键 = 开始和停止。放大时，波形会在播放时自动移动，光标保持在中央。片段：整个文件或前 5、10、30 分钟。生成时更换片段，新片段会立即开始；切换到其他选项卡时，生成会中断，返回时自动重新生成。
+• 滚轮 = 缩放 · 拖动 = 平移 · 双击 = x1 · 空格键 = 开始和停止。放大时，波形会在播放时自动移动，光标保持在中央。片段：整个文件或前 5、10、30 分钟。生成时更换片段，新片段会立即开始；切换到其他选项卡时，生成会继续完成。两种缩放，与 Jmg VideoEncoder 相同：↔（时间，x1-x4096）和 ↕（波形高度，x1-x16）；选中想要的一种，鼠标滚轮即可放大或缩小（双击 = x1）。
 • 编辑器（「✎ Edit the file」复选框）：用于手动精修只有一条音轨的 WAV、W64 或 FLAC 文件，例如合并后的音轨。在某个声道上拖动以标记该片段（纵向拖动可选多个声道；之后拖动其边缘可放大或缩小），输入 dB（例如 -40 使其几乎无声），然后按「Apply」。也可以在「From」和「to」中输入时间。滚轮 = 缩放。放大后移动波形：用手形光标拖动顶部标尺或声道名称，使用底部滚动条、方向键 ← →（按住 Shift 更快）或用右键拖动。右键单击 = 取消选择。标记了片段时，「■ Stop」会回到标记片段的开头。
 • 「▶ Hear the selection」只播放已标记的片段和声道（含修改），可在任意时间点使用。有未保存的修改时，按钮变为「Play WITHOUT CHANGES」和「Play WITH CHANGES」：后者以及单击声道都会从任意位置播放修改后的声音。「↶ Undo」和「↷ Redo」逐步撤销和重做。
 • 最小化后，程序会以图标形式留在时钟旁边（系统托盘），并显示处理进度：左键单击 = 恢复窗口；右键单击 = 菜单（取消处理、完成后的操作——无、退出或关机——、完成后打开文件夹、退出）。可在 Output 中关闭此功能，像平常一样最小化到任务栏。将鼠标停在按钮、复选框或滑块上会显示说明，几秒后自动消失。
@@ -1128,7 +1458,7 @@ OUTPUT（输出）
 • 声道：默认与输入相同。可选 5.1、4.1、4.0、3.1、2.1、2.0（Dolby 或 Simple 立体声）或 1.0（单声道）。多出的声道会混入保留的声道。
 • 7.1 来源会输出为 5.1：侧环绕声道会混入后环绕声道。
 • 立体声来源：2.0 保持立体声；5.1 进行升混（Upmix，可用「Remove voice」去除前后置中的人声）。使用 Upmix 时只能用 Channel separation、音量和均衡器；其余功能（Presence、响度标准化、Dynamic range、Dynamic processing、Bass Management、Double Bass、Smoothing 和 Audio cleanup）会被禁用。
-• 格式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（每个声道一个 WAV）、RF64、W64 (Sound Forge)、TrueHD 和 Passthrough（不转换直接复制）。2.0 和 1.0 还可选 MP3。「Aften Dolby Digital」（默认）用 Aften 编码 AC3，对动态范围大的影片效果更好；「AC3」用 FFmpeg。其设置在「⚙ Aften...」中，与其他格式相同（默认启用块切换和固定全带宽）：CBR 或 VBR、带宽、精度、滤波器、动态范围（DRC 和对白电平）以及供功放使用的码流信息（Dolby Surround EX、Dolby Headphone、A/D 转换器 Standard 或 HDCD、首选下混及其电平）。并非所有设备都能读取 VBR 的 AC3。
+• 格式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（每个声道一个 WAV）、RF64、W64 (Sound Forge)、TrueHD 和 Passthrough（不转换直接复制）。2.0 和 1.0 还可选 MP3。「Aften Dolby Digital」（默认）用 Aften 编码 AC3，对动态范围大的影片效果更好；「AC3」用 FFmpeg。其设置在「⚙ Aften...」中，与其他格式相同（默认启用块切换和固定全带宽）：CBR 或 VBR、带宽、精度、滤波器、动态范围（DRC 和对白电平）以及供功放使用的码流信息（Dolby Surround EX、Dolby Headphone、A/D 转换器 Standard 或 HDCD、首选下混及其电平）。并非所有设备都能读取 VBR 的 AC3。 在 Combine 中，7.1 输出支持 AAC、FLAC、WAV、W64 和 RF64；AC3、E-AC3、DTS 和 TrueHD 最多到 5.1。普通处理最多输出 5.1。
 • 「🎬 VideoEncoder」（顶部「Create ISO」之后）：把列表中选中的文件（或全部）交给 Jmg VideoEncoder。如果它已打开，文件会加入它的列表；否则会用这些文件打开它。如果找不到，会请您手动查找一次。之后本程序会关闭（两个程序不会同时开着）。两个程序共有的每条音轨的音频设置（音量、Presence、均衡器、声道分离、动态范围、同步和格式）也会一起传过去。 没有文件时，只是切换到另一个程序。
 • 「MKV with video」：复制视频、字幕、章节和封面，并加入处理后的音轨。「Audio only」：每条音轨输出一个文件。下方的「File name」：每个文件输出的名称（↺ 恢复自动名称），以及保存位置。
 • 「Core as a separate track」（在 Output 中，格式旁边；配合「MKV with video」）：只有带核心的音轨才能勾选，且按音轨分别设置。DTS-HD 音轨（Master Audio 或 High Resolution）内含一条普通 DTS，供不支持 HD 的设备使用；Dolby Atmos（TrueHD）音轨内含一条不带 Atmos 的 TrueHD。勾选后，它也会作为单独的音轨输出，不重新编码，排在原始音轨之后。
@@ -1158,7 +1488,27 @@ COMBINE（合并音轨 · 配音与同步）
 • Dynamic range 和 Dynamic processing 一次只能启用一个，启用响度标准化会关闭它们。Presence 可与所有效果同时使用（Upmix 除外）。程序会自动处理。
 • ⚠ 限幅器上限选「No limit」时，如果效果开得很大，可能会削波。为保险起见，请选 -1 dBFS。
 • 「Reset」清空当前选项卡（勾选「All」= 全部）。预设（preset）可保存和载入你的设置。
-• 「↶ Undo」和「↷ Redo」（底部，「Reset」旁边）：逐一撤销和重做最近 50 个操作：任何音轨的设置更改、添加或移除文件、删除音轨、标题等。在 Visualization 中，它们撤销和重做编辑器中的更改（静音或降低的部分）。也可以用 Ctrl+Z 和 Ctrl+Y。
+• 设置和预设会安全保存：先写入临时文件，再一次性替换正式文件；即使中途断电或程序关闭，也会保留完整的旧文件，绝不会留下写了一半的文件。
+• 程序生成的文件先以「名称.part.扩展名」写入，只有顺利完成后才改为正式名称：即使中途断电，也绝不会留下带着完成文件名的残缺文件。打开程序时，会提示上次留下的「.part」文件（可以删除）。
+• AC3 和 E-AC3 音轨按原样解码，不应用其中携带的压缩（FFmpeg 以前会自行应用并压低峰值）：得到的是原始声音。
+• 「↶ Undo」和「↷ Redo」（底部，「Reset」旁边）：逐一撤销和重做最近 50 个操作：任何音轨的设置更改、添加或移除文件、删除音轨、标题等。在 Visualization 中，它们撤销和重做编辑器中的更改（静音或降低的部分）。也可以用 Ctrl+Z 和 Ctrl+Y。编辑器中没有可撤销或重做的内容时，它们会撤销和重做其他更改，与其他选项卡相同。
+• 上方两列之间的分隔条在某一列的按钮或文字放不下时会停住：它们永远不会被截断。
+• 滚动条只在需要时出现；每个设置的说明在鼠标悬停时显示（选项卡中不再有说明文字）。
+• 选项卡面板的高度正好容纳当前选项卡的内容（不留空白，也不缺内容）；上方的文件列表占用其余空间。
+• 每个效果在开启时（任何设置有改动：强度、分频、上限、频率等），其标题会变成绿色。
+• 绿色让你一眼看出哪些在起作用：已做任何设置的效果或栏目标题（包括图像、裁剪、黑边、颜色），以及已经做过校正的按钮（Adjust Master、Normalize、Calculate delay、Fix by parts、More options 等）。鼠标悬停在按钮上时，按钮文字会变成绿色。
+• 选项卡也会变绿：当前打开的选项卡和鼠标悬停的选项卡。处理完成后，目标文件夹会打开并已选中该文件。
+• 选择或添加文件后，「Tracks of the file」中会先显示其音轨信息（灰色）；要处理它们，请点击「➕ Add to queue」。
+• DVD（VIDEO_TS 文件夹或 .iso 镜像）：抓取时，每条音轨都会带上其语言，该信息读取自光盘的 .IFO 文件（.VOB 文件中没有）。
+• 可视化：进入时选项卡会隐藏以留出更多空间；「⬅ Back」（左上角）返回之前的选项卡，与 Jmg VideoEncoder 相同。
+• Edit/Log（专家用）：摘要下方会列出当前音轨的所有参数（「键 = 值」）以及将要使用的 FFmpeg 滤镜。修改需要的值，然后在处理前点击「Save changes」（在编辑器中右键）。
+• 「⚙」（齿轮）位于动态范围和 Dynamic processing 标题的左侧，「Combine tracks」中的动态范围（去回声）和「Silence voices of the original」（门限）也有：打开其高级设置以便更精细地调整，类似 Ocenaudio。每项都有滑块、数值框以及两端的效果说明：阈值、启动、释放、拐点和增益，限幅器的启动和释放；门限有合并间隙、提前开始、尾音、下降、上升和保留的打击声。「auto」= 由程序计算。「↺ Default」恢复出厂值。设置随每条音轨保存，标题会变绿。「Combine tracks」只输出 FLAC 或 WAV。
+• 在「⚙」窗口中：双击滑块（或其数值框）会恢复初始值，键盘方向键可逐步调整。鼠标悬停在按钮上时，只有文字变绿（按钮不会高亮）。在 Edit/Log 中，「ffmpeg_filtros = ...」一行是该音轨的 FFmpeg 滤镜：可以修改，「Save changes」会应用；只要不更改该音轨的其他设置，处理时就会使用它们（若更改，则恢复程序计算的滤镜，日志会提示）。
+• 在可视化中更改设置时，播放会停止，视图保持不变，直到按下「Generate visualization」；按 ▶ 即可听到更改后的效果。处理期间「⬅ Back」仍然可用。悬浮说明几秒后会自动消失。
+• 充分利用处理器：较长的音轨（超过 6 分钟）会分成几段同时处理（最多用一半核心），然后无缝拼接；每段提前 64 秒开始，效果与一次处理完全一致。仅在效果不改变时间时使用（无分段、延迟或变速）。
+• 可视化：第一次带着某条音轨进入时会自动生成，之后按「Generate visualization」才会生成（更改设置时，播放会停止并给出提示）。像 Sound Forge 一样的细节：↔ 缩放可达 x4096；放大后，所见部分会从文件中按全部采样读取（处理前和处理后）。
+• Dynamic processing：不再有模式 0。默认是模式 2，滑块为 0：为 0 时不起作用；调高任一滑块即应用所选模式。
+• 在「Presence / EQ」中，Digital smoothing 位于 3 段均衡器右侧；在「Dynamics / Bass」中，Dynamic processing 位于 Bass Management 右侧，「Azid mode」在其「Auto」旁边。
 • 3 段均衡器和高级均衡器不能同时使用：其中一个有设置时，另一个处于禁用状态。Master 和各声道音量也是如此。Digital smoothing 也不能与均衡器或 Audio cleanup 同时使用，Audio cleanup 也不能与均衡器、Dynamic range 或 Dynamic processing 同时使用。「Auto」会关闭不能同时使用的项，提示会告诉您关闭了什么。
 • 「Open the destination folder when finished」（Output 选项卡）：处理完成后打开保存文件的文件夹。
 • 如果出现问题，请查看 Edit/Log 选项卡。日志文字可以用鼠标选中并复制（Ctrl+C 或右键 → Copy / Copy the whole log）。
@@ -1171,6 +1521,10 @@ COMBINE（合并音轨 · 配音与同步）
 • 蓝光：每条音轨和每个字幕的语言从光盘的播放列表中读取（.m2ts 文件本身不带语言信息）。
 • 程序工作时（处理、合并、抓取、提取、创建 ISO……），电脑不会进入睡眠；屏幕仍可以关闭。
 • 所有滑块（包括 Combine 中的）都可以用键盘方向键移动：先点击滑块，再按 ← →（每次一步）。
+• 「Save preset」保存全部设置，包括音轨的高级设置（Aften、编码器选项和手动滤镜），「Load preset」会全部应用。
+• 预设由 Jmg AudioProcesador 和 Jmg VideoEncoder 共用（同一个文件夹）：每个程序应用自己的部分；音频设置可在两者之间通用，在 Jmg AudioProcesador 中视频和字幕设置不起作用。
+• 在两个程序之间传递文件时，已添加的文件到达后也会自动添加（带着它们的音频设置）。
+• 正在进行的操作（生成、试听、播放、预览）会显示为绿色。 暂停时，「Resume」（在 Jmg VideoEncoder 中为 ⏸）保持绿色。
 
 FFMPEG 与许可证
 本程序使用 FFmpeg（ffmpeg.org），版本 N-128094-g31855b2a70-20261025（BtbN 编译版），采用 GNU GPL v3 许可证（bin\\LICENSE.txt）。
@@ -1179,14 +1533,14 @@ Jmg AudioProcesador 是基于 GNU GPL v3 许可证的自由软件。
 支持本项目：https://www.paypal.com/paypalme/JmgSoftware
 
 巨大的工作量
-• 完成 Jmg SuiteMultimedia（本程序和 Jmg VideoEncoder）付出了巨大的努力：约 45 天，并用真实的电影进行了测试。本程序在 Anthropic 的人工智能 Claude 的协助下开发。
+• 完成 Jmg SuiteMultimedia（本程序和 Jmg VideoEncoder）付出了巨大的努力和心血，并用真实的电影进行了测试。本程序在 Anthropic 的人工智能 Claude 的协助下开发。
 """
 AYUDA["ja"]="""JMG AUDIOPROCESADOR 5.1 · ヘルプ
 
 （画面は英語表示です。ボタン名は画面に表示される英語のまま記載しています。）
 
 使い方
-1. 「Select」または「Add」でファイルを追加するか、ファイル一覧にドラッグします。音声トラックのないファイルは追加されません。
+1. 「Select」または「Add」でファイルを追加するか、ファイル一覧にドラッグします。音声トラックのないファイルは追加されません。 その後、「➕ Add to queue」（右側、トラック一覧の下）で選択したファイルがトラック一覧に入ります（✔ が付きます）。処理されるのはそれらだけです。
 2. トラックをクリックします（複数選択は Ctrl+クリック）。トラックごとに設定が保存されます。「Apply to all」は、選択中のトラックの設定を他の選択トラックにコピーします。
 3. 各タブを調整し、Visualization で結果を確認します。
 4. PROCESS を押します。要点が表示され、「🔍 See everything」で各トラックの形式とエフェクトを確認できます（コピー可）。元のファイルが変更されることはありません。「Cancel」で処理を止めると、書きかけのファイルは削除されます。
@@ -1194,7 +1548,7 @@ AYUDA["ja"]="""JMG AUDIOPROCESADOR 5.1 · ヘルプ
 VOLUME（音量）
 • Master：全体の音量を上げ下げします。その下は各チャンネルの音量です。 Master と各チャンネルは -30 dB まで下げられます。さらに1つ下が「Mute」（赤）で、無音になります。 チャンネルごとの音量は最後に適用されます（Bass Management、Double Bass、Channel separation の後）。設定した値がそのままそのチャンネルの上げ下げになります。
 • 「Set Master」：トラックを測定し、ピークの上限を超えない範囲で Master を目標値まで上げます（自動クリッピング防止）。音量を下げることはありません。すでに大きい場合は 0 dB のままです。
-• 「Volume per channel」の「Auto」：選択したトラックの各チャンネルの音量を測定し、スライダーを映画向けのバランスに動かします。センターは変更せず、フロントはそれより約 3 dB 下、サラウンドは約 7 dB 下、サブウーファーは約 6 dB 下にします（最大 ±6 dB、サブウーファーは ±3 dB）。その後、手動で調整できます。フロントとサラウンドは大きすぎるときに下げるだけで、上げることはありません。ステレオやサラウンドをそれほど必要としない映画もあるためです。
+• 「Volume per channel」の「Auto」：選択したトラックの各チャンネルの音量を測定し、すべてのチャンネルの釣り合いが取れた映画向けのバランスにスライダーを動かします。センターは変更せず、フロントはそれより約 1.5 dB 下、サラウンドは約 3 dB 下にします。サブウーファーは常にほかのすべてより少し下（いちばん小さいものより約 2 dB 下）になります。フロントとサラウンドは最大 6 dB まで下げ、サブウーファーは -6～+3 dB です。あとから手で調整できます。フロントとサラウンドは大きすぎるときだけ下げ、上げることはありません。ステレオやサラウンドをそれほど必要としない映画もあるためです。
 • 詳細 EQ の「Auto」：フロント、サラウンド、センターの低音、中音、高音を測定し、互いに近づけます（最大 ±3 dB）。結果はグループ別の詳細 EQ に入り、そこで調整できます。サブウーファーは変更しません。
 • ノーマライズ：Loudnorm は音量を測定し、圧縮せずに目標値ぴったりに合わせます（ピークはリミッターが保護）。「Normalize」ですぐに測定し、調整は処理時に 1 回のパスで適用されます。事前に測定していない場合は処理中に測定します。DynAudNorm は小さい部分と大きい部分の差をならします。SpeechNorm はセリフの音量をそろえます（声のあるセンターチャンネルだけに作用）。
 • 同期：フレームレート変換（ピッチ変更あり／なし）と開始ディレイ（-6000～+6000 ms）。
@@ -1203,7 +1557,7 @@ VOLUME（音量）
 • 「Digital smoothing」（0-5）：80 年代と 90 年代の多くの映画や吹き替えにある過剰な高音（耳障りなサ行と金属的な響き）を、高音をカットするフィルター（イコライザーではありません）で、サブウーファー以外のすべてのチャンネルから取り除きます。0 = 効果なし。「Auto」はセンターの高音を測定して強さを選びます。
 
 PRESENCE / EQ（プレゼンス / イコライザー）
-• Presence：声（センターチャンネル）、音楽・環境音、効果音、サブウーファーを強調します。リミッター上限は任意です。「Channel separation」（右側、-10〜+10）：左右と前後の分離を強めたり弱めたりします。音量は上げません。その「Auto」は映画の分離を測り、映画の激しさに合わせて最適な値を設定します（アクション映画は多め、静かな映画は少なめ）。センターは決して変えません。Channel separation は最後から 2 番目、Volume per channel は最後に調整することをおすすめします。
+• Presence：声（センターチャンネル）、音楽・環境音、効果音、サブウーファーを強調します。リミッター上限は任意です。「Channel separation」（右側、-15〜+15）：左右と前後の分離を強めたり弱めたりします。音量は上げません。その「Auto」は映画の分離を測り、映画の激しさに合わせて最適な値を設定します（アクション映画は多め、静かな映画は少なめ）。センターは決して変えません。Channel separation は最後から 2 番目、Volume per channel は最後に調整することをおすすめします。 1 刻みの細かい調整、よりやわらかく（15 で以前の 10 と同じ）：Presence、Channel separation とイコライザーは -15〜+15、Dynamic range と Dynamic processing は 0〜15、Double Bass と Bass Management は 0〜6（1 刻み）。
 • 3 バンド EQ と、グループ別（フロント、リア、センター）で周波数を自由に設定できる詳細 EQ。
 • チャンネル別ディレイ：0～100 ms、5 ms 単位（5 ms ≈ 1.7 m）。
 • Audio cleanup（音声クリーンアップ）：背景ノイズの低減（1-2 = ごく控えめ）、クリックノイズ除去、音割れ（クリッピング）修復（後の 2 つは時間がかかります）。その「Auto」は、本当の背景ノイズが見つかったときだけ設定します。きれいなファイルでは 0 のままにして、補正が不要であることを知らせます。
@@ -1215,12 +1569,13 @@ DYNAMICS / BASS（ダイナミクス / 低音）
 • Bass Management：各スピーカーの低音をサブウーファーに送ります（1 = 控えめ、5 = すべて）。Double Bass：低音を双方向に重ねます。サブウーファーの低音を各スピーカーへ、各スピーカーの低音をサブウーファーへコピーします。どちらもサブウーファーがはっきり大きくなり、音割れ防止の保護付きです。「Auto」は、スピーカーに深い低音が足りないかサブウーファーが弱いときに Double Bass（1-3）を設定し、バランスが取れていれば 0 にします。既定のカット：90 Hz。
 • Dynamic range：小さな音がさらに小さくなり、メリハリが増します。
 • Dynamic processing：1 Lift（小さな部分を持ち上げる）、2 Impact（大きな部分を際立たせる）、3 両方。強さはグループ別に調整できます。Bass Management や Double Bass を使う場合は、サブウーファーを 0 にしてください。
+• Azid mode（Dynamic processing の「Auto」の隣）：BeLight（DSPguru の Azid）と同じく、AC3/E-AC3 自体が持つ圧縮情報を使います。オプションは「Inverse」だけです。AC3/E-AC3 自体の圧縮情報を逆に使い、大きな音はより大きく、小さな音はより小さくします（ダイナミクスが広がります）。「Original」では何も変えません。この情報を持つ DVD の映画におすすめです。DTS、TrueHD、FLAC などでは何も変わりません（ログに表示されます）。Presence、チャンネル分離、Dynamic range、ノーマライズ、クリーンアップとは併用できません。オンにするとそれらはオフになり、どれかを操作すると「Original」に戻ります。音量、イコライザー、スムージング、同期、Dynamic processing（モード 1 のみ）、Bass Management、Double Bass は一緒に使えます。出力は「Passthrough」（処理せずにトラックをコピー）以外のどの形式でもかまいません。Azid を使っている間は一覧に表示されません。モードを選ぶと、ウィンドウでお知らせします。
 • Bass Management、Double Bass、Dynamic range、Dynamic processing の「Auto」：同様に、測定結果（サブウーファーの音量とダイナミックレンジ）に合わせて設定します。映画がすでに適切なら 0 のままにしてお知らせします。
 
 VISUALIZATION（ビジュアライズ）
-• タブを開くと自動で生成され、設定を変えると更新されます。処理前（BEFORE）と処理後（AFTER）をチャンネルごとに比較できます。
+• トラックで初めて入ったときは自動で生成されます。その後は「Generate visualization」を押すと生成されます。処理前（BEFORE）と処理後（AFTER）をチャンネルごとに比較できます。
 • 処理前／処理後の試聴、Pause/Resume（一時停止／再開）、Stop（停止）。チャンネルをクリック = そのチャンネルだけを再生（もう一度クリック = すべて）。
-• ホイール = ズーム · ドラッグ = 移動 · ダブルクリック = x1 · スペースキー = 開始と停止。ズーム時は再生中に波形が自動で動き、カーソルは中央に保たれます。区間：ファイル全体、または最初の 5・10・30 分。生成中に区間を変えると、待たずに新しい区間が始まります。別のタブに移ると中断し、戻ると自動で生成されます。
+• ホイール = ズーム · ドラッグ = 移動 · ダブルクリック = x1 · スペースキー = 開始と停止。ズーム時は再生中に波形が自動で動き、カーソルは中央に保たれます。区間：ファイル全体、または最初の 5・10・30 分。生成中に区間を変えると、待たずに新しい区間が始まります。別のタブに移っても生成は最後まで続きます。ズームは Jmg VideoEncoder と同じく 2 種類：↔（時間、x1-x4096）と ↕（波形の高さ、x1-x16）。使いたい方を選ぶと、マウスホイールで拡大・縮小できます（ダブルクリック = x1）。
 • エディター（「✎ Edit the file」チェックボックス）：結合したトラックなど、1 トラックだけの WAV、W64、FLAC ファイルを手作業で仕上げます。チャンネルの上をドラッグしてその部分を指定し（縦にドラッグすると複数チャンネル。その後、端をドラッグすると広げたり縮めたりできます）、dB を入力して（ほぼ無音にするなら -40 など）「Apply」を押します。「From」と「to」に時間を入力することもできます。ホイール = ズーム。ズーム時に波形を動かすには、上の目盛りやチャンネル名を手のカーソルでドラッグするか、下のバー、矢印キー ← →（Shift で速く）、右ボタンのドラッグを使います。右クリック = 選択解除。部分を指定しているときは、「■ Stop」で指定部分の先頭に戻ります。
 • 「▶ Hear the selection」は、指定した部分とチャンネルだけを、変更を反映して任意の位置で試聴します。未保存の変更があると、ボタンは「Play WITHOUT CHANGES」と「Play WITH CHANGES」になり、後者とチャンネルのクリックでは、任意の位置から変更後の音を再生します。「↶ Undo」と「↷ Redo」は 1 段階ずつ戻す・やり直す操作です。
 • 最小化すると、プログラムは時計の横（システムトレイ）にアイコンとして残り、処理の進み具合を表示します。左クリック = ウィンドウが戻る、右クリック = メニュー（処理の中止、終了時の動作——なし・終了・PC のシャットダウン——、終了時にフォルダーを開く、終了）。Output でオフにすると、いつもどおりタスクバーに最小化されます。ボタン、チェックボックス、スライダーの上にマウスを置くと説明が表示され、数秒で自動的に消えます。
@@ -1233,7 +1588,7 @@ OUTPUT（出力）
 • チャンネル：初期設定は入力と同じです。5.1、4.1、4.0、3.1、2.1、2.0（Dolby または Simple のステレオ）、1.0（モノラル）。余ったチャンネルは残るチャンネルに加算されます。
 • 7.1 の音源は 5.1 で出力されます：サイドチャンネルはリアチャンネルに加算されます。
 • ステレオ音源：2.0 はステレオのまま、5.1 はアップミックスします（「Remove voice」でフロントとリアの声を減らせます）。Upmix では Channel separation、音量、イコライザーだけが使えます。それ以外（Presence、ノーマライズ、Dynamic range、Dynamic processing、Bass Management、Double Bass、Smoothing、Audio cleanup）は無効になります。
-• 形式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（チャンネルごとに 1 つの WAV）、RF64、W64 (Sound Forge)、TrueHD、Passthrough（変換せずにコピー）。2.0 と 1.0 では MP3 も選べます。「Aften Dolby Digital」（既定）は Aften で AC3 を作り、ダイナミックレンジの大きい映画で優れます。「AC3」は FFmpeg です。設定はほかの形式と同じく「⚙ Aften...」から（初期値はブロック切り替えと固定・全帯域）：CBR/VBR、帯域幅、精度、フィルター、ダイナミックレンジ（DRC と台詞レベル）、アンプ向けのビットストリーム情報（Dolby Surround EX、Dolby Headphone、A/D コンバーター Standard または HDCD、推奨ダウンミックスとそのレベル）。VBR の AC3 はすべての機器で再生できるわけではありません。
+• 形式：AC3、EAC3、DTS、AAC、FLAC、WAV、WAV Split（チャンネルごとに 1 つの WAV）、RF64、W64 (Sound Forge)、TrueHD、Passthrough（変換せずにコピー）。2.0 と 1.0 では MP3 も選べます。「Aften Dolby Digital」（既定）は Aften で AC3 を作り、ダイナミックレンジの大きい映画で優れます。「AC3」は FFmpeg です。設定はほかの形式と同じく「⚙ Aften...」から（初期値はブロック切り替えと固定・全帯域）：CBR/VBR、帯域幅、精度、フィルター、ダイナミックレンジ（DRC と台詞レベル）、アンプ向けのビットストリーム情報（Dolby Surround EX、Dolby Headphone、A/D コンバーター Standard または HDCD、推奨ダウンミックスとそのレベル）。VBR の AC3 はすべての機器で再生できるわけではありません。 Combine では、7.1 出力は AAC、FLAC、WAV、W64、RF64 に対応します。AC3、E-AC3、DTS、TrueHD は最大 5.1 です。通常の処理は最大 5.1 で出力します。
 • 「🎬 VideoEncoder」（上部、「Create ISO」の後ろ）：リストで選んだファイル（またはすべて）を Jmg VideoEncoder に渡します。開いていればそのリストに入り、開いていなければそのファイルで起動します。見つからない場合は一度だけ場所を尋ねます。その後、このプログラムは閉じます（両方が同時に開いたままにはなりません）。両方のプログラムに共通する各トラックの音声設定（音量、Presence、イコライザー、チャンネル分離、ダイナミックレンジ、同期、形式）も一緒に渡されます。 ファイルがないときは、もう一方のプログラムに切り替えるだけです。
 • 「MKV with video」：映像・字幕・チャプター・カバー画像をコピーし、処理済みトラックを追加します。「Audio only」：トラックごとに 1 ファイル。その下の「File name」：各ファイルから出力されるものの名前（↺ で自動の名前に戻ります）と保存先。
 • 「Core as a separate track」（Output の形式の横；「MKV with video」と一緒に）：コアを持つトラックでだけ有効になり、トラックごとに設定します。DTS-HD トラック（Master Audio または High Resolution）には HD に対応しない機器のための通常の DTS が、Dolby Atmos（TrueHD）トラックには Atmos なしの TrueHD が入っています。チェックすると、それも別のトラックとして再エンコードせずに、元のトラックの後に出力されます。
@@ -1263,7 +1618,27 @@ COMBINE（トラック結合 · 吹き替えと同期）
 • Dynamic range と Dynamic processing は同時に 1 つだけ使えます。ノーマライズを使うと無効になります。Presence はすべてのエフェクトと一緒に使えます（Upmix は除く）。切り替えはプログラムが自動で行います。
 • ⚠ リミッター上限を「No limit」にすると、効果を強くかけた場合に音割れすることがあります。安全のため -1 dBFS をおすすめします。
 • 「Reset」は開いているタブを初期化します（「All」= すべて）。プリセットで設定を保存・読み込みできます。
-• 「↶ Undo」と「↷ Redo」（下部、「Reset」の隣）：直前の 50 つの操作を 1 つずつ元に戻し、やり直します。どのトラックの設定変更、ファイルの追加や削除、トラックの削除、タイトルなども対象です。Visualization では、エディターでの変更（無音にした部分や下げた部分）を元に戻し、やり直します。Ctrl+Z と Ctrl+Y でも操作できます。
+• 設定とプリセットは安全に保存されます。まず一時ファイルに書き込み、それから一度に本来のファイルと置き換えます。途中で停電やプログラムの終了があっても前のファイルがそのまま残り、書きかけのファイルになることはありません。
+• プログラムが作るファイルは、まず「名前.part.拡張子」として書き込まれ、正常に終わったときだけ本来の名前になります。途中で停電しても、途切れたファイルが完成品の名前で残ることはありません。起動時には、前回残った「.part」ファイルを知らせます（削除してかまいません）。
+• AC3 と E-AC3 のトラックは、中に含まれる圧縮を適用せずにそのままデコードします（以前は FFmpeg が勝手に適用してピークを下げていました）。元の音が得られます。
+• 「↶ Undo」と「↷ Redo」（下部、「Reset」の隣）：直前の 50 つの操作を 1 つずつ元に戻し、やり直します。どのトラックの設定変更、ファイルの追加や削除、トラックの削除、タイトルなども対象です。Visualization では、エディターでの変更（無音にした部分や下げた部分）を元に戻し、やり直します。Ctrl+Z と Ctrl+Y でも操作できます。エディターに元に戻す・やり直す内容がないときは、他のタブと同じように、ほかの変更を元に戻し、やり直します。
+• 上部の 2 つの列を仕切るバーは、列のボタンや文字が収まらなくなるところで止まります。切れて見えなくなることはありません。
+• スクロールバーは必要なときだけ表示されます。各設定の説明はマウスを重ねると表示されます（タブには説明文を置いていません）。
+• タブのパネルは、各タブの内容にちょうど合う高さになります（余白も欠けもありません）。上のファイル一覧が残りを使います。
+• 各効果のタイトルは、オンのとき（強さ、カットオフ、上限、周波数など、どれかの設定を変えたとき）に緑色になります。
+• 緑色で、何かが効いているものがひと目でわかります。設定を変えた効果や項目のタイトル（画像、トリミング、黒帯、色も）と、すでに補正を行ったボタン（Adjust Master、Normalize、Calculate delay、Fix by parts、More options など）です。ボタンにマウスを重ねると、文字が緑色になります。
+• タブも緑色になります。開いているタブと、マウスを重ねたタブです。処理が終わると、出力先フォルダーがファイルを選択した状態で開きます。
+• ファイルを選択または追加すると、「Tracks of the file」に音声トラックの情報が表示されます（灰色）。処理するには「➕ Add to queue」を押します。
+• DVD（VIDEO_TS フォルダーまたは .iso イメージ）：リッピング時、各音声トラックにはディスクの .IFO ファイルから読み取った言語が付きます（.VOB には含まれていません）。
+• 可視化：入るとタブが隠れて広く使えます。「⬅ Back」（左上）で前のタブに戻ります（Jmg VideoEncoder と同じ）。
+• Edit/Log（上級者向け）：概要の下に、アクティブなトラックのすべてのパラメーター（「キー = 値」）と使用される FFmpeg フィルターが表示されます。値を変更し、処理の前に「Save changes」（エディターで右クリック）を押してください。
+• 「⚙」（歯車）はダイナミックレンジと Dynamic processing のタイトルの左にあり、「Combine tracks」のダイナミックレンジ（エコー除去）と「Silence voices of the original」（ゲート）にもあります：Ocenaudio のように細かく調整するための詳細設定を開きます。各項目にスライダー、入力欄、両側の効果の説明があります：しきい値、アタック、リリース、ニー、ゲイン、リミッターのアタックとリリース。ゲートでは、隙間の結合、早めの開始、テール、下降、上昇、残す打撃音。「auto」= プログラムが計算します。「↺ Default」で出荷時の値に戻ります。トラックごとに保存され、タイトルが緑になります。「Combine tracks」の出力は FLAC か WAV のみです。
+• 「⚙」ウィンドウでは、スライダー（または入力欄）をダブルクリックすると初期値に戻り、キーボードの矢印で 1 段ずつ動かせます。ボタンにマウスを重ねると、文字だけが緑になります（ボタンは光りません）。Edit/Log の「ffmpeg_filtros = ...」の行はトラックの FFmpeg フィルターです。変更して「Save changes」で適用でき、トラックの他の設定を変えない限り処理に使われます（変えるとプログラムのものに戻り、ログに表示されます）。
+• 可視化の中で設定を変えると再生が止まり、「Generate visualization」を押すまで表示はそのままです。▶ を押すと変更後の音を聞けます。処理中も「⬅ Back」は使えます。ツールチップは数秒で自動的に消えます。
+• プロセッサーをフル活用：長いトラック（6 分超）は複数の部分に分けて同時に処理し（最大でコアの半分）、継ぎ目なくつなぎます。各部分は 64 秒前から始めるので、一度に処理した場合と同じ音になります。エフェクトが時間を変えない場合のみ（区間・ディレイ・速度変更なし）。
+• 可視化：トラックで初めて入ったときは自動で生成され、その後は「Generate visualization」を押したときに生成されます（設定を変えると再生が止まり、お知らせが出ます）。Sound Forge のような細かさ：↔ ズームは x4096 まで。ズーム時は、表示中の部分をファイルから全サンプルで読み込み（処理前・処理後とも）。
+• Dynamic processing：モード 0 はなくなりました。既定はモード 2、スライダーは 0。0 のときは何もせず、スライダーを上げると選んだモードがかかります。
+• 「Presence / EQ」では Digital smoothing が 3 バンド EQ の右にあります。「Dynamics / Bass」では Dynamic processing が Bass Management の右にあり、「Azid mode」はその「Auto」の隣です。
 • 3 バンド EQ と詳細 EQ は同時に使えません。一方に設定があるあいだ、もう一方は無効になります。Master とチャンネルごとの音量も同じです。Digital smoothing はイコライザーや Audio cleanup とも同時に使えず、Audio cleanup もイコライザー、Dynamic range、Dynamic processing と同時に使えません。「Auto」は同時に使えないものをオフにし、何をオフにしたかを通知に表示します。
 • 「Open the destination folder when finished」（Output タブ）：処理が終わると、ファイルを保存したフォルダーを開きます。
 • 問題が起きたときは Edit/Log タブを確認してください。ログの文字はマウスで選択してコピーできます（Ctrl+C または右クリック → Copy / Copy the whole log）。
@@ -1276,6 +1651,10 @@ COMBINE（トラック結合 · 吹き替えと同期）
 • Blu-ray：各音声トラックと字幕の言語はディスクのプレイリストから読み取ります（.m2ts ファイルには含まれていません）。
 • 作業中（処理、結合、リッピング、抽出、ISO 作成など）は PC がスリープしません。画面はオフになることがあります。
 • すべてのスライダー（Combine の中のものも）はキーボードの矢印キーで動かせます：スライダーをクリックしてから ← → を押します（1 ステップずつ）。
+• 「Save preset」はトラックの詳細設定（Aften、コーデックのオプション、手動フィルター）も含めてすべての設定を保存し、「Load preset」はそれらをすべて適用します。
+• プリセットは Jmg AudioProcesador と Jmg VideoEncoder で共通です（同じフォルダー）。各プログラムは自分の部分を適用し、オーディオは両方で使えます。Jmg AudioProcesador ではビデオと字幕の設定は影響しません。
+• ファイルをもう一方のプログラムに渡すと、追加済みのものは追加された状態で届きます（オーディオ設定も一緒に）。
+• 実行中のもの（生成、試聴、再生、プレビュー）は緑色で表示されます。 一時停止中は「Resume」（Jmg VideoEncoder では ⏸）が緑色のままです。
 
 FFMPEG とライセンス
 FFmpeg（ffmpeg.org）バージョン N-128094-g31855b2a70-20261025（BtbN ビルド）を使用しています。ライセンスは GNU GPL v3 です（bin\\LICENSE.txt）。
@@ -1284,14 +1663,14 @@ Jmg AudioProcesador は GNU GPL v3 ライセンスのフリーソフトウェア
 プロジェクトを支援：https://www.paypal.com/paypalme/JmgSoftware
 
 膨大な作業
-• Jmg SuiteMultimedia（このプログラムと Jmg VideoEncoder）の制作には膨大な作業が必要でした。約 45 日間、実際の映画でテストを重ねています。 Anthropic の人工知能 Claude の協力を得て開発しました。
+• Jmg SuiteMultimedia（このプログラムと Jmg VideoEncoder）の制作には膨大な作業と献身が注がれ、実際の映画でテストを重ねています。 Anthropic の人工知能 Claude の協力を得て開発しました。
 """
 AYUDA["ru"]="""JMG AUDIOPROCESADOR 5.1 · СПРАВКА
 
 (Интерфейс программы на английском: названия кнопок приведены так, как они выглядят на экране.)
 
 КАК ПОЛЬЗОВАТЬСЯ
-1. Добавьте файлы кнопками «Select» или «Add» либо перетащите их в список файлов. Файлы без звуковых дорожек не добавляются.
+1. Добавьте файлы кнопками «Select» или «Add» либо перетащите их в список файлов. Файлы без звуковых дорожек не добавляются. Затем «➕ Add to queue» (справа, под списком дорожек) переносит выбранные файлы в список дорожек (с ✔): обрабатываются только они.
 2. Щёлкните по дорожке (Ctrl+щелчок — несколько дорожек). У каждой дорожки свои настройки. «Apply to all» копирует настройки активной дорожки на остальные выбранные.
 3. Настройте вкладки и проверьте результат во вкладке Visualization.
 4. Нажмите PROCESS: появится главное, а «🔍 See everything» покажет каждую дорожку с её форматом и эффектами (текст можно скопировать). Исходные файлы никогда не изменяются. «Cancel» останавливает обработку и удаляет всё, что осталось недописанным.
@@ -1299,7 +1678,7 @@ AYUDA["ru"]="""JMG AUDIOPROCESADOR 5.1 · СПРАВКА
 ГРОМКОСТЬ
 • Master: поднимает или опускает всё сразу. Под ним — громкость каждого канала. Master и каждый канал опускаются до -30 дБ; ещё одна позиция ниже — «Mute» (красным): тишина. Громкость по каналам применяется последней (после Bass Management, Double Bass и Channel separation): сколько вы задали, ровно настолько канал станет громче или тише.
 • «Set Master»: измеряет дорожку и поднимает Master до цели, не превышая предел пиков (автоматическая защита от клиппинга). Громкость он никогда не снижает: если дорожка уже громкая, остаётся 0 dB.
-• «Auto» в «Volume per channel»: измеряет громкость каждого канала выбранных дорожек и ставит их ползунки в баланс, как в кинотеатре: центр не трогается, фронты оказываются примерно на 3 dB ниже него, тылы — примерно на 7 dB, сабвуфер — примерно на 6 dB (не больше ±6 dB; сабвуфер ±3 dB). Потом их можно подправить вручную. Фронты и тылы только опускаются, если они слишком громкие, и никогда не поднимаются: некоторым фильмам не нужно столько стерео и объёма.
+• «Auto» в «Volume per channel»: измеряет громкость каждого канала выбранных дорожек и ставит их ползунки в баланс, как в кинотеатре, выровненный между всеми каналами: центр не трогается, фронты оказываются примерно на 1,5 dB ниже него, тылы — примерно на 3 dB; сабвуфер всегда остаётся немного ниже всех остальных (примерно на 2 dB ниже самого тихого). Фронты и тылы опускаются не более чем на 6 dB; сабвуфер — от -6 до +3 dB. Потом их можно подправить вручную. Фронты и тылы только опускаются, если они слишком громкие, и никогда не поднимаются: некоторым фильмам не нужно столько стерео и объёмного звука.
 • «Auto» продвинутого эквалайзера: измеряет низкие, средние и высокие частоты фронтов, тылов и центра и сближает их (не больше ±3 dB). Результат остаётся в продвинутом эквалайзере по группам, где его можно подправить. Сабвуфер не трогается.
 • Нормализация: Loudnorm измеряет громкость и ставит её точно на цель, без компрессии (пики берёт на себя лимитер). «Normalize» измеряет сейчас, а поправка применяется при PROCESS за один проход; если заранее не измеряли, измерение делается во время обработки. DynAudNorm выравнивает тихие и громкие места. SpeechNorm выравнивает диалоги (работает только на центральном канале, где голос).
 • Синхронизация: перевод частоты кадров (со сменой тона или без) и начальная задержка (от -6000 до +6000 ms).
@@ -1308,7 +1687,7 @@ AYUDA["ru"]="""JMG AUDIOPROCESADOR 5.1 · СПРАВКА
 • «Digital smoothing» (0-5): убирает лишние высокие частоты многих фильмов и дубляжей 80-х и 90-х (резкие свистящие звуки и металлический блеск) фильтром, срезающим верха, а не эквалайзером, на всех каналах, кроме сабвуфера. 0 = без эффекта. «Auto» измеряет верха центра и выбирает силу.
 
 PRESENCE / EQ
-• Presence: выдвигает вперёд голос (центральный канал), музыку/атмосферу, эффекты или сабвуфер. Необязательный потолок лимитера. «Channel separation» (справа, от -10 до +10): больше или меньше разделения между левым и правым и между передом и тылом, без повышения громкости. Его «Auto» измеряет разделение в фильме и ставит подходящее по динамике (больше для боевиков, меньше для спокойных фильмов); центр никогда не трогается. Рекомендуется делать Channel separation предпоследней настройкой, а Volume per channel — последней.
+• Presence: выдвигает вперёд голос (центральный канал), музыку/атмосферу, эффекты или сабвуфер. Необязательный потолок лимитера. «Channel separation» (справа, от -15 до +15): больше или меньше разделения между левым и правым и между передом и тылом, без повышения громкости. Его «Auto» измеряет разделение в фильме и ставит подходящее по динамике (больше для боевиков, меньше для спокойных фильмов); центр никогда не трогается. Рекомендуется делать Channel separation предпоследней настройкой, а Volume per channel — последней. Точная настройка с шагом 1, мягче (15 даёт то же, что раньше 10): Presence, Channel separation и эквалайзеры от -15 до +15; Dynamic range и Dynamic processing от 0 до 15; Double Bass и Bass Management от 0 до 6 (с шагом 1).
 • 3-полосный эквалайзер и продвинутый эквалайзер по группам (фронт, тыл, центр) со свободной частотой.
 • Задержка по каналам: от 0 до 100 ms шагами по 5 ms (5 ms ≈ 1,7 м).
 • Очистка звука: снижение фонового шума (1-2 = деликатно), удаление щелчков и восстановление клиппинга (эти два — медленные). Её «Auto» ставит что-то, только если находит настоящий фоновый шум; на чистом файле оставляет 0 и сообщает, что исправлять нечего.
@@ -1320,12 +1699,13 @@ DYNAMICS / BASS
 • Bass Management: переносит низкие частоты колонок на сабвуфер (1 = мягко, 5 = полностью). Double Bass: удваивает низы в обе стороны — с сабвуфера на колонки и с колонок на сабвуфер. Оба заметно поднимают сабвуфер, с защитой от клиппинга. Их «Auto» ставит Double Bass (1-3), если колонкам не хватает глубокого баса или сабвуфер слабый; если всё сбалансировано — 0. Частота раздела по умолчанию: 90 Hz.
 • Динамический диапазон: тихие звуки опускаются, контраст растёт.
 • Динамическая обработка: 1 Lift (поднимает тихие места), 2 Impact (громкие места выделяются), 3 оба. Сила по группам. Поставьте сабвуфер на 0, если используете Bass Management или Double Bass.
+• Azid mode, рядом с «Auto» у Dynamic processing: как в BeLight (Azid от DSPguru), использует сжатие, записанное в самой дорожке AC3/E-AC3. Есть только один вариант, «Inverse»: сжатие, записанное в самой дорожке AC3/E-AC3, наоборот: громкие звуки становятся громче, тихие — тише (больше динамики). «Original» ничего не меняет. Рекомендуется для фильмов с DVD, где есть эти данные; для DTS, TrueHD, FLAC... ничего не меняется (об этом сообщает журнал). Не сочетается с Presence, разделением каналов, Dynamic range, нормализациями и очисткой: при его включении они выключаются, а если изменить любой из них, он возвращается к «Original». Громкость, эквалайзеры, сглаживание, синхронизацию, Dynamic processing (только режим 1), Bass Management и Double Bass можно использовать вместе с ним. На выходе может быть любой формат, кроме «Passthrough» (копирует дорожку без обработки) — пока используется Azid, его нет в списке; при выборе режима об этом напоминает окно.
 • «Auto» в Bass Management, Double Bass, динамическом диапазоне и динамической обработке: то же самое, по тому, что он измерит (уровень сабвуфера и динамический диапазон). Если с фильмом и так всё в порядке, он оставляет 0 и сообщает об этом.
 
 VISUALIZATION
-• Создаётся сама, когда открываете вкладку, и обновляется, если меняете любую настройку. Сравнивает ДО и ПОСЛЕ, канал за каналом.
+• При первом входе с дорожкой создаётся сама; потом — по кнопке «Generate visualization». Сравнивает ДО и ПОСЛЕ, канал за каналом.
 • Воспроизведение до или после обработки, пауза/продолжение и стоп. Щелчок по каналу = слушать только этот канал (ещё щелчок = все).
-• Колесо = масштаб · перетаскивание = сдвиг · двойной щелчок = x1 · пробел = старт и стоп. При увеличении волна при воспроизведении движется сама, курсор в центре. Отрезок: весь файл или первые 5, 10 или 30 минут. Если сменить отрезок во время построения, новый начинается без ожидания; если перейти на другую вкладку, построение прерывается и само продолжается, когда вы вернётесь.
+• Колесо = масштаб · перетаскивание = сдвиг · двойной щелчок = x1 · пробел = старт и стоп. При увеличении волна при воспроизведении движется сама, курсор в центре. Отрезок: весь файл или первые 5, 10 или 30 минут. Если сменить отрезок во время построения, новый начинается без ожидания; если перейти на другую вкладку, построение всё равно завершится. Два масштаба, как в Jmg VideoEncoder: ↔ (время, x1-x4096) и ↕ (высота волн, x1-x16); отметьте нужный, и колесо мыши увеличивает или уменьшает его (двойной щелчок = x1).
 • Редактор (флажок «✎ Edit the file»): чтобы вручную доделать однодорожечный файл WAV, W64 или FLAC, например объединённую дорожку. Проведите мышью по каналу, чтобы отметить этот кусок (по вертикали — несколько каналов; потом тяните его края, чтобы расширить или сузить), введите dB (например -40, чтобы оставить почти тишину) и нажмите «Apply». Время можно ввести и в «From» и «to». Колесо = масштаб. Чтобы сдвинуть увеличенную волну: тяните курсором-рукой по верхней линейке или по названиям каналов, используйте нижнюю полосу, стрелки ← → (с Shift — быстрее) или тяните правой кнопкой. Правый щелчок = снять выделение. Когда кусок отмечен, «■ Stop» возвращает к началу отмеченного куска.
 • «▶ Hear the selection» воспроизводит только отмеченный кусок и каналы, с применёнными изменениями, на любой минуте. При несохранённых изменениях кнопки становятся «Play WITHOUT CHANGES» и «Play WITH CHANGES»: последняя, а также щелчок по каналу, воспроизводят с вашими изменениями с любого места. «↶ Undo» и «↷ Redo» идут шаг за шагом.
 • В свёрнутом виде программа остаётся значком у часов (в области уведомлений), который показывает ход обработки: левый щелчок = окно возвращается; правый щелчок = меню (отменить обработку, что делать по окончании — ничего, выйти или выключить ПК —, открыть папку по окончании, выход). Во вкладке Output это можно отключить, чтобы сворачивать на панель задач как обычно. Если задержать мышь над кнопкой, полем или ползунком, появляется описание, которое само исчезает через несколько секунд.
@@ -1338,7 +1718,7 @@ OUTPUT
 • Каналы: по умолчанию как у источника. 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (стерео Dolby или Simple) или 1.0 (моно). Лишние каналы подмешиваются к оставшимся.
 • Источники 7.1 выводятся как 5.1: боковые каналы подмешиваются к тыловым.
 • Стерео-источник: 2.0 остаётся стерео; 5.1 делает Upmix (с «Remove voice» спереди и сзади). При Upmix используются только Channel separation, громкости и эквалайзеры; остальное (Presence, нормализации, динамический диапазон, динамическая обработка, Bass Management, Double Bass, сглаживание и очистка) отключается.
-• Форматы: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (по WAV на канал), RF64, W64 (Sound Forge), TrueHD и Passthrough (копия без преобразования). MP3 для 2.0 и 1.0. «Aften Dolby Digital» (по умолчанию) делает AC3 через Aften, что даёт лучший динамический диапазон в фильмах, где его много; «AC3» — через FFmpeg. Его настройки — через «⚙ Aften...», как у других форматов (по умолчанию block switching и фиксированная полная полоса): CBR или VBR, полоса, точность, фильтры, динамический диапазон (DRC и уровень диалогов) и служебная информация для ресивера (Dolby Surround EX, Dolby Headphone, преобразователь Standard или HDCD, предпочитаемый даунмикс и его уровни). Не каждое устройство читает AC3 с VBR.
+• Форматы: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (по WAV на канал), RF64, W64 (Sound Forge), TrueHD и Passthrough (копия без преобразования). MP3 для 2.0 и 1.0. «Aften Dolby Digital» (по умолчанию) делает AC3 через Aften, что даёт лучший динамический диапазон в фильмах, где его много; «AC3» — через FFmpeg. Его настройки — через «⚙ Aften...», как у других форматов (по умолчанию block switching и фиксированная полная полоса): CBR или VBR, полоса, точность, фильтры, динамический диапазон (DRC и уровень диалогов) и служебная информация для ресивера (Dolby Surround EX, Dolby Headphone, преобразователь Standard или HDCD, предпочитаемый даунмикс и его уровни). Не каждое устройство читает AC3 с VBR. В Combine вывод 7.1 поддерживает AAC, FLAC, WAV, W64 и RF64; AC3, E-AC3, DTS и TrueHD — максимум 5.1. Обычная обработка выдаёт максимум 5.1.
 • «🎬 VideoEncoder» (вверху, после «Create ISO»): отправляет выбранные в списке файлы (или все) в Jmg VideoEncoder. Если он открыт, они попадают в его список; если нет — он открывается с ними. Если его не найти, программа один раз попросит указать, где он. После этого эта программа закрывается (обе сразу открытыми не остаются). Общие для обеих программ настройки звука каждой дорожки (громкости, Presence, эквалайзер, разделение каналов, динамический диапазон, синхронизация и формат) передаются тоже. Без файлов просто переключает на другую программу.
 • «MKV with video»: копирует видео, субтитры, главы и обложки и добавляет обработанные дорожки. «Audio only»: по файлу на дорожку. Ниже — «File name»: имя того, что получится из каждого файла (↺ возвращает автоматическое), и куда оно будет сохранено.
 • «Core as a separate track» (в Output, рядом с форматом; вместе с «MKV with video»): включается только на дорожках, где есть ядро, и задаётся для каждой дорожки. Дорожка DTS-HD (Master Audio или High Resolution) содержит обычный DTS для устройств, которые не понимают HD, а дорожка Dolby Atmos (TrueHD) — TrueHD без Atmos; если отмечено, ядро выводится и отдельной дорожкой, без перекодирования, после оригиналов.
@@ -1368,7 +1748,27 @@ COMBINE TRACKS (ДУБЛЯЖИ И СИНХРОНИЗАЦИЯ)
 • Динамический диапазон и динамическая обработка: только по одному, и нормализации их отключают. Presence работает со всеми эффектами, кроме Upmix. Программа делает это сама.
 • ⚠ Потолок лимитера «No limit»: при сильных эффектах возможен клиппинг. Для надёжности выберите -1 dBFS.
 • «Reset» очищает открытую вкладку («All» = всё). Пресеты сохраняют и загружают ваши настройки.
-• «↶ Undo» и «↷ Redo» (внизу, рядом с «Reset»): отменяют и повторяют по одному последние 50 действий: изменения настроек любой дорожки, добавление или удаление файлов, удаление дорожек, названия... В Visualization они отменяют и повторяют изменения редактора (заглушённое или ослабленное). Также Ctrl+Z и Ctrl+Y.
+• Настройки и пресеты сохраняются надёжно: сначала во временный файл, который затем за один шаг заменяет настоящий; если пропадёт питание или программа закроется посередине, останется прежний файл целиком, а не записанный наполовину.
+• То, что создаёт программа, сначала записывается как «имя.part.расширение» и получает настоящее имя, только когда всё закончилось успешно: если посередине пропадёт питание, обрезанный файл никогда не будет носить имя готового. При запуске программа сообщает о файлах «.part», оставшихся с прошлого раза (их можно удалить).
+• Дорожки AC3 и E-AC3 декодируются как есть, без записанного в них сжатия (FFmpeg применял его сам и занижал пики): получается исходный звук.
+• «↶ Undo» и «↷ Redo» (внизу, рядом с «Reset»): отменяют и повторяют по одному последние 50 действий: изменения настроек любой дорожки, добавление или удаление файлов, удаление дорожек, названия... В Visualization они отменяют и повторяют изменения редактора (заглушённое или ослабленное). Также Ctrl+Z и Ctrl+Y. Если в редакторе нечего отменять или повторять, они отменяют и повторяют остальные изменения, как на других вкладках.
+• Разделитель между двумя верхними столбцами останавливается, когда кнопки или текст столбца перестают помещаться: они никогда не обрезаются.
+• Полосы прокрутки появляются только когда нужны, а пояснение к каждой настройке появляется при наведении мыши (во вкладках нет поясняющих текстов).
+• Панель вкладок занимает ровно столько высоты, сколько нужно содержимому каждой вкладки (без пустого места и без обрезанного); список файлов сверху получает остальное.
+• Заголовок каждого эффекта становится зелёным, когда эффект включён (изменена любая настройка: сила, срез, потолок, частоты...).
+• Зелёный цвет сразу показывает всё, что что-то делает: заголовок каждого эффекта или раздела с какой-либо настройкой (также изображение, обрезка, чёрные полосы, цвет) и кнопки, которые уже что-то исправили (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...). При наведении мыши на кнопку её надпись становится зелёной.
+• Вкладки тоже становятся зелёными: открытая и та, на которую наведена мышь. По окончании папка назначения открывается с уже выделенным файлом.
+• При выборе или добавлении файла в «Tracks of the file» уже видны его аудиодорожки (серым); чтобы обработать их, нажмите «➕ Add to queue».
+• DVD (папка VIDEO_TS или образ .iso): при рипе каждая аудиодорожка получает свой язык, прочитанный из файла .IFO диска (в .VOB его нет).
+• Визуализация: при входе вкладки скрываются, чтобы было больше места; «⬅ Back» (вверху слева) возвращает на предыдущую вкладку, как в Jmg VideoEncoder.
+• Edit/Log, для экспертов: под сводкой показаны все параметры активной дорожки («ключ = значение») и фильтры FFmpeg, которые будут использованы. Измените нужные значения и перед обработкой нажмите «Save changes» (правый клик в редакторе).
+• «⚙» (шестерёнка) слева от названий «динамический диапазон» и Dynamic processing, а также в «Combine tracks» — у динамического диапазона (удаление эха) и у «Silence voices of the original» (гейт): открывает расширенные настройки для тонкой подстройки, как в Ocenaudio. У каждой — ползунок, поле и подсказки по краям: порог, атака, восстановление, колено и усиление, атака и восстановление лимитера; у гейта — объединение пауз, начало раньше, хвост, спад, подъём и сохраняемые удары. «auto» = вычисляет программа. «↺ Default» возвращает заводские значения. Сохраняются с каждой дорожкой, а название становится зелёным. «Combine tracks» выводит только FLAC или WAV.
+• В окнах «⚙»: двойной щелчок по ползунку (или его полю) возвращает начальное значение, а стрелки клавиатуры двигают его по шагу. При наведении на кнопку зеленеют только её буквы (кнопка не подсвечивается). В Edit/Log строка «ffmpeg_filtros = ...» — это фильтры FFmpeg дорожки: их можно изменить, «Save changes» их применяет; они используются при обработке, пока вы не меняете другие настройки дорожки (иначе возвращаются фильтры программы, и журнал об этом сообщает).
+• Если изменить настройку в Визуализации, воспроизведение останавливается, а вид остаётся прежним, пока вы не нажмёте «Generate visualization»; нажмите ▶, чтобы послушать с изменением. Во время обработки «⬅ Back» по-прежнему работает. Всплывающие подсказки исчезают сами через несколько секунд.
+• Вся мощность процессора: длинная дорожка (больше 6 минут) обрабатывается несколькими кусками одновременно (до половины ядер) и склеивается без шва; каждый кусок начинается на 64 с раньше, чтобы эффекты звучали так же, как за один проход. Только если эффекты не меняют время (без отрезков, задержки и смены скорости).
+• Визуализация: при первом входе с дорожкой строится сама; потом — по кнопке «Generate visualization» (при изменении настройки воспроизведение останавливается и появляется подсказка). Детализация как в Sound Forge: масштаб ↔ до x4096, а при увеличении видимая часть читается из файла со всеми сэмплами (до и после).
+• Dynamic processing: режима 0 больше нет. По умолчанию режим 2, ползунки на 0: при 0 ничего не делает; если поднять ползунок, применяется выбранный режим.
+• Во вкладке «Presence / EQ» Digital smoothing находится справа от 3-полосного эквалайзера; во вкладке «Dynamics / Bass» Dynamic processing — справа от Bass Management, а «Azid mode» — рядом с его «Auto».
 • 3-полосный EQ и продвинутый EQ вместе не используются: пока в одном что-то выставлено, другой отключён. То же с Master и громкостью по каналам. Цифровое сглаживание тоже не сочетается с эквалайзерами и с очисткой звука, а очистка — с эквалайзерами, динамическим диапазоном и динамической обработкой. Кнопки «Auto» выключают несовместимое, и сообщение говорит, что именно.
 • «Open the destination folder when finished» (вкладка Output): по окончании обработки открывает папку, куда сохранены файлы.
 • Если что-то пошло не так, посмотрите вкладку Edit/Log. Текст журнала можно выделить мышью и скопировать (Ctrl+C или правый щелчок → Copy / Copy the whole log).
@@ -1381,6 +1781,10 @@ COMBINE TRACKS (ДУБЛЯЖИ И СИНХРОНИЗАЦИЯ)
 • Blu-ray: язык каждой звуковой дорожки и каждых субтитров читается из списка воспроизведения диска (в файлах .m2ts его нет).
 • Пока программа работает (обработка, объединение, рип, извлечение, создание ISO...), ПК не уходит в спящий режим; экран при этом может гаснуть.
 • Любой ползунок, в том числе в Combine, двигается стрелками клавиатуры: щёлкните по ползунку и нажимайте ← → (по одному шагу).
+• «Save preset» сохраняет все настройки, включая расширенные настройки дорожки (Aften, параметры кодека и ручные фильтры), а «Load preset» применяет их все.
+• Пресеты общие для Jmg AudioProcesador и Jmg VideoEncoder (одна папка): каждая программа применяет свою часть; звук переходит из одной в другую, а в Jmg AudioProcesador видео и субтитры не влияют.
+• При передаче файлов из одной программы в другую добавленные файлы приходят уже добавленными (со своими настройками звука).
+• То, что сейчас работает (создание, прослушивание, воспроизведение, предпросмотр), выделяется зелёным. На паузе «Resume» (в Jmg VideoEncoder — ⏸) остаётся зелёным.
 
 FFMPEG И ЛИЦЕНЗИЯ
 Использует FFmpeg (ffmpeg.org), версия N-128094-g31855b2a70-20261025 (сборка BtbN), по лицензии GNU GPL v3 (bin\\LICENSE.txt).
@@ -1389,14 +1793,14 @@ Jmg AudioProcesador — свободная программа под лицен�
 Поддержать проект: https://www.paypal.com/paypalme/JmgSoftware
 
 ОГРОМНАЯ РАБОТА
-• На создание Jmg SuiteMultimedia (этой программы и Jmg VideoEncoder) ушла огромная работа: около 45 дней, с проверками на настоящих фильмах. Она создана с помощью Claude, искусственного интеллекта компании Anthropic.
+• На создание Jmg SuiteMultimedia (этой программы и Jmg VideoEncoder) ушли огромная работа и самоотдача, с проверками на настоящих фильмах. Она создана с помощью Claude, искусственного интеллекта компании Anthropic.
 """
 AYUDA["hi"]="""JMG AUDIOPROCESADOR 5.1 · सहायता
 
 (प्रोग्राम का इंटरफ़ेस अंग्रेज़ी में है: बटनों के नाम वैसे ही लिखे गए हैं जैसे वे स्क्रीन पर दिखते हैं।)
 
 इस्तेमाल कैसे करें
-1. «Select» या «Add» से फ़ाइलें जोड़ें, या उन्हें फ़ाइल सूची पर खींचकर छोड़ें। बिना ऑडियो ट्रैक वाली फ़ाइलें नहीं जुड़तीं।
+1. «Select» या «Add» से फ़ाइलें जोड़ें, या उन्हें फ़ाइल सूची पर खींचकर छोड़ें। बिना ऑडियो ट्रैक वाली फ़ाइलें नहीं जुड़तीं। फिर «➕ Add to queue» (दाईं ओर, ट्रैक सूची के नीचे) चुनी गई फ़ाइलों को ट्रैक सूची में डालता है (उन पर ✔): सिर्फ़ वही प्रोसेस होती हैं।
 2. किसी ट्रैक पर क्लिक करें (कई ट्रैक के लिए Ctrl+क्लिक)। हर ट्रैक की अपनी सेटिंग्स रहती हैं। «Apply to all» सक्रिय ट्रैक की सेटिंग्स बाकी चुने हुए ट्रैकों पर कॉपी करता है।
 3. टैब में सेटिंग्स करें और Visualization में नतीजा देखें।
 4. PROCESS दबाएँ: ज़रूरी जानकारी दिखती है और «🔍 See everything» हर ट्रैक को उसके फ़ॉर्मैट और इफ़ेक्ट के साथ दिखाता है (इसे कॉपी किया जा सकता है)। आपकी मूल फ़ाइलें कभी नहीं बदलतीं। «Cancel» प्रोसेस रोकता है और जो कुछ आधा लिखा रह गया हो उसे मिटा देता है।
@@ -1404,7 +1808,7 @@ AYUDA["hi"]="""JMG AUDIOPROCESADOR 5.1 · सहायता
 VOLUME (आवाज़)
 • Master: सब कुछ एक साथ ऊपर या नीचे करता है। उसके नीचे हर चैनल का वॉल्यूम है। Master और हर चैनल -30 dB तक जाते हैं; उससे एक स्थान नीचे «Mute» (लाल) है: पूरी तरह चुप। प्रति चैनल वॉल्यूम सबसे आख़िर में लगता है (Bass Management, Double Bass और Channel separation के बाद): आप जितना सेट करते हैं, वह चैनल ठीक उतना ही ऊपर या नीचे जाता है।
 • «Set Master»: ट्रैक को मापता है और Master को लक्ष्य तक उठाता है, पीक की सीमा पार किए बिना (अपने-आप क्लिपिंग से बचाव)। यह वॉल्यूम कभी कम नहीं करता: अगर ट्रैक पहले से तेज़ है, तो 0 dB पर रहता है।
-• «Volume per channel» का «Auto»: चुने हुए ट्रैकों के हर चैनल की लाउडनेस मापता है और उनके स्लाइडरों को सिनेमा जैसे संतुलन पर ले आता है: सेंटर को नहीं छूता, फ़्रंट उससे लगभग 3 dB नीचे, सराउंड लगभग 7 dB और सबवूफ़र लगभग 6 dB नीचे (अधिकतम ±6 dB; सबवूफ़र ±3 dB)। बाद में आप उन्हें हाथ से ठीक कर सकते हैं। फ़्रंट और सराउंड सिर्फ़ तब घटाए जाते हैं जब वे बहुत तेज़ हों, कभी बढ़ाए नहीं जाते: कुछ फ़िल्मों को इतना स्टीरियो या सराउंड नहीं चाहिए।
+• «Volume per channel» का «Auto»: चुने हुए ट्रैकों के हर चैनल की लाउडनेस मापता है और उनके स्लाइडरों को सभी चैनलों में संतुलित, सिनेमा जैसे संतुलन पर ले आता है: सेंटर को नहीं छूता, फ़्रंट उससे लगभग 1.5 dB नीचे और सराउंड लगभग 3 dB नीचे रहते हैं; सबवूफ़र हमेशा बाकी सबसे थोड़ा नीचे रहता है (सबसे धीमे से लगभग 2 dB नीचे)। फ़्रंट और सराउंड ज़्यादा से ज़्यादा 6 dB नीचे जाते हैं; सबवूफ़र -6 से +3 dB तक। बाद में आप इन्हें हाथ से ठीक कर सकते हैं। फ़्रंट और सराउंड केवल तब नीचे किए जाते हैं जब वे बहुत तेज़ हों, कभी ऊपर नहीं: कुछ फ़िल्मों को इतना स्टीरियो या सराउंड नहीं चाहिए।
 • एडवांस्ड EQ का «Auto»: फ़्रंट, सराउंड और सेंटर के बेस, मिड और ट्रेबल को मापता है और उन्हें एक-दूसरे के पास लाता है (अधिकतम ±3 dB)। नतीजा ग्रुप वाले एडवांस्ड EQ में रहता है, जहाँ आप उसे बदल सकते हैं। सबवूफ़र को नहीं छूता।
 • नॉर्मलाइज़ेशन: Loudnorm लाउडनेस मापकर उसे बिना कंप्रेशन के ठीक लक्ष्य पर रखता है (पीक को एक लिमिटर सँभालता है)। «Normalize» अभी मापता है और बदलाव PROCESS करते समय एक ही पास में लागू होता है; अगर पहले नहीं मापा, तो प्रोसेस के दौरान मापा जाता है। DynAudNorm धीमे और तेज़ हिस्सों को बराबर करता है। SpeechNorm संवादों को बराबर करता है (सिर्फ़ सेंटर चैनल पर, जहाँ आवाज़ होती है)।
 • सिंक्रोनाइज़ेशन: फ़्रेम रेट बदलना (पिच बदलकर या बिना) और शुरुआती देरी (-6000 से +6000 ms)।
@@ -1413,7 +1817,7 @@ VOLUME (आवाज़)
 • «Digital smoothing» (0-5): 80 और 90 के दशक की कई फ़िल्मों और डबिंग का ज़्यादा ट्रेबल (तीखी सीटी जैसी स-ध्वनियाँ और धातु जैसी चमक) हटाता है, इक्वलाइज़र से नहीं बल्कि ट्रेबल काटने वाले फ़िल्टर से, सबवूफ़र को छोड़कर सभी चैनलों पर। 0 = कोई असर नहीं। «Auto» सेंटर का ट्रेबल मापकर मात्रा चुनता है।
 
 PRESENCE / EQ
-• Presence: आवाज़ (सेंटर चैनल), संगीत/माहौल, इफ़ेक्ट या सबवूफ़र को उभारता है। लिमिटर की ऊपरी सीमा वैकल्पिक है। «Channel separation» (दाईं ओर, -10 से +10): बाएँ-दाएँ और आगे-पीछे के बीच ज़्यादा या कम अलगाव, वॉल्यूम बढ़ाए बिना। उसका «Auto» फ़िल्म का अलगाव मापता है और फ़िल्म कितनी तेज़ है उसके हिसाब से सही मात्रा लगाता है (एक्शन में ज़्यादा, शांत फ़िल्मों में कम); सेंटर को कभी नहीं छूता। सलाह: Channel separation को आख़िर से दूसरी सेटिंग और Volume per channel को आख़िरी सेटिंग बनाएँ।
+• Presence: आवाज़ (सेंटर चैनल), संगीत/माहौल, इफ़ेक्ट या सबवूफ़र को उभारता है। लिमिटर की ऊपरी सीमा वैकल्पिक है। «Channel separation» (दाईं ओर, -15 से +15): बाएँ-दाएँ और आगे-पीछे के बीच ज़्यादा या कम अलगाव, वॉल्यूम बढ़ाए बिना। उसका «Auto» फ़िल्म का अलगाव मापता है और फ़िल्म कितनी तेज़ है उसके हिसाब से सही मात्रा लगाता है (एक्शन में ज़्यादा, शांत फ़िल्मों में कम); सेंटर को कभी नहीं छूता। सलाह: Channel separation को आख़िर से दूसरी सेटिंग और Volume per channel को आख़िरी सेटिंग बनाएँ। 1 के कदमों में बारीक, हल्का समायोजन (15 वही देता है जो पहले 10 देता था): Presence, Channel separation और इक्वलाइज़र -15 से +15; Dynamic range और Dynamic processing 0 से 15; Double Bass और Bass Management 0 से 6 (1 के कदमों में)।
 • 3-बैंड EQ और ग्रुप के हिसाब से एडवांस्ड EQ (फ़्रंट, रियर, सेंटर), अपनी मर्ज़ी की फ़्रीक्वेंसी के साथ।
 • हर चैनल की देरी: 0 से 100 ms, 5 ms के क़दमों में (5 ms ≈ 1.7 मीटर)।
 • ऑडियो सफ़ाई: पृष्ठभूमि शोर कम करना (1-2 = हल्का), क्लिक हटाना और क्लिपिंग की मरम्मत (ये दोनों धीमे हैं)। इसका «Auto» तभी कुछ लगाता है जब असली पृष्ठभूमि शोर मिले; साफ़ फ़ाइल पर 0 छोड़ता है और बताता है कि सुधार की ज़रूरत नहीं।
@@ -1425,12 +1829,13 @@ DYNAMICS / BASS
 • Bass Management: स्पीकरों की निचली फ़्रीक्वेंसी सबवूफ़र पर भेजता है (1 = हल्का, 5 = पूरा)। Double Bass: बेस को दोनों तरफ़ दोगुना करता है, सबवूफ़र से स्पीकरों पर और स्पीकरों से सबवूफ़र पर। दोनों सबवूफ़र को साफ़ तौर पर बढ़ाते हैं, क्लिपिंग से सुरक्षित। इसका «Auto» Double Bass (1-3) लगाता है अगर स्पीकरों में गहरा बेस कम हो या सबवूफ़र कमज़ोर हो; संतुलित हों तो 0। डिफ़ॉल्ट कट: 90 Hz।
 • डायनामिक रेंज: धीमी आवाज़ें नीचे जाती हैं और कंट्रास्ट बढ़ता है।
 • डायनामिक प्रोसेसिंग: 1 Lift (धीमे हिस्से ऊपर), 2 Impact (तेज़ हिस्से उभरते हैं), 3 दोनों। ग्रुप के हिसाब से ताक़त। अगर Bass Management या Double Bass इस्तेमाल करें, तो सबवूफ़र को 0 पर रखें।
+• Azid mode, Dynamic processing के «Auto» के बगल में: BeLight (DSPguru के Azid) की तरह, यह AC3/E-AC3 में ही मौजूद कम्प्रेशन जानकारी का उपयोग करता है। इसका एक ही विकल्प है, «Inverse»: AC3/E-AC3 में मौजूद कम्प्रेशन को उल्टा लगाना: तेज़ आवाज़ें और तेज़, धीमी और धीमी (ज़्यादा डायनामिक्स)। «Original» कुछ नहीं बदलता। DVD फ़िल्मों के लिए सुझाया गया, जिनमें यह जानकारी होती है; DTS, TrueHD, FLAC... में कुछ नहीं बदलता (लॉग में बताया जाता है)। यह Presence, चैनल अलगाव, Dynamic range, नॉर्मलाइज़ेशन या सफ़ाई के साथ नहीं चलता: इसे चालू करने पर वे बंद हो जाते हैं, और उनमें से किसी को छूने पर यह «Original» पर लौट आता है। वॉल्यूम, इक्वलाइज़र, स्मूदिंग, सिंक, Dynamic processing (केवल मोड 1), Bass Management और Double Bass इसके साथ इस्तेमाल किए जा सकते हैं। आउटपुट «Passthrough» (ट्रैक को बिना प्रोसेस किए कॉपी करता है) को छोड़कर कोई भी फ़ॉर्मैट हो सकता है; Azid इस्तेमाल करते समय यह सूची में नहीं दिखता। मोड चुनने पर एक विंडो यह याद दिलाती है।
 • Bass Management, Double Bass, डायनामिक रेंज और डायनामिक प्रोसेसिंग में «Auto»: वही काम, जो मापे उसके अनुसार (सबवूफ़र का स्तर और डायनामिक रेंज)। अगर फ़िल्म पहले से ठीक है, तो 0 छोड़ता है और बताता है।
 
 VISUALIZATION
-• टैब खोलते ही अपने-आप बनता है और कोई भी सेटिंग बदलने पर अपडेट होता है। पहले और बाद (BEFORE / AFTER) की तुलना चैनल-दर-चैनल करता है।
+• किसी ट्रैक के साथ पहली बार आने पर यह अपने-आप बनता है; उसके बाद «Generate visualization» दबाने पर। पहले और बाद (BEFORE / AFTER) की तुलना चैनल-दर-चैनल करता है।
 • पहले या बाद वाला चलाएँ, Pause/Resume और Stop। किसी चैनल पर क्लिक = सिर्फ़ वह चैनल सुनें (फिर क्लिक = सभी)।
-• पहिया = ज़ूम · खींचना = खिसकाना · डबल-क्लिक = x1 · स्पेस बार = चलाना और रोकना। ज़ूम पर, चलते समय वेवफ़ॉर्म अपने-आप चलता है और कर्सर बीच में रहता है। हिस्सा: पूरी फ़ाइल या पहले 5, 10 या 30 मिनट। अगर बनते समय हिस्सा बदलें, तो नया बिना रुके शुरू होता है; अगर दूसरे टैब पर जाएँ, तो रुक जाता है और लौटने पर अपने-आप बनता है।
+• पहिया = ज़ूम · खींचना = खिसकाना · डबल-क्लिक = x1 · स्पेस बार = चलाना और रोकना। ज़ूम पर, चलते समय वेवफ़ॉर्म अपने-आप चलता है और कर्सर बीच में रहता है। हिस्सा: पूरी फ़ाइल या पहले 5, 10 या 30 मिनट। अगर बनते समय हिस्सा बदलें, तो नया बिना रुके शुरू होता है; अगर दूसरे टैब पर जाएँ, तो भी यह पूरा बनता है। दो ज़ूम, Jmg VideoEncoder की तरह: ↔ (समय, x1-x4096) और ↕ (तरंगों की ऊँचाई, x1-x16); जो चाहिए उसे चुनें और माउस का पहिया उसे बढ़ाता या घटाता है (डबल क्लिक = x1)।
 • एडिटर («✎ Edit the file» बॉक्स): एक ट्रैक वाली WAV, W64 या FLAC फ़ाइल को हाथ से पूरा करने के लिए, जैसे जोड़ा गया (combined) ट्रैक। उस टुकड़े को चिह्नित करने के लिए किसी चैनल पर खींचें (ऊपर-नीचे खींचने पर कई चैनल; फिर उसके किनारों को खींचकर बड़ा या छोटा करें), dB लिखें (जैसे -40, लगभग चुप करने के लिए) और «Apply» दबाएँ। समय «From» और «to» में भी लिख सकते हैं। पहिया = ज़ूम। ज़ूम में वेवफ़ॉर्म खिसकाने के लिए: ऊपर की पट्टी या चैनलों के नाम पर हाथ से खींचें, नीचे की पट्टी, ← → तीर (Shift के साथ तेज़) या दाएँ बटन से खींचें। दायाँ क्लिक = चयन हटाएँ। टुकड़ा चिह्नित हो तो «■ Stop» उस टुकड़े की शुरुआत पर लौटाता है।
 • «▶ Hear the selection» सिर्फ़ चिह्नित टुकड़ा और चैनल, बदलावों के साथ, किसी भी मिनट पर चलाता है। बिना सहेजे बदलावों के साथ बटन «Play WITHOUT CHANGES» और «Play WITH CHANGES» बन जाते हैं: दूसरा वाला, और किसी चैनल पर क्लिक, आपके बदलावों के साथ किसी भी जगह से चलाते हैं। «↶ Undo» और «↷ Redo» एक-एक क़दम चलते हैं।
 • मिनिमाइज़ करने पर प्रोग्राम घड़ी के पास (सिस्टम ट्रे में) एक आइकन बनकर रहता है, जो प्रोसेस की प्रगति दिखाता है: बायाँ क्लिक = विंडो वापस आती है; दायाँ क्लिक = मेनू (प्रोसेस रद्द करें, ख़त्म होने पर क्या करें —कुछ नहीं, बाहर निकलें या पीसी बंद करें—, ख़त्म होने पर फ़ोल्डर खोलें, बाहर निकलें)। Output में इसे बंद किया जा सकता है, ताकि हमेशा की तरह टास्कबार पर मिनिमाइज़ हो। किसी बटन, बॉक्स या स्लाइडर पर माउस रोकने से उसका विवरण दिखता है, जो कुछ सेकंड में अपने-आप चला जाता है।
@@ -1443,7 +1848,7 @@ OUTPUT
 • चैनल: डिफ़ॉल्ट रूप से इनपुट जितने। 5.1, 4.1, 4.0, 3.1, 2.1, 2.0 (Dolby या Simple स्टीरियो) या 1.0 (मोनो)। जो चैनल बचते हैं वे बाकी में मिला दिए जाते हैं।
 • 7.1 स्रोत 5.1 के रूप में निकलते हैं: साइड चैनल रियर में मिला दिए जाते हैं।
 • स्टीरियो स्रोत: 2.0 स्टीरियो ही रहता है; 5.1 एक Upmix करता है (फ़्रंट और रियर से «Remove voice» के साथ)। Upmix के साथ सिर्फ़ Channel separation, वॉल्यूम और इक्वलाइज़र इस्तेमाल होते हैं; बाकी (Presence, नॉर्मलाइज़ेशन, डायनामिक रेंज, डायनामिक प्रोसेसिंग, Bass Management, Double Bass, स्मूदिंग और सफ़ाई) बंद हो जाते हैं।
-• फ़ॉर्मैट: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (हर चैनल की एक WAV), RF64, W64 (Sound Forge), TrueHD और Passthrough (बिना बदले कॉपी)। 2.0 और 1.0 के लिए MP3। «Aften Dolby Digital» (डिफ़ॉल्ट) AC3 को Aften से बनाता है, जो ज़्यादा डायनामिक रेंज वाली फ़िल्मों में बेहतर रेंज देता है; «AC3», FFmpeg से। इसकी सेटिंग्स दूसरे फ़ॉर्मैटों की तरह «⚙ Aften...» से (डिफ़ॉल्ट: block switching और स्थिर पूरी बैंडविड्थ): CBR या VBR, बैंडविड्थ, सटीकता, फ़िल्टर, डायनामिक रेंज (DRC और संवाद स्तर) और एम्प्लीफ़ायर के लिए जानकारी (Dolby Surround EX, Dolby Headphone, Standard या HDCD A/D कनवर्टर, पसंदीदा डाउनमिक्स और उसके स्तर)। हर डिवाइस VBR वाला AC3 नहीं पढ़ता।
+• फ़ॉर्मैट: AC3, EAC3, DTS, AAC, FLAC, WAV, WAV Split (हर चैनल की एक WAV), RF64, W64 (Sound Forge), TrueHD और Passthrough (बिना बदले कॉपी)। 2.0 और 1.0 के लिए MP3। «Aften Dolby Digital» (डिफ़ॉल्ट) AC3 को Aften से बनाता है, जो ज़्यादा डायनामिक रेंज वाली फ़िल्मों में बेहतर रेंज देता है; «AC3», FFmpeg से। इसकी सेटिंग्स दूसरे फ़ॉर्मैटों की तरह «⚙ Aften...» से (डिफ़ॉल्ट: block switching और स्थिर पूरी बैंडविड्थ): CBR या VBR, बैंडविड्थ, सटीकता, फ़िल्टर, डायनामिक रेंज (DRC और संवाद स्तर) और एम्प्लीफ़ायर के लिए जानकारी (Dolby Surround EX, Dolby Headphone, Standard या HDCD A/D कनवर्टर, पसंदीदा डाउनमिक्स और उसके स्तर)। हर डिवाइस VBR वाला AC3 नहीं पढ़ता। Combine में 7.1 आउटपुट AAC, FLAC, WAV, W64 और RF64 में मिलता है; AC3, E-AC3, DTS और TrueHD अधिकतम 5.1 तक। सामान्य प्रोसेसिंग अधिकतम 5.1 देती है।
 • «🎬 VideoEncoder» (ऊपर, «Create ISO» के बाद): सूची की चुनी हुई फ़ाइलें (या सभी) Jmg VideoEncoder को भेजता है। अगर वह खुला है, तो वे उसकी सूची में जाती हैं; अगर नहीं, तो वह उनके साथ खुलता है। अगर वह न मिले, तो एक बार उसे ढूँढने को कहता है। फिर यह प्रोग्राम बंद हो जाता है (दोनों एक साथ खुले नहीं रहते)। दोनों प्रोग्रामों में मौजूद हर ट्रैक की ऑडियो सेटिंग्स (वॉल्यूम, Presence, इक्वलाइज़र, चैनल सेपरेशन, डायनामिक रेंज, सिंक और फ़ॉर्मेट) भी साथ जाती हैं। फ़ाइलें न हों तो बस दूसरे प्रोग्राम पर चला जाता है।
 • «MKV with video»: वीडियो, सबटाइटल, चैप्टर और कवर कॉपी करता है, और प्रोसेस किए गए ट्रैक जोड़ता है। «Audio only»: हर ट्रैक की एक फ़ाइल। नीचे «File name»: हर फ़ाइल से जो निकलेगा उसका नाम (↺ अपने-आप वाले नाम पर लौटाता है) और वह कहाँ सहेजा जाएगा।
 • «Core as a separate track» (Output में, फ़ॉर्मेट के पास; «MKV with video» के साथ): यह सिर्फ़ उन ट्रैकों पर चालू होता है जिनमें कोर होता है, और हर ट्रैक के लिए अलग से लगता है। DTS-HD ट्रैक (Master Audio या High Resolution) के अंदर उन डिवाइसों के लिए एक सामान्य DTS होता है जो HD नहीं समझते, और Dolby Atmos (TrueHD) ट्रैक के अंदर Atmos के बिना एक TrueHD; चुनने पर वह अलग ट्रैक के रूप में भी निकलता है, बिना दोबारा एन्कोड किए, मूल ट्रैकों के बाद।
@@ -1473,7 +1878,27 @@ COMBINE TRACKS (डबिंग और सिंक)
 • डायनामिक रेंज और डायनामिक प्रोसेसिंग: एक समय में सिर्फ़ एक, और नॉर्मलाइज़ेशन उन्हें बंद कर देते हैं। Presence सभी इफ़ेक्ट के साथ काम करता है, Upmix को छोड़कर। प्रोग्राम यह अपने-आप करता है।
 • ⚠ लिमिटर की सीमा «No limit»: इफ़ेक्ट ज़्यादा बढ़ाने पर क्लिपिंग हो सकती है। सुरक्षित रहने के लिए -1 dBFS चुनें।
 • «Reset» खुला टैब साफ़ करता है («All» = सब कुछ)। प्रीसेट आपकी सेटिंग्स सहेजते और लोड करते हैं।
-• «↶ Undo» और «↷ Redo» (नीचे, «Reset» के पास): आख़िरी 50 कार्यों को एक-एक करके वापस करते और दोहराते हैं: किसी भी ट्रैक की सेटिंग में बदलाव, फ़ाइलें जोड़ना या हटाना, ट्रैक मिटाना, शीर्षक... Visualization में ये एडिटर के बदलाव (म्यूट किए या कम किए गए हिस्से) वापस करते और दोहराते हैं। Ctrl+Z और Ctrl+Y से भी।
+• सेटिंग्स और प्रीसेट सुरक्षित तरीके से सहेजे जाते हैं: पहले एक अस्थायी फ़ाइल में, जो फिर एक ही बार में असली फ़ाइल की जगह ले लेती है; अगर बीच में बिजली चली जाए या प्रोग्राम बंद हो जाए, तो पिछली फ़ाइल पूरी बची रहती है, कभी आधी लिखी नहीं।
+• प्रोग्राम जो फ़ाइलें बनाता है, वे पहले «नाम.part.ext» के रूप में लिखी जाती हैं और ठीक से पूरी होने पर ही असली नाम पाती हैं: अगर बीच में बिजली चली जाए, तो कटी हुई फ़ाइल कभी पूरी फ़ाइल के नाम से नहीं रहती। खोलने पर प्रोग्राम पिछली बार बची «.part» फ़ाइलों के बारे में बताता है (उन्हें हटाया जा सकता है)।
+• AC3 और E-AC3 ट्रैक जैसे हैं वैसे ही डिकोड होते हैं, उनके अंदर के कम्प्रेशन के बिना (FFmpeg पहले इसे अपने आप लगाकर पीक कम कर देता था): मूल आवाज़ मिलती है।
+• «↶ Undo» और «↷ Redo» (नीचे, «Reset» के पास): आख़िरी 50 कार्यों को एक-एक करके वापस करते और दोहराते हैं: किसी भी ट्रैक की सेटिंग में बदलाव, फ़ाइलें जोड़ना या हटाना, ट्रैक मिटाना, शीर्षक... Visualization में ये एडिटर के बदलाव (म्यूट किए या कम किए गए हिस्से) वापस करते और दोहराते हैं। Ctrl+Z और Ctrl+Y से भी। जब एडिटर में वापस करने या दोहराने को कुछ न हो, तो ये बाकी बदलावों को वापस करते और दोहराते हैं, जैसे दूसरे टैब में।
+• ऊपर के दो कॉलम के बीच की पट्टी वहीं रुक जाती है जहाँ किसी कॉलम के बटन या टेक्स्ट नहीं समाते: वे कभी कटते नहीं।
+• स्क्रॉल बार केवल ज़रूरत पड़ने पर दिखते हैं, और हर सेटिंग की व्याख्या माउस ऊपर ले जाने पर दिखती है (टैब में व्याख्या वाले टेक्स्ट नहीं हैं)।
+• टैब का पैनल हर टैब की सामग्री जितनी ही ऊँचाई लेता है (न खाली जगह, न कुछ कटा हुआ); ऊपर की फ़ाइल सूची बाकी जगह लेती है।
+• हर इफ़ेक्ट का शीर्षक हरा हो जाता है जब वह चालू हो (कोई भी सेटिंग बदली हो: तीव्रता, कटऑफ़, सीमा, फ़्रीक्वेंसी...)।
+• हरा रंग एक नज़र में दिखाता है कि क्या-क्या कुछ कर रहा है: जिस इफ़ेक्ट या हिस्से में कोई सेटिंग बदली हो उसका शीर्षक (इमेज, कटिंग, काली पट्टियाँ, रंग भी) और वे बटन जिन्होंने पहले ही कुछ ठीक किया है (Adjust Master, Normalize, Calculate delay, Fix by parts, More options...)। किसी बटन पर माउस ले जाने पर उसके अक्षर हरे हो जाते हैं।
+• टैब भी हरे होते हैं: जो खुला है और जिस पर माउस है। काम पूरा होने पर गंतव्य फ़ोल्डर फ़ाइल चुनी हुई अवस्था में खुलता है।
+• फ़ाइल चुनने या जोड़ने पर «Tracks of the file» में उसके ऑडियो ट्रैक की जानकारी (धूसर) दिखती है; उन्हें प्रोसेस करने के लिए «➕ Add to queue» दबाएँ।
+• DVD (VIDEO_TS फ़ोल्डर या .iso इमेज): रिप करते समय हर ऑडियो ट्रैक को उसकी भाषा मिलती है, जो डिस्क की .IFO फ़ाइल से पढ़ी जाती है (.VOB फ़ाइलों में यह नहीं होती)।
+• विज़ुअलाइज़ेशन: इसमें जाने पर ज़्यादा जगह के लिए टैब छिप जाते हैं; «⬅ Back» (ऊपर बाईं ओर) पिछले टैब पर ले जाता है, जैसे Jmg VideoEncoder में।
+• Edit/Log, विशेषज्ञों के लिए: सारांश के नीचे सक्रिय ट्रैक के सभी पैरामीटर («कुंजी = मान») और इस्तेमाल होने वाले FFmpeg फ़िल्टर दिखते हैं। जो मान चाहें बदलें और प्रोसेस करने से पहले «Save changes» (एडिटर में राइट-क्लिक) दबाएँ।
+• «⚙» (गियर), डायनामिक रेंज और Dynamic processing के शीर्षकों के बाईं ओर, और «Combine tracks» में डायनामिक रेंज (गूँज हटाना) और «Silence voices of the original» (गेट) पर: Ocenaudio की तरह बारीक ट्यूनिंग के लिए एडवांस्ड सेटिंग्स खोलता है। हर एक के साथ स्लाइडर, बॉक्स और दोनों ओर उसका असर: थ्रेशोल्ड, अटैक, रिलीज़, नी और गेन, लिमिटर का अटैक और रिलीज़; गेट में अंतराल जोड़ना, पहले शुरू करना, टेल, नीचे जाना, ऊपर आना और बचाए जाने वाले धमाके। «auto» = प्रोग्राम खुद तय करता है। «↺ Default» फ़ैक्टरी मान लौटाता है। ये हर ट्रैक के साथ सेव होती हैं और शीर्षक हरा हो जाता है। «Combine tracks» सिर्फ़ FLAC या WAV देता है।
+• «⚙» विंडो में: स्लाइडर (या उसके बॉक्स) पर डबल-क्लिक करने से वह शुरुआती मान पर लौटता है, और कीबोर्ड के तीर उसे एक-एक कदम चलाते हैं। बटन पर माउस ले जाने पर सिर्फ़ उसके अक्षर हरे होते हैं (बटन नहीं चमकता)। Edit/Log में «ffmpeg_filtros = ...» पंक्ति ट्रैक के FFmpeg फ़िल्टर हैं: इन्हें बदल सकते हैं और «Save changes» इन्हें लागू करता है; जब तक ट्रैक की दूसरी सेटिंग न बदलें, प्रोसेस में यही इस्तेमाल होते हैं (बदलने पर प्रोग्राम वाले लौट आते हैं और लॉग में लिखा आता है)।
+• विज़ुअलाइज़ेशन में कोई सेटिंग बदलने पर आवाज़ रुक जाती है और «Generate visualization» दबाने तक व्यू वैसा ही रहता है; बदलाव के साथ सुनने के लिए ▶ दबाएँ। प्रोसेसिंग के दौरान भी «⬅ Back» काम करता है। टूलटिप कुछ सेकंड बाद अपने-आप हट जाते हैं।
+• प्रोसेसर की पूरी ताक़त: लंबा ट्रैक (6 मिनट से ज़्यादा) कई टुकड़ों में एक साथ प्रोसेस होता है (आधे कोर तक) और बिना जोड़ दिखे जुड़ता है; हर टुकड़ा 64 सेकंड पहले से शुरू होता है ताकि इफ़ेक्ट एक बार में करने जैसे ही सुनाई दें। यह तभी होता है जब इफ़ेक्ट समय नहीं बदलते (बिना हिस्सों, डिले या स्पीड बदलाव के)।
+• विज़ुअलाइज़ेशन: किसी ट्रैक के साथ पहली बार आने पर यह अपने-आप बनता है; उसके बाद «Generate visualization» दबाने पर बनता है (कोई सेटिंग बदलने पर आवाज़ रुक जाती है और सूचना दिखती है)। Sound Forge जैसी बारीकी: ↔ ज़ूम x4096 तक जाता है, और ज़ूम पर जो दिखता है वह फ़ाइल से सभी सैंपल के साथ पढ़ा जाता है (पहले और बाद में)।
+• Dynamic processing: अब मोड 0 नहीं है। डिफ़ॉल्ट रूप से मोड 2 और स्लाइडर 0 पर: 0 पर कुछ नहीं होता; कोई स्लाइडर बढ़ाने पर चुना हुआ मोड लागू होता है।
+• «Presence / EQ» में Digital smoothing 3-बैंड EQ के दाईं ओर है; «Dynamics / Bass» में Dynamic processing, Bass Management के दाईं ओर है, और «Azid mode» उसके «Auto» के पास है।
 • 3-बैंड EQ और एडवांस्ड EQ एक साथ इस्तेमाल नहीं होते: जब तक एक में कुछ सेट है, दूसरा बंद रहता है। Master और हर चैनल के वॉल्यूम के साथ भी ऐसा ही। डिजिटल स्मूदिंग भी इक्वलाइज़रों या ऑडियो सफ़ाई के साथ नहीं चलता, न ऑडियो सफ़ाई इक्वलाइज़रों, डायनामिक रेंज या डायनामिक प्रोसेसिंग के साथ। «Auto» बटन जो साथ नहीं चलता उसे बंद कर देते हैं और सूचना बताती है कि क्या।
 • «Open the destination folder when finished» (Output टैब): प्रोसेस ख़त्म होने पर वह फ़ोल्डर खोलता है जहाँ फ़ाइलें सहेजी गईं।
 • अगर कुछ गड़बड़ हो, तो Edit/Log टैब देखें। लॉग का टेक्स्ट माउस से चुना और कॉपी किया जा सकता है (Ctrl+C या दायाँ क्लिक → Copy / Copy the whole log)।
@@ -1486,6 +1911,10 @@ COMBINE TRACKS (डबिंग और सिंक)
 • Blu-ray: हर ऑडियो ट्रैक और हर सबटाइटल की भाषा डिस्क की प्लेलिस्ट से पढ़ी जाती है (.m2ts फ़ाइलों में यह नहीं होती)।
 • जब प्रोग्राम काम कर रहा हो (प्रोसेस, जोड़ना, रिप, निकालना, ISO बनाना...), तब पीसी स्लीप मोड में नहीं जाता; स्क्रीन फिर भी बंद हो सकती है।
 • हर स्लाइडर, Combine वाले भी, कीबोर्ड के तीरों से चलता है: स्लाइडर पर क्लिक करें और ← → दबाएँ (एक बार में एक क़दम)।
+• «Save preset» सभी सेटिंग्स सहेजता है, ट्रैक की एडवांस्ड सेटिंग्स (Aften, कोडेक विकल्प और मैनुअल फ़िल्टर) भी, और «Load preset» उन सबको लगाता है।
+• प्रीसेट Jmg AudioProcesador और Jmg VideoEncoder में साझा हैं (एक ही फ़ोल्डर): हर प्रोग्राम अपना हिस्सा लगाता है; ऑडियो एक से दूसरे में जाता है, और Jmg AudioProcesador में वीडियो और सबटाइटल का असर नहीं होता।
+• एक प्रोग्राम से दूसरे में फ़ाइलें भेजने पर, जो जोड़ी गई थीं वे जुड़ी हुई ही पहुँचती हैं (अपनी ऑडियो सेटिंग्स के साथ)।
+• जो चल रहा है (बनाना, सुनना, चलाना, प्रीव्यू) वह हरे रंग में दिखता है। रुकने पर «Resume» (Jmg VideoEncoder में ⏸) हरा रहता है।
 
 FFMPEG और लाइसेंस
 FFmpeg (ffmpeg.org) का उपयोग करता है, संस्करण N-128094-g31855b2a70-20261025 (BtbN बिल्ड), GNU GPL v3 लाइसेंस के तहत (bin\\LICENSE.txt)।
@@ -1494,7 +1923,7 @@ Jmg AudioProcesador GNU GPL v3 लाइसेंस के तहत मुफ�
 प्रोजेक्ट का समर्थन करें: https://www.paypal.com/paypalme/JmgSoftware
 
 बहुत बड़ी मेहनत
-• Jmg SuiteMultimedia (यह प्रोग्राम और Jmg VideoEncoder) को बनाने में बहुत बड़ी मेहनत लगी है: लगभग 45 दिन, असली फ़िल्मों पर परीक्षण के साथ। इसे Anthropic की आर्टिफ़िशियल इंटेलिजेंस Claude की मदद से विकसित किया गया।
+• Jmg SuiteMultimedia (यह प्रोग्राम और Jmg VideoEncoder) को बनाने में बहुत बड़ी मेहनत और लगन लगी है, असली फ़िल्मों पर परीक्षण के साथ। इसे Anthropic की आर्टिफ़िशियल इंटेलिजेंस Claude की मदद से विकसित किया गया।
 """
 
 # ---- Rejilla comun de diseño (todas las pestañas): etiqueta | deslizador | valor | extra ----
@@ -1847,8 +2276,9 @@ def _fps_exacto(v):
     try:return Fraction(s)
     except (ValueError,ZeroDivisionError):return Fraction(25)
 def _set_paleta(nombre):
-    global CF,CT,CSB,CSK,CA,CDO,CDN,CAV,CID,CPS,CASB,CASF,CPB,CPT,PMAR,PNOM,TMAR,TNOM
+    global CF,CT,CSB,CSK,CA,CDO,CDN,CAV,CID,CPS,CASB,CASF,CPB,CPT,PMAR,PNOM,TMAR,TNOM,VERDE_JMG
     p=PALETAS.get(nombre,PALETAS["claro"])
+    VERDE_JMG="#1e8a3a" if p is PALETAS["claro"] else "#3cb95a"   # (JMG, 22-11) en el tema claro, más oscuro (se ve bien al pasar el ratón)
     CF=p["CF"];CT=p["CT"];CSB=p["CSB"];CSK=p["CSK"];CA=p["CA"]
     CDO=p["CDO"];CDN=p["CDN"];CAV=p["CAV"];CID=p["CID"];CPS=p["CPS"]
     CASB=p["CASB"];CASF=p["CASF"];CPB=p["CPB"];CPT=p["CPT"]
@@ -1922,6 +2352,42 @@ def _pausar_pid(pid,on):
         os.kill(int(pid),signal.SIGSTOP if on else signal.SIGCONT);return True
     except Exception:return False
 _BD_LISTA={}   # (JMG, 13-11) carpeta BDMV -> la lista de reproducción (.mpls) que _bd_titulo eligió como película
+_ISO1_2={"es":"spa","en":"eng","ca":"cat","gl":"glg","eu":"baq","fr":"fre","de":"ger","it":"ita","pt":"por","ja":"jpn","zh":"chi","ko":"kor","ru":"rus",
+         "nl":"dut","pl":"pol","sv":"swe","da":"dan","no":"nor","fi":"fin","cs":"cze","hu":"hun","el":"gre","tr":"tur","he":"heb","ar":"ara","hi":"hin",
+         "th":"tha","is":"ice","hr":"hrv","ro":"rum","sk":"slo","sl":"slv","bg":"bul","uk":"ukr","sr":"srp","et":"est","lv":"lav","lt":"lit","id":"ind",
+         "ms":"may","vi":"vie","la":"lat"}
+def _dvd_idiomas(vobs):
+    """(JMG, 22-11) DVD: {id de la pista, como lo da FFmpeg: idioma} de sus pistas de audio y de subtítulos, leídos del .IFO de su
+    VTS, porque los .VOB no traen el idioma. {} si no se puede leer"""
+    res={}
+    try:
+        m_=re.match(r"(VTS_\d\d)_\d\.VOB$",os.path.basename(vobs[0]),re.I)
+        if not m_:return {}
+        with open(os.path.join(os.path.dirname(vobs[0]),m_.group(1)+"_0.IFO"),"rb") as fh:d=fh.read(1<<20)
+        if d[:12]!=b"DVDVIDEO-VTS":return {}
+        def lg(b2):
+            t=b2.decode("latin1").lower().strip("\x00 ")
+            return _ISO1_2.get(t) if len(t)==2 else None
+        na=min(8,int.from_bytes(d[0x202:0x204],"big"));ns=min(32,int.from_bytes(d[0x254:0x256],"big"))
+        ac=list(range(8));sc=list(range(32))   # el número de cada pista dentro del VOB: del primer PGC del título (si no, en orden)
+        try:
+            pt=int.from_bytes(d[0xCC:0xD0],"big")*2048;o=pt+int.from_bytes(d[pt+12:pt+16],"big")
+            for i in range(8):
+                w=int.from_bytes(d[o+0x0C+2*i:o+0x0E+2*i],"big")
+                if w&0x8000:ac[i]=(w>>8)&7
+            for i in range(32):
+                w=int.from_bytes(d[o+0x1C+4*i:o+0x20+4*i],"big")
+                if w&0x80000000:sc[i]=(w>>24)&0x1F
+        except Exception:pass
+        for i in range(na):
+            a=d[0x204+8*i:0x20C+8*i];base={0:0x80,2:0x1C0,3:0x1C0,4:0xA0,6:0x88}.get(a[0]>>5)   # AC3, MPEG, LPCM, DTS
+            l_=lg(a[2:4]) if (a[0]>>2)&3==1 else None
+            if l_ and base is not None:res[base+ac[i]]=l_
+        for i in range(ns):
+            s=d[0x256+6*i:0x25C+6*i];l_=lg(s[2:4]) if s[0]&3==1 else None
+            if l_:res[0x20+sc[i]]=l_
+    except Exception:return {}
+    return res
 def _bd_idiomas(carpeta):
     """(JMG, 13-11) Blu-ray: {PID: idioma} de las pistas de audio y de subtítulos de la película, leídos de la tabla de pistas
     (STN) de su lista de reproducción, porque los .m2ts no traen el idioma. {} si no se puede leer"""
@@ -2085,7 +2551,7 @@ def _tmdb_clave():
     except Exception:return ""
 def _tmdb_clave_poner(c):
     try:
-        with open(_tmdb_cfg_ruta(),"w",encoding="utf-8") as f:json.dump({"clave":str(c).strip()},f)
+        _json_seguro(_tmdb_cfg_ruta(),{"clave":str(c).strip()})
     except Exception:pass
 def _tmdb_hay():
     return bool(TMDB_SERVICIO or _tmdb_clave())
@@ -2151,14 +2617,15 @@ def _portada_junto(ruta):
     return None
 _PERFILES={"DTS-HD MA":"DTS-HD Master Audio","DTS-HD HRA":"DTS-HD High Resolution","DTS-HD MA + DTS:X":"DTS:X (DTS-HD MA)",
            "DTS-HD MA + DTS:X IMAX":"DTS:X IMAX (DTS-HD MA)","Dolby TrueHD + Dolby Atmos":"Dolby Atmos (TrueHD)","Dolby Digital Plus + Dolby Atmos":"Dolby Atmos (E-AC3)"}
-def _separ_filtro(s,chans,lay,env=True):
+def _separ_filtro(s,chans,lay,env=True,adv=None):
     """(JMG, 27-11) «Separación de canales» (-10..+10): cada pareja izquierda / derecha (delanteros, traseros, laterales) se ensancha o se
     estrecha (lo común a los dos canales se queda; la diferencia sube o baja) sin subir el volumen, y en positivo los traseros se retrasan
     un poco (hasta 10 ms, como los decodificadores de cine) para despegar lo de detrás de lo de delante. -> filtros o None"""
-    try:s=max(-10,min(10,int(s)))
+    try:s=max(-15,min(15,int(round(float(s)))))   # (JMG, 20-11) de -15 a +15, de 1 en 1: el 15 hace lo que antes el 10
     except (TypeError,ValueError):return None
     if not s or not chans:return None
-    x=s/10.0;w=0.7*x;k=1.0+w;g=((1.0+0.25)/(1.0+0.25*k*k))**0.5 if w>0 else 1.0   # ensanchar: se compensa el nivel de una mezcla de cine normal (lo distinto, ~6 dB por debajo de lo común)
+    a_=adv or {};x=s/15.0;w=float(a_.get("fuerza",0.7))*x;k=1.0+w;   # (JMG, 22-11) «⚙»: fuerza y retraso
+    g=((1.0+0.25)/(1.0+0.25*k*k))**0.5 if w>0 else 1.0   # ensanchar: se compensa el nivel de una mezcla de cine normal (lo distinto, ~6 dB por debajo de lo común)
     a=round(g*(1.0+k)/2.0,4);b=round(g*(1.0-k)/2.0,4)
     idx={c:i for i,c in enumerate(chans)};ex={i:f"c{i}" for i in range(len(chans))};hay=False
     for l,r in [("FL","FR")]+([("BL","BR"),("SL","SR")] if env else []):
@@ -2167,7 +2634,7 @@ def _separ_filtro(s,chans,lay,env=True):
     f=[]
     if hay:f.append(f"pan={lay}|"+"|".join(f"c{i}={ex[i]}" for i in range(len(chans))))
     tr=[c for c in ("BL","BR","SL","SR") if c in idx]
-    if x>0 and env and tr:f.append("adelay=delays="+"|".join(str(int(round(10*x))) if c in tr else "0" for c in chans))
+    if x>0 and env and tr:f.append("adelay=delays="+"|".join(str(int(round(float(a_.get("retardo",10))*x))) if c in tr else "0" for c in chans))
     return ",".join(f) or None
 def _separ_medida(arch,chs,orden=0,dur=0.0):
     """(JMG, 28-11) la separación que tiene una pista: dB de lo distinto entre izquierda y derecha frente a lo común, en los delanteros
@@ -2203,7 +2670,7 @@ def _separ_auto(W,I,R,V):
     lr=[R[c] for c in ("FL","FR","BL","BR","SL","SR") if ok(c) and c in R]
     if lr:p.append(cl((m(lr)-15.0)/10.0,0.0,1.0))         # contraste 15 LU: tranquila; 25 LU: mucha acción (lo normal en cine, 15-25)
     a=m(p) if p else 0.5;obj=-7.0+6.0*a;w=m(list(W.values()))
-    x=cl((10.0**((obj-w)/20.0)-1.0)/0.7,-1.0,0.3+0.7*a*a);s=int(round(10*x))   # una tranquila, como mucho +3; una de mucha acción, hasta +10
+    xm=0.3+0.7*a*a;x=cl((10.0**((obj-w)/20.0)-1.0)/0.7,-1.0,xm);s=min(int(round(15*x)),int(15*xm+1e-9))   # una tranquila, como mucho +4 (el +3 de antes); una de mucha acción, hasta +15 (el tope)
     tipo=V("de mucha acción","with lots of action") if a>=0.66 else (V("tranquila","calm") if a<0.33 else V("intermedia","in between"))
     return s,V(f"película {tipo} ({a*100:.0f} %) · separación medida {w:+.1f} dB, la que le va {obj:+.1f} dB → {s:+d} (el central no se toca)",
                f"movie {tipo} ({a*100:.0f} %) · measured separation {w:+.1f} dB, the right one {obj:+.1f} dB → {s:+d} (the center is not touched)")
@@ -2312,6 +2779,14 @@ def _abrir_externo(destino):
         except subprocess.TimeoutExpired:return True
     if "://" in destino:return bool(webbrowser.open(destino))
     return False
+_ULTIMOS=[]   # (JMG, 22-11) lo último que se ha escrito (para abrir su carpeta con el archivo ya elegido)
+def _abrir_marcado(archivo):
+    """(JMG, 22-11) abre la carpeta con el archivo ya seleccionado (para no tener que buscarlo)"""
+    try:
+        if sys.platform=="win32" and archivo and os.path.isfile(archivo):
+            subprocess.Popen(["explorer","/select,",os.path.normpath(archivo)]);return True
+    except Exception:pass
+    return _abrir_externo(os.path.dirname(archivo) or archivo)
 def _db_auto(f63,f1k,l63,tope,V):
     """«Auto» del Double Bass (igual en Jmg AudioProcesador y Jmg VideoEncoder): f63/f1k = graves profundos y 1 kHz de los
     altavoces delanteros, l63 = graves del subwoofer (None: vacío). -> (intensidad 0-tope, motivo)"""
@@ -2323,6 +2798,53 @@ def _db_auto(f63,f1k,l63,tope,V):
     if l63 is None:return n,V("el subwoofer está casi vacío.","the subwoofer is almost empty.")
     if fino>=sub:return n,V(f"a los altavoces les faltan graves (63 Hz {f63-f1k:+.0f} dB respecto a 1 kHz).",f"the speakers lack bass (63 Hz {f63-f1k:+.0f} dB against 1 kHz).")
     return n,V(f"el subwoofer va flojo ({l63-f63:+.0f} dB respecto a los graves de los altavoces).",f"the subwoofer is weak ({l63-f63:+.0f} dB against the speakers' bass).")
+ADV_EF={   # (JMG, 22-11) «⚙» ajustes avanzados de cada efecto: (clave, texto, text, mín, máx, paso, por defecto, unidad, (a la izquierda), (a la derecha))
+    # un por defecto entre paréntesis («("auto",v)») lo calcula el programa (v es lo que suele salir): solo se usa lo que se mueva
+    "pres":[("voz_f","Frecuencia de la voz","Voice frequency",500,2500,50,1000,"Hz",("Grave","Low"),("Aguda","High")),
+        ("voz_q","Anchura de la voz (Q)","Voice width (Q)",0.3,3.0,0.1,0.8,"",("Ancha","Wide"),("Estrecha","Narrow")),
+        ("ae_q","Anchura de ambiente y efectos (Q)","Ambience and effects width (Q)",0.2,2.0,0.1,0.5,"",("Ancha","Wide"),("Estrecha","Narrow")),
+        ("lim_at","Ataque del limitador","Limiter attack",1,50,1,5,"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("lim_rel","Liberación del limitador","Limiter release",10,1000,10,80,"ms",("Rápida","Fast"),("Lenta","Slow")),],
+    "separ":[("fuerza","Fuerza máxima","Maximum strength",0.2,1.0,0.05,0.7,"",("Suave","Gentle"),("Fuerte","Strong")),
+        ("retardo","Retraso máximo de los traseros","Maximum surround delay",0,20,1,10,"ms",("Nada","None"),("Más","More"))],
+    "eq3":[("f_bass","Frecuencia de graves","Bass frequency",40,400,5,100,"Hz",("Grave","Low"),("Aguda","High")),
+        ("f_mids","Frecuencia de medios","Mids frequency",300,4000,50,1000,"Hz",("Grave","Low"),("Aguda","High")),
+        ("f_treble","Frecuencia de agudos","Treble frequency",2000,16000,100,5000,"Hz",("Grave","Low"),("Aguda","High")),
+        ("q","Anchura de las bandas (Q)","Band width (Q)",0.3,3.0,0.1,1.0,"",("Ancha","Wide"),("Estrecha","Narrow"))],
+    "eqadv":[("q","Anchura de las bandas (Q)","Band width (Q)",0.3,4.0,0.1,1.0,"",("Ancha","Wide"),("Estrecha","Narrow"))],
+    "suav":[("corte","Frecuencia de corte","Cut-off frequency",2000,16000,100,("auto",5000),"Hz",("Más suave","Softer"),("Más brillo","Brighter")),
+        ("polos","Pendiente (polos)","Slope (poles)",1,2,1,2,"",("Suave","Gentle"),("Fuerte","Steep"))],
+    "gama":[("umbral","Umbral (desplaza la curva)","Threshold (shifts the curve)",-20,20,1,0,"dB",("Bajo","Low"),("Alto","High")),
+        ("ataque","Ataque","Attack",1,500,1,50,"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("liberacion","Liberación","Release",20,3000,10,400,"ms",("Rápida","Fast"),("Lenta","Slow")),
+        ("rodilla","Rodilla (suavidad)","Knee (softness)",0,12,0.5,6,"dB",("Dura","Hard"),("Suave","Soft")),
+        ("ganancia","Ganancia","Gain",-12,12,0.5,0,"dB",("Menos","Less"),("Más","More")),
+        ("lim_at","Ataque del limitador","Limiter attack",1,50,1,5,"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("lim_rel","Liberación del limitador","Limiter release",10,1000,10,80,"ms",("Rápida","Fast"),("Lenta","Slow")),],
+    "pd":[("umbral","Umbral (nivel medio)","Threshold (average level)",-40,-10,0.5,("auto",-25),"dB",("Bajo","Low"),("Alto","High")),
+        ("ataque","Ataque","Attack",0.5,100,0.5,("auto",8),"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("liberacion","Liberación","Release",20,2000,10,250,"ms",("Rápida","Fast"),("Lenta","Slow")),
+        ("rodilla","Rodilla (suavidad)","Knee (softness)",0,12,0.5,4,"dB",("Dura","Hard"),("Suave","Soft")),
+        ("lim_at","Ataque del limitador","Limiter attack",1,50,1,5,"ms",("Rápido","Fast"),("Lento","Slow")),
+        ("lim_rel","Liberación del limitador","Limiter release",10,1000,10,80,"ms",("Rápida","Fast"),("Lenta","Slow")),],
+    "limp":[("reduccion","Reducción de ruido","Noise reduction",1,40,0.5,("auto",13),"dB",("Poca","Little"),("Mucha","A lot")),
+        ("suelo","Suelo de ruido","Noise floor",-80,-20,1,("auto",-50),"dB",("Bajo","Low"),("Alto","High")),
+        ("click_v","Ventana de los clics","Click window",2,100,1,10,"ms",("Corta","Short"),("Larga","Long")),
+        ("click_o","Solapamiento de los clics","Click overlap",50,95,1,50,"%",("Poco","Little"),("Mucho","A lot"))],
+    "norm":[("marco","Ventana (DynAudNorm)","Frame (DynAudNorm)",100,8000,50,500,"ms",("Rápida","Fast"),("Lenta","Slow")),
+        ("pico","Pico objetivo (DynAudNorm)","Target peak (DynAudNorm)",0.1,1.0,0.01,0.71,"",("Bajo","Low"),("Alto","High"))],
+}
+ADV_EF["comb_silv"]=[("union","Unir huecos de menos de","Join gaps shorter than",0.2,5.0,0.1,1.5,"s",("Corto","Short"),("Largo","Long")),
+    ("antes","Empezar antes de la voz","Start before the voice",0.0,2.0,0.05,0.4,"s",("Justo","Tight"),("Antes","Earlier")),
+    ("cola","Cola (por el eco)","Tail (for the echo)",0.0,3.0,0.05,0.6,"s",("Corta","Short"),("Larga","Long")),
+    ("bajada","Bajada","Fade down",50,2000,10,400,"ms",("Rápida","Fast"),("Lenta","Slow")),
+    ("subida","Subida","Fade up",50,3000,10,800,"ms",("Rápida","Fast"),("Lenta","Slow")),
+    ("golpes","Respetar golpes por encima del eco","Keep hits above the echo by",3,30,1,10,"dB",("Más golpes","More hits"),("Menos golpes","Fewer hits"))]
+ADV_EF["comb_gama"]=[x for x in ADV_EF["gama"] if not x[0].startswith("lim_")]   # «Combinar pistas»: quitar el eco (sin limitador)
+def _n_(x):
+    """(JMG, 22-11) 100.0 -> 100 (las órdenes de FFmpeg, iguales que antes con los valores de fábrica)"""
+    try:x=float(x);return int(x) if x.is_integer() else round(x,4)
+    except (TypeError,ValueError):return x
 class AudioProcessorGUI:
     def __init__(self,root):
         global IDIOMA, LNT
@@ -2380,7 +2902,7 @@ class AudioProcessorGUI:
             self.root.geometry("1300x950")
         self.root.minsize(1000,min(700,max(500,self.root.winfo_screenheight()-140)))
         self.root.resizable(True,True);self.root.configure(bg=CF)
-        self.root.protocol("WM_DELETE_WINDOW",lambda:self._on_close(silent=True));self.root.after(900,self._extras_10_11)   # (JMG, 10-11) bandeja y descripciones
+        self.root.protocol("WM_DELETE_WINDOW",lambda:self._on_close(silent=True));self._quitar_desc(self.root);self._tit_registrar(self.root);self.root.after(900,self._extras_10_11)   # (JMG, 10-11) bandeja y descripciones
         self._estilo()
         self.files=[];self.procesando=False
         self.ppa={};self.pc={};self.aa=None;self.usp={}
@@ -2429,10 +2951,11 @@ class AudioProcessorGUI:
         self.var_titulo_pista=tk.StringVar(value="")
         for n in ["fl","fr","fc","lfe","bl","br","voz","amb","efc","sub","eq_bass","eq_mids","eq_treble","gdin_val","din_val"]:
             setattr(self,f"var_{n}",tk.DoubleVar(value=1 if n=="din_val" else 0))
-        self.var_bm=tk.IntVar(value=0);self.var_bm_corte=tk.IntVar(value=120)
-        self.var_db=tk.IntVar(value=0);self.var_db_corte=tk.IntVar(value=90)
-        self.var_separ=tk.IntVar(value=0)   # (JMG, 27-11) Separación de canales (-10..+10)   # (JMG, 8-11) 90 Hz
-        self.var_gdin_front=tk.IntVar(value=0);self.var_gdin_tras=tk.IntVar(value=0);self.var_gdin_cent=tk.IntVar(value=0);self.var_din_modo=tk.IntVar(value=0);self.var_din_fc=tk.IntVar(value=0);self.var_din_ft=tk.IntVar(value=5);self.var_din_lfe=tk.IntVar(value=0)
+        self.agregados=set()   # (JMG, 20-11) los archivos agregados (➕ Agregar): solo esos se procesan
+        self.var_bm=tk.IntVar(value=0);self.var_bm_corte=tk.IntVar(value=90)
+        self.var_db=tk.DoubleVar(value=0);self.var_db_corte=tk.IntVar(value=90)
+        self.var_separ=tk.DoubleVar(value=0)   # (JMG, 27-11) Separación de canales (-10..+10)   # (JMG, 8-11) 90 Hz
+        self.var_gdin_front=tk.DoubleVar(value=0);self.var_gdin_tras=tk.DoubleVar(value=0);self.var_gdin_cent=tk.DoubleVar(value=0);self.var_din_modo=tk.IntVar(value=0);self.var_din_azid=tk.IntVar(value=0);self.var_din_fc=tk.DoubleVar(value=0);self.var_din_ft=tk.DoubleVar(value=0);self.var_din_lfe=tk.DoubleVar(value=0)
         self.var_limp=tk.IntVar(value=0);self.var_declick=tk.BooleanVar(value=False);self.var_declip=tk.BooleanVar(value=False)
         self.var_suav=tk.IntVar(value=0)
         self._auto_bts={}
@@ -2484,13 +3007,13 @@ class AudioProcessorGUI:
                 n[k]=v
             return n
         self.formatos=_con_aften(self.formatos);self.formatos_down=_con_aften(self.formatos_down);self.formatos_mono=_con_aften(self.formatos_mono)
-        self.pdir=os.path.join(_data_dir(),"presets")
+        self.pdir=_presets_suite(os.path.join(_data_dir(),"presets"))   # (JMG, 26-11) comunes con Jmg VideoEncoder
         try:os.makedirs(self.pdir,exist_ok=True)
         except OSError:pass
         self._wp=[];self._wg=[]
         import queue as _q
         self._uiq=_q.Queue()
-        self._build();self._excl();self._traces()
+        self._build();self._excl();self._traces();self._quitar_desc(self.root);self._tit_registrar(self.root)
         self.root.after(40,self._ui_poll)
         self.root.bind_class('TCombobox','<<ComboboxSelected>>',self._cmb_sin_foco,add='+')
         # Enter en cualquier casilla: el valor queda fijado y el cursor deja de parpadear (el foco pasa a su ventana)
@@ -2502,6 +3025,7 @@ class AudioProcessorGUI:
         self._din_lbl();self._chk_ff();self._refrescar()
         self._cnt()
         self._set_enabled(len(self.files)>0)
+        self.root.after(2500,lambda:_a_medias_aviso(self))   # (JMG, 20-11) lo que quedó a medias la última vez
         try:self._load_cfg()
         except Exception:pass
         try:
@@ -2591,9 +3115,9 @@ class AudioProcessorGUI:
         for w in self.root.winfo_children():w.destroy()
         self._wp=[];self._wg=[]
         self._estilo()
-        self._build()
+        self._build();self._quitar_desc(self.root);self._tit_registrar(self.root)
 
-        for f in self.files: self.la.insert("end", os.path.basename(f))
+        for f in self.files: self.la.insert("end", self._la_txt(f))
         self._refrescar()
         try: self.nb.select(tab)
         except Exception:pass
@@ -2642,7 +3166,7 @@ class AudioProcessorGUI:
         s.configure("TNotebook.Tab",padding=[6,2],font=("",9),background=CSB,foreground=CT,borderwidth=0,focuscolor=CF)
         s.map("TNotebook.Tab",
             background=[("selected",CF),("active",CSK),("!active",CSB)],
-            foreground=[("selected",CT),("active",CT),("!active",CT)],
+            foreground=[("selected",VERDE_JMG),("active",VERDE_JMG),("!active",CT)],   # (JMG, 22-11) la abierta y la del ratón, en verde
             expand=[("selected",(0,0,0,0)),("active",(0,0,0,0)),("!active",(0,0,0,0))])
         # Frames
         s.configure("TFrame",background=CF,borderwidth=0,relief="flat")
@@ -2653,10 +3177,12 @@ class AudioProcessorGUI:
         s.configure("TLabel",background=CF,foreground=CT)
         # Buttons
         s.configure("TButton",padding=4,borderwidth=1,relief="solid",background=CF,foreground=CT,bordercolor=CSB,lightcolor=CF,darkcolor=CF)
-        s.map("TButton",background=[("active",CSB),("pressed",CSK)],foreground=[("active",CT),("pressed",CT)])
+        s.map("TButton",background=[("active",CF),("pressed",CF)],foreground=[("active",VERDE_JMG),("pressed",VERDE_JMG)])   # (JMG, 21-11) al pasar el ratón, las letras en verde
         s.configure("Auto.TButton",padding=0,anchor="center",font=("",8))   # (JMG, 14-11) «Auto»: del tamaño de las casillas de valor (_caja_auto), centrado
-        s.configure("AutoOn.TButton",padding=0,anchor="center",font=("",8,"bold"),foreground="#3cb95a")   # puesto: la palabra en verde
-        s.map("AutoOn.TButton",foreground=[("disabled",CA),("pressed","#3cb95a"),("active","#3cb95a"),("!active","#3cb95a")])
+        s.configure("AutoOn.TButton",padding=0,anchor="center",font=("",8,"bold"),foreground=VERDE_JMG)   # puesto: la palabra en verde
+        s.configure("Rueda.TButton",padding=(1,0),font=("",10))   # (JMG, 22-11) la «⚙» de cada efecto
+        s.layout("SinPest.TNotebook.Tab",[])   # (JMG, 22-11) Visualización, sin pestañas
+        s.map("AutoOn.TButton",foreground=[("disabled",CA),("pressed",VERDE_JMG),("active",VERDE_JMG),("!active",VERDE_JMG)])
         # Check y Radio
         s.configure("G.TCheckbutton",font=("",10),padding=6,background=CF,foreground=CT,focuscolor=CF,borderwidth=0)
         s.map("G.TCheckbutton",background=[("active",CF),("!active",CF)],foreground=[("active",CT),("!active",CT)])
@@ -2837,6 +3363,13 @@ class AudioProcessorGUI:
         if not s:
             self._reset_vars()
             self._set_enabled(False)
+            return
+        self._lp_info=False
+        s0=s;s=tuple(i for i in s if i<len(self.files) and self.files[i] in self.agregados)   # (JMG, 20-11) solo los agregados (➕ Agregar)
+        if not s:
+            self._reset_vars();self._set_enabled(False)
+            self._lp_info=self._pistas_info([self.files[i] for i in s0 if i<len(self.files)])   # (JMG, 22-11) sin agregar: sus pistas, solo para verlas
+            self.var_pista_resumen.set(self._vt("Pulsa «➕ Agregar» para pasar el archivo a la lista de pistas.","Press «➕ Add to queue» to pass the file to the track list."))
             return
         self._set_enabled(True)
         multi = len(s)>1
@@ -3128,7 +3661,25 @@ class AudioProcessorGUI:
         try:self.root.after_idle(self._sp_real)
         except Exception:pass
 
+    def _pistas_info(self,rutas):
+        """(JMG, 22-11) las pistas de los archivos sin agregar, solo para verlas (en gris; no se eligen ni se procesan)"""
+        n=0;multi=len(rutas)>1
+        for ruta in rutas:
+            ps=self.pc.get(ruta)
+            if ps is None:
+                try:ps=self._det(ruta);self.pc[ruta]=ps
+                except Exception:ps=[]
+            for p in ps or []:
+                bt=f" · {int(p['bit_rate'])//1000} kbps" if p.get("bit_rate") else ""
+                tt=f" · {p['title']}" if p.get("title") else ""
+                pref=f"[{os.path.basename(ruta)}] " if multi else ""
+                self.lp.insert("end",f"{pref}#{p['orden']}  [{p['lang']}]  {_nombre_codec(p['codec'],p.get('perfil'))}  {p['layout']} ({p['channels']}ch){bt}{tt}")
+                try:self.lp.itemconfigure("end",foreground=CA)
+                except Exception:pass
+                n+=1
+        return n>0
     def _sp_real(self):
+        if getattr(self,"_lp_info",False):self.lp.selection_clear(0,"end");return   # (JMG, 22-11) solo información: falta «➕ Agregar»
         sel=self.lp.curselection()
         if not sel:
             self._pintar_pistas()
@@ -3186,7 +3737,7 @@ class AudioProcessorGUI:
         pc_={k:dict(v) for k,v in self.pconf.items()}
         if self.pactual:pc_[self.pactual]=self._snap_pista()   # lo que hay en pantalla, aunque aun no se haya guardado en la pista
         s_=self._snap()
-        e={"files":list(self.files),"pc":{f:self.pc.get(f) for f in self.files},"pconf":pc_,"glob":{k:s_[k] for k in self._UD_GLOB if k in s_}}
+        e={"agr":sorted(self.agregados),"files":list(self.files),"pc":{f:self.pc.get(f) for f in self.files},"pconf":pc_,"glob":{k:s_[k] for k in self._UD_GLOB if k in s_}}
         for nm in self._UD_ARCH:e[nm]=copy.deepcopy(getattr(self,nm,{}))
         try:e["la_sel"]=list(self.la.curselection())
         except Exception:e["la_sel"]=[]
@@ -3212,13 +3763,9 @@ class AudioProcessorGUI:
         except Exception:return False
     def _ud_puede(self):
         if self.procesando:return False,False
-        if self._ud_vis():   # (JMG, 18-11) en Visualización, los de abajo deshacen y rehacen los cambios del editor
-            try:
-                if not self._ed_activo():return False,False
-                h=self._ed_hist();return bool(h["hechos"]),bool(h["rehacer"])
-            except Exception:return False,False
-        if not hasattr(self,"_ud_h"):return False,False
-        return len(self._ud_h)>=2,bool(self._ud_r)
+        # (JMG, 18-11) en Visualización, primero los cambios del editor; (JMG, 20-11) si no tiene nada, los demás (como en las otras pestañas)
+        gu,gr=(len(self._ud_h)>=2,bool(self._ud_r)) if hasattr(self,"_ud_h") else (False,False)
+        return (self._ud_ed(-1) or gu),(self._ud_ed(1) or gr)
     def _ud_botones(self):
         u,r=self._ud_puede()
         for b,ok in ((getattr(self,"btn_ud",None),u),(getattr(self,"btn_ur",None),r)):
@@ -3227,15 +3774,15 @@ class AudioProcessorGUI:
             try:
                 if str(b.cget("state"))!=st:b.configure(state=st)
             except Exception:pass
-    def _deshacer(self):self._ed_deshacer() if self._ud_vis() else self._ud_mover(-1)
-    def _rehacer(self):self._ed_rehacer() if self._ud_vis() else self._ud_mover(1)
+    def _deshacer(self):self._ed_deshacer() if self._ud_ed(-1) else self._ud_mover(-1)
+    def _rehacer(self):self._ed_rehacer() if self._ud_ed(1) else self._ud_mover(1)
     def _ud_tecla(self,e,sen):
         """Ctrl+Z / Ctrl+Y en la ventana principal (en un texto, lo suyo)"""
         if getattr(self,"_bp_prev",None) is not None:return "break"   # (JMG, 14-11) codificando
         try:
             if e.widget.winfo_class()=="Text" or e.widget.winfo_toplevel() is not self.root:return None
         except Exception:return None
-        (self._ed_deshacer() if sen<0 else self._ed_rehacer()) if self._ud_vis() else self._ud_mover(sen);return "break"
+        (self._ed_deshacer() if sen<0 else self._ed_rehacer()) if self._ud_ed(sen) else self._ud_mover(sen);return "break"
     def _ud_mover(self,sen):
         if self._bloq():return
         self._ud_reg(True)   # lo ultimo que has hecho, aunque no hayan pasado 0,6 s
@@ -3262,8 +3809,9 @@ class AudioProcessorGUI:
             for k,v in e["glob"].items():
                 try:getattr(self,"var_"+k).set(v)
                 except Exception:pass
+            self.agregados.clear();self.agregados.update(e.get("agr",self.files))
             self.la.delete(0,"end")
-            for f in self.files:self.la.insert("end",os.path.basename(f))
+            for f in self.files:self.la.insert("end",self._la_txt(f))
             for i in e["la_sel"]:
                 if i<len(self.files):self.la.selection_set(i)
             if self.files and not self.la.curselection():self.la.selection_set(0)
@@ -3335,6 +3883,7 @@ class AudioProcessorGUI:
             except Exception:return 0.0
     def _sl(self,p,lbl,var,a,b,r,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=0,mute=False):
         if not step and isinstance(var,tk.IntVar):step=1
+        q=lambda x:(int(round(x/float(step))*step) if float(step).is_integer() else round(round(x/float(step))*step,2))   # (JMG, 19-11) también de 0,5 en 0,5
         if lbl:(ttk.Label(p,text=lbl) if lw>=20 else ttk.Label(p,text=lbl,width=lw)).grid(row=r,column=cl,sticky="w",padx=5,pady=3)
         e=ttk.Scale(p,from_=a,to=b,variable=var,orient="horizontal",length=int(sl*0.75))
         e.grid(row=r,column=cs,padx=(5,1),pady=3)
@@ -3343,7 +3892,7 @@ class AudioProcessorGUI:
         en.grid(row=r,column=cv,padx=(1,5),pady=3)
         def rv():
             x=self._raw(var)
-            if step:x=max(a,min(b,int(round(x/float(step))*step)))
+            if step:x=max(a,min(b,q(x)))
             return x
         def oc(*_):
             x=rv()
@@ -3360,7 +3909,7 @@ class AudioProcessorGUI:
             if mute and ve.get().strip().lower() in ("mute","m","-inf"):ve.set(self._fv(a))   # (JMG, 19-11) escribir «Mute» = abajo del todo
             try:v=float(ve.get().replace(",","."))
             except ValueError:ve.set(self._fv(rv()));(oc() if mute else None);self.root.focus_set();return
-            if step:v=int(round(v/float(step))*step)
+            if step:v=q(v)
             v=max(a,min(b,v))
             if mute and v<a+1-1e-9:v=a   # (JMG, 19-11) por debajo de -30: Mute
             var.set(v);ve.set("Mute" if (mute and v<=a+0.5) else self._fv(v))
@@ -3379,7 +3928,7 @@ class AudioProcessorGUI:
             def snap(*_):
                 if _g[0]:return
                 x=self._raw(var)
-                sv=max(a,min(b,int(round(x/float(step))*step)))
+                sv=max(a,min(b,q(x)))
                 if abs(sv-x)>1e-6:
                     _g[0]=True
                     try:var.set(sv)
@@ -3388,7 +3937,7 @@ class AudioProcessorGUI:
             def soltar(ev=None):
                 # al soltar el raton, la barra queda exactamente en el valor redondeado (una sola vez, sin bucles)
                 try:
-                    sv=max(a,min(b,int(round(self._raw(var)/float(step))*step)))
+                    sv=max(a,min(b,q(self._raw(var))))
                     if abs(float(e.get())-sv)>1e-6:e.set(sv)
                 except Exception:pass
             e.bind("<ButtonRelease-1>",soltar,add="+")
@@ -3554,11 +4103,12 @@ class AudioProcessorGUI:
             except Exception:pass
         cols.bind("<Configure>",lambda e:self.root.after_idle(_cols_aj),add="+")
         cols.bind("<ButtonRelease-1>",lambda e:setattr(self,"_cols_user",True),add="+")
+        cols.bind("<Configure>",lambda e:self.root.after_idle(self._cols_min),add="+");self.root.after(400,self._cols_min)   # (JMG, 20-11) la barra no corta los botones
         self.root.after(150,_cols_aj)
 
         # --- Columna Izquierda: Archivos ---
         ci = ttk.Frame(cols,cursor="arrow")   # puntero propio: nunca hereda las flechas <-> de la barra divisoria
-        cols.add(ci, minsize=200, stretch="always")
+        cols.add(ci, minsize=200, stretch="always");self._cols_ci=ci
 
         ttk.Label(ci,text=T("lbl_archivos"),font=("",9,"bold")).pack(anchor="w", pady=(6, 4))
         lf=ttk.Frame(ci);lf.pack(fill="both",expand=True)
@@ -3579,7 +4129,7 @@ class AudioProcessorGUI:
 
         # --- Columna Derecha: Pistas ---
         cd = ttk.Frame(cols,cursor="arrow")
-        cols.add(cd, minsize=400, stretch="always")
+        cols.add(cd, minsize=400, stretch="always");self._cols_cd=cd
 
         ttk.Label(cd,text=T("lbl_pistas"),font=("",9,"bold")).pack(anchor="w", pady=(6, 4))
         pf=ttk.Frame(cd);pf.pack(fill="both",expand=True)
@@ -3594,8 +4144,11 @@ class AudioProcessorGUI:
         self.lp.configure(yscrollcommand=psc.set)
 
         # Panel de pista seleccionada (dentro de la columna derecha, debajo de la lista)
-        pinf=ttk.Frame(cd);pinf.pack(fill="x",pady=(6,0))
+        pinf=ttk.Frame(cd);pinf.pack(fill="x",pady=(6,0));self._pinf=pinf
         row1=ttk.Frame(pinf);row1.pack(fill="x",pady=(0,2))
+        self.btn_agr=ttk.Button(row1,text="➕ "+self._vt("Agregar","Add to queue"),command=self._agregar_ap);self.btn_agr.pack(side="left",padx=(0,12))   # (JMG, 20-11) a la derecha, debajo de la lista, como en Jmg VideoEncoder
+        self._ayuda_flotante(self.btn_agr,self._vt("Pasa los archivos seleccionados a la lista de pistas, con sus ajustes.\nLos archivos agregados llevan ✔ y son los que se procesan.",
+                                          "Passes the selected files to the track list, with their settings.\nAdded files have a ✔ and are the ones that get processed."))
         ttk.Label(row1,text=self._vt("Acciones:","Actions:"),font=("",9,"bold")).pack(side="left",padx=(0,6))
         self.btn_sel_all=ttk.Button(row1,text=self._vt("Seleccionar todas","Select all"),command=self._sel_todas)
         self.btn_sel_all.pack(side="left",padx=2)
@@ -3634,7 +4187,7 @@ class AudioProcessorGUI:
         ttk.Label(inf,text=T("lbl_layout"),font=("",8,"bold")).pack(side="right",padx=(10,4))
         bot=ttk.Frame(self.root);bot.pack(side="bottom",fill="x",padx=10,pady=(5,10))
         self.btn_p=ttk.Button(bot,text=T("procesar"),command=self._conf);self.btn_p.pack(side="left",padx=4)
-        self.btn_pausa=ttk.Button(bot,text="⏸ "+self._vt("Pausa","Pause"),command=self._pausa_pulsar,state="disabled");self.btn_pausa.pack(side="left",padx=4)   # (JMG, 13-11)
+        self.btn_pausa=ttk.Button(bot,text="⏸ "+self._vt("Pausa","Pause"),command=self._pausa_pulsar,state="disabled");self.btn_pausa.pack(side="left",padx=4);self._verde_reg(self.btn_pausa,lambda:getattr(self,"_pausa_on",False))   # (JMG, 13-11); (26-11) en pausa, «Continuar» en verde
         self._ayuda_flotante(self.btn_pausa,self._vt("Para el procesado sin perder nada;\n«▶ Continuar» lo sigue donde estaba.","Pauses the processing without losing anything;\n«▶ Resume» carries on where it was."))
         if not getattr(self,"_pausa_tick_on",False):self._pausa_tick_on=True;self.root.after(500,self._pausa_tick)
         self.btn_c=ttk.Button(bot,text=T("cancelar"),command=self._cancel,state="disabled");self.btn_c.pack(side="left",padx=4)
@@ -3675,7 +4228,8 @@ class AudioProcessorGUI:
         self.vpan.pack(side="top",fill="both",expand=True)
         top.configure(cursor="arrow");self.nb_outer.configure(cursor="arrow")   # tampoco las flechas de la barra horizontal
         self.vpan.add(top,minsize=90,stretch="never",padx=10,pady=4);self._vp_top=top
-        self.vpan.add(self.nb_outer,minsize=250,stretch="always",padx=10,pady=4)
+        self.vpan.add(self.nb_outer,minsize=120,stretch="always",padx=10,pady=4)
+        self.vpan.bind("<Configure>",self._ajustar_pestana_luego,add="+")   # (JMG, 21-11) las pestañas, a su altura justa
         # el panel debe quedar DEBAJO de sus paneles en el orden de apilado, si no los tapa
         self.vpan.lower()
         top.lift();self.nb_outer.lift()
@@ -3688,6 +4242,173 @@ class AudioProcessorGUI:
         self.root.after(30,self._forzar_colores)
         self.root.after(150,self._forzar_colores)
     # ---------- (JMG, 10-11) icono en la bandeja del sistema y descripciones al pasar el ratón (los dos programas igual) ----------
+    _TIP_CLS=("TScale","Scale","Entry","TEntry","TCombobox","TSpinbox","Spinbox","TCheckbutton","Checkbutton","TRadiobutton","Radiobutton","TButton","Button")
+    @staticmethod
+    def _tit_ne(x,v):
+        try:return float(x)==float(v)
+        except (TypeError,ValueError):return str(x).strip() in ("","0","False","None")
+    def _tit_ne_g(self,*ks):
+        vs=[getattr(self,"var_"+k) for k in ks if hasattr(self,"var_"+k)]
+        return (vs,lambda vs=vs:any(not self._tit_ne(v.get(),0) for v in vs))
+    def _tit_registrar(self,raiz):
+        """(JMG, 21-11) el título de cada efecto, en nuestro verde cuando está puesto"""
+        try:G=self._tit_grupos()
+        except Exception:return
+        def hijos(w):
+            for c in w.winfo_children():
+                yield c;yield from hijos(c)
+        self.root.after(30,lambda r=raiz:self._adv_ruedas(r))   # (JMG, 22-11) la «⚙» de cada efecto
+        self._tits=[(w,k) for w,k in getattr(self,"_tits",[]) if w.winfo_exists()]
+        for w in [raiz]+list(hijos(raiz)):
+            try:
+                if w.winfo_class()=="TLabel" and "bold" in str(w.cget("font")):
+                    t=str(w.cget("text")).strip()
+                    if t in G and all(w is not x for x,_ in self._tits):self._tits.append((w,t))
+            except Exception:pass
+        if not getattr(self,"_tit_traz",False):
+            self._tit_traz=True
+            for vs,_ in G.values():
+                for v in vs:
+                    try:v.trace_add("write",lambda *a:self._tit_pintar_luego())
+                    except Exception:pass
+        self._vst=set()
+        try:W=self._tit_widgets()
+        except Exception:W={}
+        self._tbtn=[(w,k) for w,k in getattr(self,"_tbtn",[]) if w.winfo_exists()]
+        for w in [raiz]+list(hijos(raiz)):   # (JMG, 21-11) botones y textos que ya han corregido algo
+            try:
+                c=w.winfo_class()
+                if c in ("TButton","TCheckbutton","TLabel"):
+                    t=str(w.cget("text")).strip()
+                    if t in W and all(w is not x for x,_ in self._tbtn):w._jmg_st=str(w.cget("style")) or c;self._tbtn.append((w,t))
+            except Exception:pass
+        if not getattr(self,"_tit_bucle_on",False):
+            self._tit_bucle_on=True
+            try:self.root.after(1000,self._tit_bucle)
+            except Exception:pass
+        self._tit_pintar()
+        try:self.root.after(400,self._tit_pintar)   # después de que el tema repinte los colores
+        except Exception:pass
+    def _tit_pintar_luego(self):
+        try:
+            if getattr(self,"_tit_id",None):return
+            self._tit_id=self.root.after(40,self._tit_pintar)
+        except Exception:pass
+    def _tit_pintar(self):
+        self._tit_id=None
+        try:G=self._tit_grupos()
+        except Exception:return
+        for w,t in list(getattr(self,"_tits",[])):
+            try:
+                if w.winfo_exists():w.configure(foreground=VERDE_JMG if G[t][1]() else "")
+            except Exception:pass
+        try:W=self._tit_widgets()
+        except Exception:W={}
+        for w,t in list(getattr(self,"_tbtn",[])):
+            try:
+                if not w.winfo_exists() or t not in W:continue
+                on=bool(W[t]())
+                if w.winfo_class()=="TLabel":w.configure(foreground=VERDE_JMG if on else "")
+                else:
+                    st=self._verde_estilo(w._jmg_st) if on else w._jmg_st
+                    if str(w.cget("style"))!=st:w.configure(style=st)
+            except Exception:pass
+    def _verde_estilo(self,base):
+        """el mismo estilo del botón, con las letras en nuestro verde"""
+        n="Verde."+base
+        if n not in getattr(self,"_vst",set()):
+            s=ttk.Style();s.configure(n,foreground=VERDE_JMG)
+            s.map(n,foreground=[("disabled",CA),("pressed",VERDE_JMG),("active",VERDE_JMG),("!disabled",VERDE_JMG)])
+            self._vst=getattr(self,"_vst",set())|{n}
+        return n
+    def _tit_bucle(self):
+        """lo que no son variables (tramos medidos...) se repasa cada segundo"""
+        try:self._tit_pintar()
+        except Exception:pass
+        try:self.root.after(1000,self._tit_bucle)
+        except Exception:pass
+    def _tit_widgets(self):
+        """(JMG, 21-11) botones y textos que se ponen en verde cuando ya han corregido algo -> {texto: ¿puesto?}"""
+        V=self._vt;ne=lambda v:not self._tit_ne(v.get(),0)
+        def tramos():
+            try:return bool(self.pactual and self.ptramos.get(tuple(self.pactual)))
+            except Exception:return False
+        ch=lambda:any(ne(getattr(self,"var_"+k)) for k in ("fl","fr","fc","lfe","bl","br"))
+        eq=lambda:any(ne(getattr(self,"var_"+k)) for k in ("eq_bass","eq_mids","eq_treble")) or any(ne(getattr(self,f"var_eq{a}_b{i}_g")) for a in ("front","tras","cent") for i in (1,2,3))
+        return {T("master"):lambda:ne(self.var_master),T("escanear"):lambda:ne(self.var_master),T("norm_auto"):lambda:bool(self.var_master_auto.get()),
+                T("norm_ya"):lambda:bool(self.var_master_auto.get()),"🎯 "+V("Calcular delay","Calculate delay"):lambda:ne(self.var_delay_init),
+                "✂ "+V("Corregir por tramos","Fix by parts"):tramos,T("auto_vol"):ch,T("auto_ton"):eq}
+    def _tit_grupos(self):
+        """título de cada efecto -> (sus variables, ¿hay algún ajuste hecho?): (JMG, 21-11) cualquiera distinto del de fábrica"""
+        V=self._vt;g={}
+        def d(*pares):
+            vs=[(getattr(self,"var_"+k),v) for k,v in pares if hasattr(self,"var_"+k)]
+            def hay(vs=vs):
+                for var,v in vs:
+                    x=var.get()
+                    if v=="techo":
+                        if "dbfs" in str(x).lower():return True
+                    elif not self._tit_ne(x,v):return True
+                return False
+            return ([a for a,_ in vs],hay)
+        z=lambda *ks:[(k,0) for k in ks]
+        g[T("presencia")]=d(*z("voz","amb","efc","sub"),("techo_pres","techo"));g[V("Separación de canales","Channel separation")]=d(("separ",0))
+        g[T("eq3")]=d(*z("eq_bass","eq_mids","eq_treble"))
+        g[T("eq_adv")]=d(*[(f"eq{a}_b{i}_g",0) for a in ("front","tras","cent") for i in (1,2,3)],*[(f"eq{a}_b{i}_f",(100,1000,5000)[i-1]) for a in ("front","tras","cent") for i in (1,2,3)])
+        g[V("Suavizado digital","Digital smoothing")]=d(("suav",0));g[T("bm")]=d(("bm",0),("bm_corte",90));g[T("db")]=d(("db",0),("db_corte",90))
+        g[T("gama")]=d(*z("gdin_front","gdin_tras","gdin_cent"),("techo_gd","techo"))
+        g[T("pd")]=d(("din_modo",0),("din_azid",0),("din_ft",0),("din_fc",0),("din_lfe",0),("techo_pd","techo"))
+        g[T("limp_tit")]=d(*z("limp","declick","declip"));g[T("norm_alt")]=d(*z("dyn_norm","speech_norm"))
+        g[V("Volumen por canal","Volume per channel")]=d(*z("fl","fr","fc","lfe","bl","br"))
+        g[T("delay_tit")]=d(*z("delay_fl","delay_fr","delay_fc","delay_bl","delay_br"))
+        g[T("sync_tit")]=([self.var_delay_init,self.var_fps_from,self.var_fps_to,self.var_fps_metodo],
+                          lambda:not self._tit_ne(self.var_delay_init.get(),0) or str(self.var_fps_from.get())!=str(self.var_fps_to.get()) or str(self.var_fps_metodo.get())!="tono")
+        for t_,e_ in self._adv_titulos().items():   # (JMG, 22-11) con un ajuste avanzado cambiado, también en verde
+            if t_ in g:g[t_]=(g[t_][0],lambda h=g[t_][1],e_=e_:h() or bool((getattr(self,"_adv",{}) or {}).get(e_)))
+        return g
+    def _quitar_desc(self,raiz):
+        """(JMG, 21-11) fuera las descripciones (texto gris en cursiva): ya salen al pasar el ratón. Su texto pasa a la descripción flotante
+        de los controles de su apartado que no tenían ninguna (y a su título); los avisos (_jmg_aviso) se quedan"""
+        def hijos(w):
+            for c in w.winfo_children():
+                yield c;yield from hijos(c)
+        for w in list(hijos(raiz)):
+            try:
+                if w.winfo_class()!="TLabel" or getattr(w,"_jmg_aviso",False) or isinstance(w,tk.Toplevel):continue
+                if str(w.cget("foreground"))!=str(CA) or "italic" not in str(w.cget("font")) or str(w.cget("textvariable")):continue
+                txt=str(w.cget("text")).strip();mg=w.winfo_manager()
+                if not txt or not mg:continue
+                self._desc_a_tips(w,txt)
+                if mg=="grid":w.grid_remove()
+                elif mg=="pack":w.pack_forget()
+                w._jmg_desc=txt
+            except Exception:pass
+    def _desc_a_tips(self,w,txt):
+        def todos(x):
+            yield x
+            for c in x.winfo_children():yield from todos(c)
+        p=w.master;sec=[];mg=w.winfo_manager()
+        try:
+            if mg=="grid":
+                r=int(w.grid_info()["row"]);fil=[]
+                for x in p.grid_slaves():
+                    try:xr=int(x.grid_info()["row"])
+                    except Exception:continue
+                    if xr<r:fil.append((xr,x))
+                lim=max([xr for xr,x in fil if x.winfo_class()=="TSeparator" and str(x.cget("orient"))=="horizontal"]+[-1])
+                sec=[x for xr,x in fil if xr>lim]
+            elif mg=="pack":
+                sl=p.pack_slaves();i=sl.index(w)
+                for x in reversed(sl[:i]):
+                    if x.winfo_class()=="TSeparator":break
+                    sec.append(x)
+        except Exception:return
+        for x in sec:
+            for y in todos(x):
+                try:
+                    c=y.winfo_class()
+                    if (c in self._TIP_CLS or (c in ("TLabel","Label") and "bold" in str(y.cget("font")))) and not self._tip_texto(y):self._ayuda_flotante(y,txt)
+                except Exception:pass
     def _extras_10_11(self):
         """se llama una vez al abrir: la bandeja (solo Windows) y las descripciones"""
         try:self._tips_iniciar()
@@ -3776,7 +4497,7 @@ class AudioProcessorGUI:
         self._tip_quitar()
         try:
             w=e.widget
-            if isinstance(w,str):return
+            if isinstance(w,str) or w is getattr(self,"_tip_visto",None):return   # (JMG, 26-11) ya se fue sola: hasta salir y volver a entrar
             txt=self._tip_texto(w)
         except Exception:return
         if txt:self._tip_id=self.root.after(self._TIP_RETRASO,lambda:self._tip_mostrar(w,txt))
@@ -3792,9 +4513,18 @@ class AudioProcessorGUI:
             sw,sh=self.root.winfo_screenwidth(),self.root.winfo_screenheight()
             px=min(x+16,sw-tw-4);py=y+20 if y+20+th<sh-40 else y-th-12
             t.geometry(f"+{max(0,px)}+{max(0,py)}");self._tip_top=t
-            self._tip_fin=self.root.after(self._TIP_DURA,self._tip_quitar)
+            self._tip_fin=self.root.after(self._TIP_DURA,lambda w=w:self._tip_caduca(w))
         except Exception:pass
+    def _tip_caduca(self,w):
+        """(JMG, 26-11) la descripción se va sola; al cerrarla, Windows vuelve a «entrar» en el control y salía otra vez: ese control queda marcado"""
+        self._tip_fin=None;self._tip_visto=w;self._tip_quitar()
     def _tip_quitar(self,e=None):
+        v=getattr(self,"_tip_visto",None)
+        if v is not None and e is not None and str(getattr(e,"type",""))in("Leave","8") and getattr(e,"widget",None) is v:
+            try:
+                x,y=self.root.winfo_pointerxy()
+                if self.root.winfo_containing(x,y) is not v:self._tip_visto=None
+            except Exception:self._tip_visto=None
         for k in ("_tip_id","_tip_fin"):
             i=getattr(self,k,None)
             if i:
@@ -3852,6 +4582,9 @@ class AudioProcessorGUI:
                 if (n==p[1:]) if p.startswith("=") else n.startswith(p):return a if es else b
         return None
     _TIPS=[
+        (("=vista:","=view:"),"Antes / Después: la onda original y la procesada, una sobre otra. Canal por canal: cada canal por separado.","Before / After: the original and the processed wave, one over the other. Channel by channel: each channel on its own."),
+        (("=salida:","=output:"),"Por dónde se oye: en estéreo (todos los canales mezclados) o en multicanal (5.1 / 7.1) si tu equipo lo es.","How it is heard: in stereo (all channels mixed) or in multichannel (5.1 / 7.1) if your system is."),
+        (("separación de canales","separación","channel separation","separation"),"Más o menos separación entre izquierda y derecha (delanteros y traseros) y entre delante y detrás, sin subir el volumen. 0 = sin cambio; a la izquierda, más junto. «Auto» pone la que le va a la película.","More or less separation between left and right (fronts and surrounds) and between front and back, without raising the volume. 0 = no change; to the left, closer together. «Auto» sets the right one for the movie."),   # (JMG, 21-11)
         # --- abajo ---
         (("=procesar","=process"),"Empieza a procesar todo lo que está en la lista, con los ajustes de cada archivo o pista.","Starts processing everything in the list, with the settings of each file or track."),
         (("=cancelar","=cancel"),"Para el proceso en marcha. Lo que se estaba haciendo no se guarda a medias.","Stops the running process. What was being made is not left half-saved."),
@@ -3992,7 +4725,7 @@ class AudioProcessorGUI:
         (("traseros (bl/br)","surround (bl/br)"),"Gama dinámica de los traseros: más contraste.","Dynamic range of the surrounds: more contrast."),
         (("gama dinámica","dynamic range"),"Aumenta el contraste: los sonidos flojos bajan y los fuertes se quedan igual. Esconde ruidos y eco.","Increases the contrast: quiet sounds go down and loud ones stay. Hides noise and echo."),
         (("procesado dinámico","dynamic processing"),"Elevación (sube lo flojo), Impacto (lo fuerte destaca) o las dos cosas, por grupos de altavoces.","Elevation (raises the quiet), Impact (the loud stands out) or both, per speaker group."),
-        (("modo:","mode:"),"0 = apagado · 1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas.","0 = off · 1 Elevation: raises the quiet · 2 Impact: the loud stands out · 3 both."),
+        (("modo:","mode:"),"1 Elevación: sube lo flojo · 2 Impacto: lo fuerte destaca · 3 las dos cosas.","1 Elevation: raises the quiet · 2 Impact: the loud stands out · 3 both."),
         (("front./traseros","front/rear"),"Intensidad para los delanteros y traseros (0 = sin efecto).","Strength for the fronts and surrounds (0 = no effect)."),
         (("central 0-10","center 0-10"),"Intensidad para el central (0 = sin efecto).","Strength for the center (0 = no effect)."),
         (("=central","=center"),"Solo el canal central, el de los diálogos.","Only the center channel, the dialogue one."),
@@ -4333,9 +5066,9 @@ class AudioProcessorGUI:
         for w in self.root.winfo_children():w.destroy()
         self._wp=[];self._wg=[]
         self._estilo()
-        self._build()
+        self._build();self._quitar_desc(self.root);self._tit_registrar(self.root)
 
-        for f in self.files: self.la.insert("end", os.path.basename(f))
+        for f in self.files: self.la.insert("end", self._la_txt(f))
         self._refrescar()
         try: self.nb.select(tab)
         except Exception:pass
@@ -4488,12 +5221,12 @@ class AudioProcessorGUI:
         buscar()
     def _acv(self):
         top=tk.Toplevel(self.root);top.title(T("acerca_t"))
-        top.geometry("540x645");top.configure(bg=CF)   # (JMG, 19-11) +85 de alto: el logo de Jmg Software
+        top.geometry("540x602");top.configure(bg=CF)   # (JMG, 19-11) +85 de alto: el logo de Jmg Software
         top.transient(self.root);top.resizable(False,False)
 
         f=ttk.Frame(top);f.pack(fill="both",expand=True,padx=20,pady=(20,10))
         try:   # (JMG, 19-11) arriba, el logo de Jmg Software: el programa es de su autor (el de TMDB va abajo y más pequeño)
-            _jl=tk.PhotoImage(data=JMG_LOGO);top._jmg_logo=_jl;_jw=tk.Label(f,image=_jl,bg=CF,cursor="hand2");_jw.pack(anchor="w",pady=(0,12))
+            _jl=tk.PhotoImage(data=LOGO_B64);top._jmg_logo=_jl;_jw=tk.Label(f,image=_jl,bg=CF,cursor="hand2");_jw.pack(anchor="w",pady=(0,12))
             _jw.bind("<Button-1>",lambda e:self._contactar());self._ayuda_flotante(_jw,self._vt("Escríbeme: ","Write to me: ")+CONTACTO_MAIL)   # (JMG, 22-11) aquí, el correo
         except Exception:pass
 
@@ -4595,8 +5328,42 @@ class AudioProcessorGUI:
         pintar(lg)
         ttk.Button(top,text=T("cerrar"),command=top.destroy).pack(pady=(0,12))
     def _cfgd(self):
-        return {"separ":self.var_separ.get(),"master":self.var_master.get(),"master_auto":self.var_master_auto.get(),"loudnorm_target":self.var_loudnorm_target.get(),"loudnorm_passes":self.var_loudnorm_passes.get(),"dyn_norm":self.var_dyn_norm.get(),"speech_norm":self.var_speech_norm.get(),"norm_vol":self.var_norm_vol.get(),"loudnorm_vol":self.var_loudnorm_vol.get(),"gdin_vol":self.var_gdin_vol.get(),"din_vol":self.var_din_vol.get(),"fps_from":self.var_fps_from.get(),"fps_to":self.var_fps_to.get(),"fps_metodo":self.var_fps_metodo.get(),"delay_init":self.var_delay_init.get(),"remux":self.var_remux.get(),"remux_subs":self.var_remux_subs.get(),"remux_caps":self.var_remux_caps.get(),"remux_adj":self.var_remux_adj.get(),"remux_meta":self.var_remux_meta.get(),"remux_nucleo":self.var_remux_nucleo.get(),"fl":self.var_fl.get(),"fr":self.var_fr.get(),"fc":self.var_fc.get(),"lfe":self.var_lfe.get(),"bl":self.var_bl.get(),"br":self.var_br.get(),"voz":self.var_voz.get(),"amb":self.var_amb.get(),"efc":self.var_efc.get(),"sub":self.var_sub.get(),"eq_bass":self.var_eq_bass.get(),"eq_mids":self.var_eq_mids.get(),"eq_treble":self.var_eq_treble.get(),"eqfront_b1_f":self.var_eqfront_b1_f.get(),"eqfront_b1_g":self.var_eqfront_b1_g.get(),"eqfront_b2_f":self.var_eqfront_b2_f.get(),"eqfront_b2_g":self.var_eqfront_b2_g.get(),"eqfront_b3_f":self.var_eqfront_b3_f.get(),"eqfront_b3_g":self.var_eqfront_b3_g.get(),"eqtras_b1_f":self.var_eqtras_b1_f.get(),"eqtras_b1_g":self.var_eqtras_b1_g.get(),"eqtras_b2_f":self.var_eqtras_b2_f.get(),"eqtras_b2_g":self.var_eqtras_b2_g.get(),"eqtras_b3_f":self.var_eqtras_b3_f.get(),"eqtras_b3_g":self.var_eqtras_b3_g.get(),"eqcent_b1_f":self.var_eqcent_b1_f.get(),"eqcent_b1_g":self.var_eqcent_b1_g.get(),"eqcent_b2_f":self.var_eqcent_b2_f.get(),"eqcent_b2_g":self.var_eqcent_b2_g.get(),"eqcent_b3_f":self.var_eqcent_b3_f.get(),"eqcent_b3_g":self.var_eqcent_b3_g.get(),"delay_fl":self.var_delay_fl.get(),"delay_fr":self.var_delay_fr.get(),"delay_fc":self.var_delay_fc.get(),"delay_bl":self.var_delay_bl.get(),"delay_br":self.var_delay_br.get(),"bm":self.var_bm.get(),"bm_corte":self.var_bm_corte.get(),"db":self.var_db.get(),"db_corte":self.var_db_corte.get(),"gdin_front":self.var_gdin_front.get(),"gdin_tras":self.var_gdin_tras.get(),"gdin_cent":self.var_gdin_cent.get(),"din_modo":self.var_din_modo.get(),"din_val":self.var_din_val.get(),"din_fc":self.var_din_fc.get(),"din_ft":self.var_din_ft.get(),"din_lfe":self.var_din_lfe.get(),"limp":self.var_limp.get(),"declick":self.var_declick.get(),"declip":self.var_declip.get(),"suav":self.var_suav.get(),"upmix":self.var_upmix.get(),"upmix_central":self.var_upmix_central.get(),"upmix_voz":self.var_upmix_voz.get(),"formato":self.var_formato.get(),"bitrate":self.var_bitrate.get(),"dup_modo":self.var_dup_modo.get(),"downmix":self.var_downmix.get(),"layout":self.var_layout_sal.get(),"downmix_modo":self.var_downmix_modo.get(),"downmix_lfe":self.var_downmix_lfe.get(),"destino_modo":self.var_destino_modo.get(),"destino_carpeta":self.var_destino_carpeta.get(),"al_terminar":self.var_al_terminar.get(),"techo_pres":self.var_techo_pres.get(),"techo_gd":self.var_techo_gd.get(),"techo_pd":self.var_techo_pd.get()}
+        return {"separ":self.var_separ.get(),"master":self.var_master.get(),"master_auto":self.var_master_auto.get(),"loudnorm_target":self.var_loudnorm_target.get(),"loudnorm_passes":self.var_loudnorm_passes.get(),"dyn_norm":self.var_dyn_norm.get(),"speech_norm":self.var_speech_norm.get(),"norm_vol":self.var_norm_vol.get(),"loudnorm_vol":self.var_loudnorm_vol.get(),"gdin_vol":self.var_gdin_vol.get(),"din_vol":self.var_din_vol.get(),"fps_from":self.var_fps_from.get(),"fps_to":self.var_fps_to.get(),"fps_metodo":self.var_fps_metodo.get(),"delay_init":self.var_delay_init.get(),"remux":self.var_remux.get(),"remux_subs":self.var_remux_subs.get(),"remux_caps":self.var_remux_caps.get(),"remux_adj":self.var_remux_adj.get(),"remux_meta":self.var_remux_meta.get(),"remux_nucleo":self.var_remux_nucleo.get(),"fl":self.var_fl.get(),"fr":self.var_fr.get(),"fc":self.var_fc.get(),"lfe":self.var_lfe.get(),"bl":self.var_bl.get(),"br":self.var_br.get(),"voz":self.var_voz.get(),"amb":self.var_amb.get(),"efc":self.var_efc.get(),"sub":self.var_sub.get(),"eq_bass":self.var_eq_bass.get(),"eq_mids":self.var_eq_mids.get(),"eq_treble":self.var_eq_treble.get(),"eqfront_b1_f":self.var_eqfront_b1_f.get(),"eqfront_b1_g":self.var_eqfront_b1_g.get(),"eqfront_b2_f":self.var_eqfront_b2_f.get(),"eqfront_b2_g":self.var_eqfront_b2_g.get(),"eqfront_b3_f":self.var_eqfront_b3_f.get(),"eqfront_b3_g":self.var_eqfront_b3_g.get(),"eqtras_b1_f":self.var_eqtras_b1_f.get(),"eqtras_b1_g":self.var_eqtras_b1_g.get(),"eqtras_b2_f":self.var_eqtras_b2_f.get(),"eqtras_b2_g":self.var_eqtras_b2_g.get(),"eqtras_b3_f":self.var_eqtras_b3_f.get(),"eqtras_b3_g":self.var_eqtras_b3_g.get(),"eqcent_b1_f":self.var_eqcent_b1_f.get(),"eqcent_b1_g":self.var_eqcent_b1_g.get(),"eqcent_b2_f":self.var_eqcent_b2_f.get(),"eqcent_b2_g":self.var_eqcent_b2_g.get(),"eqcent_b3_f":self.var_eqcent_b3_f.get(),"eqcent_b3_g":self.var_eqcent_b3_g.get(),"delay_fl":self.var_delay_fl.get(),"delay_fr":self.var_delay_fr.get(),"delay_fc":self.var_delay_fc.get(),"delay_bl":self.var_delay_bl.get(),"delay_br":self.var_delay_br.get(),"bm":self.var_bm.get(),"bm_corte":self.var_bm_corte.get(),"db":self.var_db.get(),"db_corte":self.var_db_corte.get(),"gdin_front":self.var_gdin_front.get(),"gdin_tras":self.var_gdin_tras.get(),"gdin_cent":self.var_gdin_cent.get(),"din_modo":self.var_din_modo.get(),"din_azid":self.var_din_azid.get(),"din_val":self.var_din_val.get(),"din_fc":self.var_din_fc.get(),"din_ft":self.var_din_ft.get(),"din_lfe":self.var_din_lfe.get(),"limp":self.var_limp.get(),"declick":self.var_declick.get(),"declip":self.var_declip.get(),"suav":self.var_suav.get(),"upmix":self.var_upmix.get(),"upmix_central":self.var_upmix_central.get(),"upmix_voz":self.var_upmix_voz.get(),"formato":self.var_formato.get(),"bitrate":self.var_bitrate.get(),"dup_modo":self.var_dup_modo.get(),"downmix":self.var_downmix.get(),"layout":self.var_layout_sal.get(),"downmix_modo":self.var_downmix_modo.get(),"downmix_lfe":self.var_downmix_lfe.get(),"destino_modo":self.var_destino_modo.get(),"destino_carpeta":self.var_destino_carpeta.get(),"al_terminar":self.var_al_terminar.get(),"techo_pres":self.var_techo_pres.get(),"techo_gd":self.var_techo_gd.get(),"techo_pd":self.var_techo_pd.get()}
+    def _din_sync(self,de):
+        """(JMG, 26-11) Procesado dinámico sin el 0: el modo elegido (1-3, por defecto 2) está en var_din_ui; con los deslizadores a 0 no hace
+        nada (por dentro din_modo = 0); al mover un deslizador se pone el modo elegido; si algo lo apaga (din_modo = 0), los deslizadores a 0"""
+        if getattr(self,"_din_sync_on",False) or getattr(self,"_cargando",False) or getattr(self,"_cargando_pista",False) or getattr(self,"_din_dictc",False):
+            if de=="modo":
+                try:
+                    m_=int(self.var_din_modo.get() or 0);(self.var_din_ui.set(m_ or 2) if (m_ or not getattr(self,"_din_sync_on",False)) else None)   # al cargar, el modo guardado (apagado: el 2, JMG 27-11); (árbitro) al bajar los deslizadores a 0, se queda el elegido
+                except Exception:pass
+            return
+        self._din_sync_on=True
+        try:
+            sl=(self.var_din_ft,self.var_din_fc,self.var_din_lfe);hay=any(abs(float(v.get() or 0))>1e-9 for v in sl)
+            if de=="modo":
+                m=int(self.var_din_modo.get() or 0)
+                if m:self.var_din_ui.set(m)
+                else:
+                    if int(self.var_din_ui.get() or 2)!=2:self.var_din_ui.set(2)   # (JMG, 27-11) apagado: el desplegable vuelve al 2 (no se queda con el modo de otra pista)
+                    if hay:
+                        for v in sl:v.set(0)
+            else:
+                m=int(self.var_din_ui.get() or 2) if hay else 0
+                if int(self.var_din_modo.get() or 0)!=m:self.var_din_modo.set(m)
+        except Exception:pass
+        finally:self._din_sync_on=False
     def _dictc(self,d):
+        self._din_dictc=True   # (JMG, 26-11) al cargar unos ajustes, el Procesado dinámico se queda como venga
+        try:return self._dictc_(d)
+        finally:
+            self._din_dictc=False
+            try:
+                if int(self.var_din_modo.get() or 0):self.var_din_ui.set(int(self.var_din_modo.get()))
+            except Exception:pass
+    def _dictc_(self,d):
+        self._adv={k:dict(v) for k,v in d["adv"].items() if isinstance(v,dict)} if isinstance(d.get("adv"),dict) else {}   # (JMG, 22-11) los ajustes avanzados de la pista
+        self._fc_mano=d.get("fc_mano") if isinstance(d.get("fc_mano"),(list,tuple)) else None   # (JMG, 25-11) los filtros a mano (Edit/Log)
         if isinstance(d.get("opc_aud"),dict):self._opc_aud={k:dict(v) for k,v in d["opc_aud"].items() if isinstance(v,dict)}   # (JMG, 12-11)
         if isinstance(d.get("aften"),dict):   # (JMG, 10-11) los ajustes de Aften son de cada pista
             self._aften=dict(AFTEN_DEF);self._aften.update({k:v for k,v in _af_migrar(d["aften"]).items() if k in AFTEN_DEF})
@@ -4606,7 +5373,7 @@ class AudioProcessorGUI:
             if k in d:
                 try:v.set(d[k])
                 except (ValueError,tk.TclError):v.set(dd)
-        for k,v in [("separ",self.var_separ),("master",self.var_master),("fl",self.var_fl),("fr",self.var_fr),("fc",self.var_fc),("lfe",self.var_lfe),("bl",self.var_bl),("br",self.var_br),("voz",self.var_voz),("amb",self.var_amb),("efc",self.var_efc),("sub",self.var_sub),("eq_bass",self.var_eq_bass),("eq_mids",self.var_eq_mids),("eq_treble",self.var_eq_treble),("eqfront_b1_f",self.var_eqfront_b1_f),("eqfront_b1_g",self.var_eqfront_b1_g),("eqfront_b2_f",self.var_eqfront_b2_f),("eqfront_b2_g",self.var_eqfront_b2_g),("eqfront_b3_f",self.var_eqfront_b3_f),("eqfront_b3_g",self.var_eqfront_b3_g),("eqtras_b1_f",self.var_eqtras_b1_f),("eqtras_b1_g",self.var_eqtras_b1_g),("eqtras_b2_f",self.var_eqtras_b2_f),("eqtras_b2_g",self.var_eqtras_b2_g),("eqtras_b3_f",self.var_eqtras_b3_f),("eqtras_b3_g",self.var_eqtras_b3_g),("eqcent_b1_f",self.var_eqcent_b1_f),("eqcent_b1_g",self.var_eqcent_b1_g),("eqcent_b2_f",self.var_eqcent_b2_f),("eqcent_b2_g",self.var_eqcent_b2_g),("eqcent_b3_f",self.var_eqcent_b3_f),("eqcent_b3_g",self.var_eqcent_b3_g),("delay_fl",self.var_delay_fl),("delay_fr",self.var_delay_fr),("delay_fc",self.var_delay_fc),("delay_bl",self.var_delay_bl),("delay_br",self.var_delay_br),("bm",self.var_bm),("db",self.var_db),("gdin_front",self.var_gdin_front),("gdin_tras",self.var_gdin_tras),("gdin_cent",self.var_gdin_cent),("din_modo",self.var_din_modo),("gdin_vol",self.var_gdin_vol),("din_vol",self.var_din_vol)]:
+        for k,v in [("separ",self.var_separ),("master",self.var_master),("fl",self.var_fl),("fr",self.var_fr),("fc",self.var_fc),("lfe",self.var_lfe),("bl",self.var_bl),("br",self.var_br),("voz",self.var_voz),("amb",self.var_amb),("efc",self.var_efc),("sub",self.var_sub),("eq_bass",self.var_eq_bass),("eq_mids",self.var_eq_mids),("eq_treble",self.var_eq_treble),("eqfront_b1_f",self.var_eqfront_b1_f),("eqfront_b1_g",self.var_eqfront_b1_g),("eqfront_b2_f",self.var_eqfront_b2_f),("eqfront_b2_g",self.var_eqfront_b2_g),("eqfront_b3_f",self.var_eqfront_b3_f),("eqfront_b3_g",self.var_eqfront_b3_g),("eqtras_b1_f",self.var_eqtras_b1_f),("eqtras_b1_g",self.var_eqtras_b1_g),("eqtras_b2_f",self.var_eqtras_b2_f),("eqtras_b2_g",self.var_eqtras_b2_g),("eqtras_b3_f",self.var_eqtras_b3_f),("eqtras_b3_g",self.var_eqtras_b3_g),("eqcent_b1_f",self.var_eqcent_b1_f),("eqcent_b1_g",self.var_eqcent_b1_g),("eqcent_b2_f",self.var_eqcent_b2_f),("eqcent_b2_g",self.var_eqcent_b2_g),("eqcent_b3_f",self.var_eqcent_b3_f),("eqcent_b3_g",self.var_eqcent_b3_g),("delay_fl",self.var_delay_fl),("delay_fr",self.var_delay_fr),("delay_fc",self.var_delay_fc),("delay_bl",self.var_delay_bl),("delay_br",self.var_delay_br),("bm",self.var_bm),("db",self.var_db),("gdin_front",self.var_gdin_front),("gdin_tras",self.var_gdin_tras),("gdin_cent",self.var_gdin_cent),("din_modo",self.var_din_modo),("din_azid",self.var_din_azid),("gdin_vol",self.var_gdin_vol),("din_vol",self.var_din_vol)]:
             s(v,k)
         s(self.var_master_auto,"master_auto",False)
         # Loading loudnorm_target safely
@@ -4632,8 +5399,8 @@ class AudioProcessorGUI:
         s(self.var_remux_adj,"remux_adj",True)
         s(self.var_remux_meta,"remux_meta",True)
         s(self.var_remux_nucleo,"remux_nucleo",False)
-        s(self.var_bm_corte,"bm_corte",120);s(self.var_db_corte,"db_corte",90)
-        s(self.var_din_val,"din_val",1);s(self.var_din_fc,"din_fc",0);s(self.var_din_ft,"din_ft",5);s(self.var_din_lfe,"din_lfe",0);s(self.var_limp,"limp",0);s(self.var_declick,"declick",False);s(self.var_declip,"declip",False);s(self.var_upmix,"upmix","N")
+        s(self.var_bm_corte,"bm_corte",90);s(self.var_db_corte,"db_corte",90)
+        s(self.var_din_val,"din_val",1);s(self.var_din_fc,"din_fc",0);s(self.var_din_ft,"din_ft",0);s(self.var_din_lfe,"din_lfe",0);s(self.var_limp,"limp",0);s(self.var_declick,"declick",False);s(self.var_declip,"declip",False);s(self.var_upmix,"upmix","N")
         try:self.var_suav.set(int(d.get("suav",0) or 0))   # los ajustes de antes de la 7.0 no lo tienen
         except (TypeError,ValueError,tk.TclError):self.var_suav.set(0)
         s(self.var_techo_pres,"techo_pres","Sin límite");s(self.var_techo_gd,"techo_gd","Sin límite");s(self.var_techo_pd,"techo_pd","Sin límite")
@@ -4697,7 +5464,7 @@ class AudioProcessorGUI:
         if not nf:self._toast(T("inv_tit"),T("inv_x"),tipo="warning");return
         r=os.path.join(self.pdir,f"{nf}.json")
         try:
-            with open(r,"w",encoding="utf-8") as f:json.dump(self._cfgd(),f,indent=2,ensure_ascii=False)
+            _json_seguro(r,self._preset_comun(),indent=2,ensure_ascii=False)   # (JMG, 26-11) común con Jmg VideoEncoder   # (JMG, 25-11) todo: también Aften, las opciones del códec, lo avanzado y los filtros a mano
             self._log(T("log_g",n=nf));self._toast("OK",T("guardado_x",r=r),tipo="info")
         except Exception as e:messagebox.showerror(T("error_tit"),f"{e}")
     def _mp(self):
@@ -4715,8 +5482,35 @@ class AudioProcessorGUI:
         r=os.path.join(self.pdir,n)
         try:
             with open(r,"r",encoding="utf-8") as f:d=json.load(f)
-            self._dictc(d);self._log(T("log_c",n=n))
+            x=self._preset_ap(d)
+            if x is None:self._toast(T("info_tit"),self._vt("Ese preset no tiene ajustes de audio.","That preset has no audio settings."),seg=4);return
+            self._dictc(x);self._log(T("log_c",n=n))
         except Exception as e:messagebox.showerror(T("error_tit"),f"{e}")
+    _PR_COMUN_FUERA=("delay","fps_de","fps_a","fps_met")
+    def _preset_comun(self):
+        """(JMG, 26-11) preset común con Jmg VideoEncoder: lo de este programa («ap») y el audio que entienden los dos («comun»)"""
+        d=self._snap();c=self._traspaso_comun(d)
+        for k in self._PR_COMUN_FUERA:c.pop(k,None)
+        return {"jmg_preset":1,"de":"ap","ap":d,"comun":c}
+    def _preset_ap(self,d):
+        """lo que pone aquí un preset: el de este programa, entero; el de Jmg VideoEncoder, su audio (el vídeo y los subtítulos no
+        afectan) en la pista elegida, sin tocar su sincronía; None si no trae audio"""
+        if isinstance(d.get("ap"),dict):return d["ap"]
+        if not ("jve" in d or "ve" in d or "comun" in d):return d   # los de antes de este programa
+        c=dict(d.get("comun") or {})
+        if not c:   # uno de Jmg VideoEncoder de antes: el audio de su primera pista
+            a=(((d.get("ve") or d).get("a")) or [{}])[0] or {}
+            c={"ef":{k:v for k,v in (a.get("ef") or {}).items() if k in _TR_EF and v}}
+            if a.get("cod") and a["cod"]!="copy":
+                c.update(cod=a["cod"],aften=bool(a.get("aften",True)) if a["cod"]=="ac3" else False)
+                if a.get("kbps"):c["kbps"]=int(a["kbps"])
+        for k in self._PR_COMUN_FUERA:c.pop(k,None)
+        if not c.get("ef") and not c.get("cod"):return None
+        cfg=self._snap();keep={k:cfg.get(k) for k in ("delay_init","fps_from","fps_to","fps_metodo")}
+        p=None
+        try:p=(self.pc.get(self.pactual[0]) or [])[self.pactual[1]]
+        except Exception:pass
+        self._traspaso_a_cfg(cfg,c,p);cfg.update(keep);return cfg
     def _ap(self):
         try:
             if not _abrir_externo(self.pdir):self._toast(T("info_tit"),self.pdir,tipo="info")
@@ -4818,7 +5612,7 @@ class AudioProcessorGUI:
         for v in (self.var_voz,self.var_amb,self.var_efc,self.var_sub,
                   self.var_gdin_front,self.var_gdin_tras,self.var_gdin_cent,
                   self.var_master_auto,self.var_dyn_norm,self.var_speech_norm,
-                  self.var_din_modo,self.var_limp,self.var_declick,self.var_declip):
+                  self.var_din_modo,self.var_din_azid,self.var_limp,self.var_declick,self.var_declip):
             v.trace_add("write",lambda *a:self._ex())
         for _v in (self.var_din_val,self.var_din_ft,self.var_din_fc,self.var_din_lfe):_v.trace_add("write",lambda *a:self._din_lbl())
         for _v in [self.var_eq_bass,self.var_eq_mids,self.var_eq_treble,self.var_suav,self.var_master,self.var_fl,self.var_fr,self.var_fc,self.var_lfe,self.var_bl,self.var_br]+\
@@ -5055,7 +5849,7 @@ class AudioProcessorGUI:
         except Exception:pass
     def _bp_libres(self):
         """lo que sigue funcionando mientras codifica (además de las pestañas y las barras de desplazamiento)"""
-        return [w for w in (getattr(self,"btn_c",None),getattr(self,"btn_pausa",None),getattr(self,"cmb_fin",None)) if w is not None]   # (JMG, 13-11) y «Pausa» y «Al terminar»
+        return [w for w in (getattr(self,"btn_c",None),getattr(self,"btn_pausa",None),getattr(self,"cmb_fin",None))+tuple(getattr(self,"_bp_extra",[])) if w is not None]   # (JMG, 27-11) + «⬅ Volver»   # (JMG, 13-11) y «Pausa» y «Al terminar»
     def _bp_aplicar(self):
         """recorre la ventana principal: desactiva lo que esté activo y pone el freno de clics, teclas y rueda donde no esté
         (también lo que el programa haya vuelto a activar o haya creado después de empezar)"""
@@ -5260,7 +6054,7 @@ class AudioProcessorGUI:
         try:
             p=rh([FFPROBE,"-v","error","-show_entries","format=duration:stream=id,codec_type","-of","json",ent],timeout=60);jp=json.loads(p.stdout or "{}")
             dur=float((jp.get("format") or {}).get("duration") or 0)
-            lg=_bd_idiomas(r_) if fs and fs[0].lower().endswith((".m2ts",".mts")) else {}   # (JMG, 13-11) Blu-ray: el idioma de cada pista, de su lista
+            lg=_bd_idiomas(r_) if fs and fs[0].lower().endswith((".m2ts",".mts")) else _dvd_idiomas(fs)   # (JMG, 13-11) Blu-ray: el idioma de cada pista, de su lista; (22-11) DVD: de su .IFO
             for i_,s_ in enumerate([x for x in jp.get("streams",[]) if x.get("codec_type")=="audio"]):
                 try:l_=lg.get(int(str(s_.get("id")),16))
                 except ValueError:l_=None
@@ -5295,7 +6089,7 @@ class AudioProcessorGUI:
             except Exception:pass
             suelta()
             if ok:
-                self._ls(f"[💿] {sal}");self._addl([sal])
+                self._ls(f"[💿] {sal}");self._addl([sal],True)
                 try:i=self.files.index(os.path.normpath(os.path.abspath(sal)));self.la.selection_clear(0,"end");self.la.selection_set(i);self.la.see(i);self._multi_cp()
                 except Exception:pass
                 ref=dur_lista if dur_lista>60 else dur   # un Blu-ray: lo que dice su lista de reproducción (aunque sus archivos estén cortados)
@@ -5316,14 +6110,14 @@ class AudioProcessorGUI:
                     self._ui(est.set,V("Repitiendo (se cortó la lectura de la imagen)...","Repeating (the image reading was cut)..."));_esperar_lectura(r_)
                 err=[];ok=False
                 try:
-                    p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",creationflags=CNW);corre["p"]=p
+                    c_,pares=_part_cmd(cmd);p=subprocess.Popen(c_,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",errors="replace",creationflags=CNW);corre["p"]=p
                     lee=threading.Thread(target=lambda p=p,err=err:err.extend(p.stderr.read().splitlines()),daemon=True);lee.start()
                     for lin in p.stdout:
                         if lin.startswith("out_time_us=") and dur>0:
                             try:
                                 v=min(99.0,int(lin.split("=")[1])/1e4/dur);self._ui(pb.configure,{"value":v});self._ui(est.set,V(f"Ripeando... {v:.0f} %",f"Ripping... {v:.0f} %"))
                             except Exception:pass
-                    p.wait();lee.join(5);ok=p.returncode==0 and not corre["canc"] and os.path.isfile(sal) and os.path.getsize(sal)>0
+                    p.wait();lee.join(5);_part_fin(pares,p.returncode==0 and not corre["canc"]);ok=p.returncode==0 and not corre["canc"] and os.path.isfile(sal) and os.path.getsize(sal)>0
                 except Exception as ex:err.append(str(ex))
                 real=0.0
                 if ok:   # (JMG, 13-11) cuánto dura de verdad lo ripeado
@@ -5332,6 +6126,8 @@ class AudioProcessorGUI:
                 ref=dur_lista if dur_lista>60 else dur
                 if corre["canc"] or not ((ok and ref>60 and 0<real<0.9*ref) or (not ok and any(k_ in x for x in err for k_ in ("Invalid argument","Error opening input","Permission denied","not ready","no está listo")))):break
             if not ok:
+                try:_part_fin(pares,False)   # (JMG, 20-11) lo de a medias, también si algo saltó a mitad
+                except Exception:pass
                 try:
                     if os.path.isfile(sal):os.remove(sal)
                 except OSError:pass
@@ -5356,7 +6152,23 @@ class AudioProcessorGUI:
         rs=self.root.tk.splitlist(e.data)
         a=[r for r in rs if os.path.isfile(r)]
         if a:self._addl(a)
-    def _addl(self,rs):
+    def _la_txt(self,f):return ("✔ " if f in self.agregados else "")+os.path.basename(f)
+    def _pintar_la(self):
+        s=self.la.curselection();y=self.la.yview()[0];self.la.delete(0,"end")
+        for f in self.files:self.la.insert("end",self._la_txt(f))
+        for i in s:self.la.selection_set(i)
+        self.la.yview_moveto(y);self._refs()
+    def _agregar_ap(self):
+        """(JMG, 20-11) «➕ Agregar», como en Jmg VideoEncoder: los archivos seleccionados pasan a la lista de pistas (llevan ✔) y solo
+        esos se procesan; añadir, seleccionar o arrastrar archivos ya no los carga solos"""
+        if self._bloq():return
+        sel=[self.files[i] for i in self.la.curselection() if i<len(self.files)]
+        if not sel:self._toast(T("info_tit"),self._vt("Selecciona antes uno o varios archivos de la lista.","First select one or more files in the list."),seg=4);return
+        self.agregados.update(sel);self._pintar_la();self._multi_cp()
+        try:self._vis_chk_files()
+        except Exception:pass
+        self._log("[+] "+", ".join(os.path.basename(f) for f in sel))
+    def _addl(self,rs,agregar=None):
         ad=0;du=0;pr=None;malos=[]
         for r in rs:
             rn=os.path.normpath(os.path.abspath(r))
@@ -5367,7 +6179,9 @@ class AudioProcessorGUI:
             if not ps:
                 malos.append(os.path.basename(rn));self.pc.pop(rn,None);continue
             self.pc[rn]=ps
-            self.files.append(rn);self.la.insert("end",os.path.basename(rn))
+            self.files.append(rn)
+            if agregar or (agregar is None and _AGR_AUTO):self.agregados.add(rn)   # (JMG, 20-11) lo que crea el programa entra agregado
+            self.la.insert("end",self._la_txt(rn))
             if rn not in self.ppa:self.ppa[rn]=0
             if pr is None:pr=rn
             ad+=1
@@ -5387,7 +6201,7 @@ class AudioProcessorGUI:
         if not s:return
         for i in sorted(s,reverse=True):
             r=self.files[i];self.la.delete(i);del self.files[i]
-            self.ppa.pop(r,None);self.pc.pop(r,None);self.usp.pop(r,None)
+            self.ppa.pop(r,None);self.pc.pop(r,None);self.usp.pop(r,None);self.agregados.discard(r)
             self.sel_por_archivo.pop(r,None)
             self.excluir_pistas.pop(r,None)
             self.borrar_pistas.pop(r,None)
@@ -5407,7 +6221,7 @@ class AudioProcessorGUI:
         if self.pactual and self.pactual[0]==r:self.pactual=None
     def _clr(self):
         if self._bloq():return
-        self.la.delete(0,"end");self.files.clear();self.ppa.clear();self.pc.clear();self.usp.clear();self.lnc.clear();self.excluir_pistas.clear();self.borrar_pistas.clear();self.ext_subs.clear();self.ext_cover.clear()
+        self.la.delete(0,"end");self.files.clear();self.agregados.clear();self.ppa.clear();self.pc.clear();self.usp.clear();self.lnc.clear();self.excluir_pistas.clear();self.borrar_pistas.clear();self.ext_subs.clear();self.ext_cover.clear()
         self.pconf.clear();self.pnombre.clear();self.pmark.clear();self.ptitulo.clear();self.ptramos.clear();self.sel_por_archivo.clear();self.pactual=None
         getattr(self,"_tiempos",{}).clear();self.var_tiempo.set("")
         self.aa=None;self._cnt();self._multi_cp()
@@ -5420,6 +6234,8 @@ class AudioProcessorGUI:
                 self.btn_p.configure(state="normal" if n>0 else "disabled")
         except Exception:pass
         self._set_enabled(n>0)
+        try:self.btn_agr.configure(state="normal" if n>0 else "disabled")   # (JMG, 20-11) como en el VE: sin archivos, desactivado (no va con las acciones de pista: sin agregar no hay pistas)
+        except Exception:pass
 
     def _set_enabled(self,activo):
         """Habilita o deshabilita todos los controles de las pestanas"""
@@ -5447,7 +6263,7 @@ class AudioProcessorGUI:
         for w in padre.winfo_children():
             cls=w.winfo_class()
             try:
-                if w==getattr(self,"en_tit",None) or w==getattr(self,"lbl_marcadas",None):
+                if w==getattr(self,"en_tit",None) or w==getattr(self,"lbl_marcadas",None) or w==getattr(self,"btn_vis_volver",None):   # (JMG, 25-11) «⬅ Volver», siempre (sin archivos no se salía de Visualización)
                     continue
             except Exception:pass
             try:
@@ -5474,6 +6290,8 @@ class AudioProcessorGUI:
                 if ch>vh:sb.pack(side="right",fill="y")
                 else:sb.pack_forget()
         inner.bind("<Configure>",_on_conf)
+        if not hasattr(self,"_tab_in"):self._tab_in={}
+        self._tab_in[str(parent)]=inner;inner.bind("<Configure>",self._ajustar_pestana_luego,add="+")   # (JMG, 21-11) altura justa
         def _on_canvas(e):
             canvas.itemconfig(inner_id,width=e.width);_on_conf()
         canvas.bind("<Configure>",_on_canvas)
@@ -5676,12 +6494,7 @@ class AudioProcessorGUI:
         ttk.Label(R,text=T("tiempo_info"),foreground=CA,font=("",8,"italic"),wraplength=G_RW-30,justify="left").grid(row=15,column=0,columnspan=3,sticky="w",pady=(4,0))
         for _v in (self.var_fps_from,self.var_fps_to,self.var_delay_init):_v.trace_add("write",lambda *a:(self._tiempo_txt(),self._sinc_txt()))
 
-        ttk.Separator(L, orient="horizontal").grid(row=20, column=0, columnspan=3, sticky="ew", pady=15)
-        self._tit_auto(L,21,self._vt("Suavizado digital","Digital smoothing"),"suav")
-        self._w_suav=list(self._sl(L,self._vt("Intensidad (0-5)","Amount (0-5)"),self.var_suav,0,5,22,step=1))
-        ttk.Label(L,text=self._vt("Quita el exceso de agudos de muchas películas y doblajes de los 80 y 90 (eses y brillo metálico). 0 = sin efecto. «Auto» lo mide en el central.",
-                                  "Removes the excess treble of many movies and dubs from the 80s and 90s (harsh S sounds and metallic shine). 0 = no effect. «Auto» measures it on the center."),
-                  foreground=CA,font=("",8,"italic")).grid(row=23,column=0,columnspan=3,sticky="w",padx=5,pady=(0,4))
+        # (JMG, 21-11) el Suavizado digital, a «Presencia / EQ» (a la derecha del EQ de 3 bandas)
         ttk.Separator(L, orient="horizontal").grid(row=24, column=0, columnspan=3, sticky="ew", pady=15)
         ttk.Label(L, text=T("desc_vol"), foreground=CA, font=("", 9, "italic"), justify="left").grid(row=25, column=0, columnspan=3, sticky="w", padx=5, pady=(10, 20))
         self._unif(L)
@@ -6123,10 +6936,10 @@ class AudioProcessorGUI:
         self._toast(T("escaneo_t"),msg,tipo="info",seg=8)
 
     # ---------- «Ajustar canales» y «Ajustar tono»: miden los canales y dejan el resultado en los deslizadores ----------
-    _VOL_OBJ={"FL":-3.0,"FR":-3.0,"BL":-7.0,"BR":-7.0,"LFE":-6.0}   # dB respecto al central: una mezcla de cine
+    _VOL_OBJ={"FL":-1.5,"FR":-1.5,"BL":-3.0,"BR":-3.0,"LFE":-6.0}   # dB respecto al central: una mezcla de cine (JMG, 27-11: más compensada)
     # objetivos de los botones «Auto»: vol = dB respecto al central de frontales, traseros y subwoofer · voz, amb, efc = dB de Presencia ·
     # lra = rango dinamico deseado (LU) · gama, bm = topes de Gama dinamica y Bass Management · corte en Hz
-    _AUTO_OBJ={"vol":(-3.0,-7.0,-6.0),"voz":2.0,"lra":17.0,"gama":4,"bm":3,"corte":120,"db":3,"db_corte":90}
+    _AUTO_OBJ={"vol":(-1.5,-3.0,-6.0),"voz":2.0,"lra":17.0,"gama":6,"bm":3,"corte":90,"db":3,"db_corte":90}
     _AUTO_TXT="Auto"
     def _auto_pista(self,ruta,idx):
         """(pista de FFmpeg, {canal: indice}) de una pista de la lista"""
@@ -6167,23 +6980,25 @@ class AudioProcessorGUI:
         return {cs[j][0]:val[k] for j,k in enumerate(sorted(val))},{cs[j][0]:lra[k] for j,k in enumerate(sorted(val))}
     def _vol_ajustes(self,med):
         """deslizadores de canal para el equilibrio: el central manda (no se toca) y los demas van a su sitio respecto a el.
-        Un canal casi mudo se deja en 0. Maximo +-6 dB (subwoofer +-3), de 0,5 en 0,5"""
+        Un canal casi mudo se deja en 0. Frontales y traseros solo bajan (hasta 6 dB); el subwoofer, 2 dB por debajo del más flojo (de -6 a +3); de 0,5 en 0,5"""
         fc=med.get("FC",-99.0)
         if fc<=-60:return None
-        res={}
+        res={};lv=[fc]
         for c,obj in self._VOL_OBJ.items():
-            if c not in med:continue
-            lim=3.0 if c=="LFE" else 6.0
-            g=0.0 if med[c]<=-60 else max(-lim,min(lim,fc+obj-med[c]))
-            if c!="LFE":g=min(0.0,g)   # (JMG, 27-11) frontales y traseros solo se bajan: hay películas que no piden tanto estéreo ni surround
+            if c not in med or c=="LFE":continue
+            g=0.0 if med[c]<=-60 else max(-6.0,min(0.0,fc+obj-med[c]))   # (JMG, 27-11) frontales y traseros solo se bajan: hay películas que no piden tanto estéreo ni surround
             res[c.lower()]=round(g*2)/2.0
+            if med[c]>-60:lv.append(med[c]+res[c.lower()])
+        if "LFE" in med:   # (JMG, 27-11) el subwoofer, siempre un poco por debajo de los demás (2 dB por debajo del más flojo)
+            g=0.0 if med["LFE"]<=-60 else max(-6.0,min(3.0,min(lv)-2.0-med["LFE"]))
+            res["lfe"]=math.floor(g*2)/2.0
         return res
     @staticmethod
     def _eff_inv(db,top_pos,top_neg,expo=1.4):
         """lo contrario de _eff: valor del deslizador (entero, -10..10) que da mas o menos esos dB"""
         if abs(db)<0.05:return 0
         t=top_pos if db>0 else top_neg
-        return int((1 if db>0 else -1)*round(10.0*(min(abs(db),t)/t)**(1.0/expo)))
+        return int((1 if db>0 else -1)*round(15.0*(min(abs(db),t)/t)**(1.0/expo)))
     def _tono_grupos(self,med):
         """med={grupo: [espectros de sus canales]}: dB de las 3 bandas (100, 1000 y 5000 Hz) de cada grupo para acercarlo a la media de todos.
         Suave a proposito (+-3 dB): la voz del central y los traseros no tienen por que sonar igual que los frontales"""
@@ -6329,6 +7144,7 @@ class AudioProcessorGUI:
         if self._cancelar.is_set():
             self._set_prog(0);self._st("");self._toast(T("cancelado_tit"),V("Medida cancelada.","Measurement cancelled."),tipo="info",seg=3);return
         for ruta,idx,aj in res:
+            if modo=="vol":aj={**{k:0 for k in ("fl","fr","fc","lfe","bl","br")},**aj}   # (JMG, 19-11) los seis: el que no se mide (un subwoofer callado) a 0, no se queda en Mute
             c0=self.pconf.get((ruta,idx)) or {}
             # los dos ecualizadores no van juntos, ni el Master con el volumen por canal
             if modo=="tono" and any(v for k,v in aj.items() if k.endswith("_g")):   # el EQ avanzado no va con el de 3 bandas, el Suavizado ni la Limpieza
@@ -6489,18 +7305,18 @@ class AudioProcessorGUI:
                     if k_ in aj and aj[k_]>0:
                         p_=come(cs)
                         if p_>=0.3:
-                            nv[k_]=int(cl(self._eff_inv(self._eff(aj[k_],tp,tn)+p_,tp,tn),-10,10))
+                            nv[k_]=int(cl(self._eff_inv(self._eff(aj[k_],tp,tn)+p_,tp,tn),-15,15))
                             if nv[k_]!=aj[k_]:cam.append(f"{nom} {aj[k_]:+d}→{nv[k_]:+d}")
                 pe=max([come(cs) for cs in (("FC",),("FL","FR"),("BL","BR"),("LFE",))]+[0.0])
             else:
                 P=self._AUTO_OBJ
-                gr=(("gdin_front",("FL","FR"),P["gama"],T("gd_front")),("gdin_tras",("BL","BR"),P["gama"],T("gd_tras")),("gdin_cent",("FC",),2,T("gd_cent"))) if ef=="gama" else \
-                   (("din_ft",("FL","FR","BL","BR"),6,V("F/T","F/R")),("din_fc",("FC",),3,"C"))
+                gr=(("gdin_front",("FL","FR"),P["gama"],T("gd_front")),("gdin_tras",("BL","BR"),P["gama"],T("gd_tras")),("gdin_cent",("FC",),3,T("gd_cent"))) if ef=="gama" else \
+                   (("din_ft",("FL","FR","BL","BR"),9,V("F/T","F/R")),("din_fc",("FC",),4,"C"))
                 for k_,cs,mx,nom in gr:
                     if aj.get(k_):
                         q_=cont(cs)
                         if abs(q_)>=0.75:
-                            nv[k_]=int(cl(aj[k_]+(1 if ef=="gama" else -1)*round(q_/1.5),1 if ef=="din" else 0,mx))
+                            nv[k_]=int(cl(aj[k_]+(1 if ef=="gama" else -1)*round(q_),1 if ef=="din" else 0,mx))
                             if nv[k_]!=aj[k_]:cam.append(f"{nom} {aj[k_]}→{nv[k_]}")
                 pe=max([cont(cs) for k_,cs,_,_ in gr if aj.get(k_)]+[0.0])   # (árbitro) solo lo que se compensa (el central ya no)
             u_=("dB" if ef=="pres" else "LU")
@@ -6612,8 +7428,8 @@ class AudioProcessorGUI:
             lr=lambda cs:[R[c] for c in cs if ok(c) and c in R]
             T_=P["lra"];res=[]
             a=lr(("FL","FR"));b=lr(("BL","BR"));c=lr(("FC",))
-            if a:aj["gdin_front"]=int(cl(round((T_-med(a))/1.5),0,P["gama"]));res.append(T("gd_front")+f" {aj['gdin_front']}")
-            if b:aj["gdin_tras"]=int(cl(round((T_-med(b))/1.5),0,P["gama"]));res.append(T("gd_tras")+f" {aj['gdin_tras']}")
+            if a:aj["gdin_front"]=int(cl(round(T_-med(a)),0,P["gama"]));res.append(T("gd_front")+f" {aj['gdin_front']}")
+            if b:aj["gdin_tras"]=int(cl(round(T_-med(b)),0,P["gama"]));res.append(T("gd_tras")+f" {aj['gdin_tras']}")
             if c:aj["gdin_cent"]=0   # (JMG, 28-11) el central es la referencia: la Gama no lo toca (a mano sí)
             if not a and not b:return None,V("solo hay central, y el central es la referencia: la Gama no lo toca.","there is only a center, and the center is the reference: the Range does not touch it.")
             if not aj:return None,no
@@ -6626,7 +7442,7 @@ class AudioProcessorGUI:
             ex=med(a)-P["lra"]
             if ex<=3.0:aj={"din_modo":0};txt=V(f"rango dinámico {med(a):.0f} LU: no hace falta, apagado.",f"dynamic range {med(a):.0f} LU: not needed, off.")
             else:   # demasiado contraste: Elevacion sube lo flojo (el central no se toca: es la referencia)
-                v=int(cl(round(ex/1.5)+2,1,6))
+                v=int(cl(round(ex+3),2,9))   # (JMG, 20-11) de 0 a 15
                 aj={"din_modo":3,"din_ft":v,"din_fc":0,"din_lfe":0}   # (JMG, 9-11) modo 3: Elevación + Impacto; (28-11) el central es la referencia: Gama y Procesado no lo tocan
                 txt=V(f"rango dinámico {med(a):.0f} LU · ",f"dynamic range {med(a):.0f} LU · ")+self._din_nom(3)+f" · "+V("F/T ","F/R ")+f"{v} · C {aj['din_fc']} · Sub 0"
         elif ef=="separ":   # (JMG, 28-11) la que le va a la película: más en las de acción, menos en las tranquilas; el central no se toca
@@ -6701,14 +7517,15 @@ class AudioProcessorGUI:
         # ─── Presencia ───
         ttk.Label(f,text=T("presencia"),font=("",10,"bold")).grid(row=1,column=0,sticky="w",padx=5,pady=(4,2));self._techo_box(f,1,self.var_techo_pres,1);self._btn_auto(f,"pres").grid(row=1,column=2,padx=(1,5),pady=(4,2))
         for r,(l,v) in enumerate([(T("voz"),self.var_voz),(T("amb"),self.var_amb),(T("efc"),self.var_efc)],start=2):
-            e,en=self._sl(f,l,v,-10,10,r,step=1);self._wp.extend([e,en])
+            e,en=self._sl(f,l,v,-15,15,r,step=1);self._wp.extend([e,en])   # (JMG, 19-11) de -15 a +15, de 1 en 1
             if r==2:self._px['voz']=[e,en]
-        e,en=self._sl(f,T("sub"),self.var_sub,-10,10,5,step=1);self._wp.extend([e,en]);self._px['sub']=[e,en]
+        e,en=self._sl(f,T("sub"),self.var_sub,-15,15,5,step=1);self._wp.extend([e,en]);self._px['sub']=[e,en]
         self.lbl_pa=ttk.Label(f,textvariable=self.var_pres_aviso,foreground=CAV,font=("",8,"italic"))
         self.lbl_pa.grid(row=6,column=0,columnspan=3,sticky="w",padx=5,pady=(2,0))
         sp_=ttk.Frame(f);sp_.grid(row=1,column=3,rowspan=6,sticky="nw",padx=(40,0))   # (JMG, 27-11) a la derecha de la Presencia
+        ttk.Separator(f,orient="vertical").grid(row=1,column=3,rowspan=6,sticky="nsw",padx=(18,0))   # (JMG, 21-11) con raya
         self._tit_auto(sp_,0,self._vt("Separación de canales","Channel separation"),"separ")   # (JMG, 28-11) con su «Auto»
-        self._w_separ=list(self._sl(sp_,self._vt("Separación","Separation"),self.var_separ,-10,10,1,step=1))
+        self._w_separ=list(self._sl(sp_,self._vt("Separación","Separation"),self.var_separ,-15,15,1,step=1))
         ttk.Label(sp_,text=self._vt("Más o menos separación entre izquierda y derecha (delanteros y traseros) y entre delante y detrás. No sube el volumen. 0 = sin cambio; a la izquierda, más junto.","More or less separation between left and right (fronts and surrounds) and between front and back. It does not raise the volume. 0 = no change; to the left, closer together."),foreground=CA,font=("",8,"italic"),wraplength=330,justify="left").grid(row=2,column=0,columnspan=3,sticky="w",padx=5,pady=(4,0))
 
         ttk.Separator(f, orient="horizontal").grid(row=7, column=0, columnspan=3, sticky="ew", pady=15)
@@ -6717,7 +7534,11 @@ class AudioProcessorGUI:
         self._tit_auto(f,8,T("eq3"),"eq3")
         self._w_eq3=[]
         for _k,_v,_r in ((T("eq_g"),self.var_eq_bass,9),(T("eq_m"),self.var_eq_mids,10),(T("eq_a"),self.var_eq_treble,11)):
-            self._w_eq3.extend(self._sl(f,_k,_v,-10,10,_r,step=1))
+            self._w_eq3.extend(self._sl(f,_k,_v,-15,15,_r,step=1))
+        sv_=ttk.Frame(f);sv_.grid(row=8,column=3,rowspan=4,sticky="nw",padx=(40,0))   # (JMG, 21-11) Suavizado: a la derecha del EQ de 3 bandas, con raya
+        ttk.Separator(f,orient="vertical").grid(row=8,column=3,rowspan=4,sticky="nsw",padx=(18,0))
+        self._tit_auto(sv_,0,self._vt("Suavizado digital","Digital smoothing"),"suav")
+        self._w_suav=list(self._sl(sv_,self._vt("Intensidad (0-5)","Amount (0-5)"),self.var_suav,0,5,1,step=1))
 
         ttk.Separator(f, orient="horizontal").grid(row=12, column=0, columnspan=3, sticky="ew", pady=15)
 
@@ -6738,7 +7559,7 @@ class AudioProcessorGUI:
             for i in (1,2,3):
                 fv=getattr(self,f"var_eq{gkey}_b{i}_f")
                 gv=getattr(self,f"var_eq{gkey}_b{i}_g")
-                self._w_eqa.extend(self._sl(gf,self._vt(f"Banda {i}",f"Band {i}"),gv,-10,10,i,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
+                self._w_eqa.extend(self._sl(gf,self._vt(f"Banda {i}",f"Band {i}"),gv,-15,15,i,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
                 ttk.Label(gf,text="Freq:",foreground=CA).grid(row=i,column=3,sticky="w",padx=(10,2),pady=3)
                 fe=tk.Entry(gf,textvariable=fv,width=6,justify="center",bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB,highlightcolor=CID,borderwidth=0,readonlybackground=CDN,disabledbackground=CDN)
                 fe.grid(row=i,column=4,padx=2,pady=3);self._w_eqa.append(fe)
@@ -6789,25 +7610,25 @@ class AudioProcessorGUI:
 
         # ─── Bass Management ───
         self._tit_auto(f,1,T("bm"),"bm",pady=(4,4))
-        self._cw["BMDB"].extend(self._sl(f,T("int_0_10"),self.var_bm,0,5,2,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
-        self._cw["BMDB"].extend(self._sl(f,T("corte_hz"),self.var_bm_corte,20,200,3,d=120,cl=0,cs=1,cv=2,lw=22,sl=200,step=10))
+        self._cw["BMDB"].extend(self._sl(f,T("int_0_10"),self.var_bm,0,6,2,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
+        self._cw["BMDB"].extend(self._sl(f,T("corte_hz"),self.var_bm_corte,20,200,3,d=90,cl=0,cs=1,cv=2,lw=22,sl=200,step=10))
         ttk.Label(f,text=T("bm_info"),foreground=CA,font=("",8,"italic")).grid(row=4,column=0,columnspan=4,sticky="w",padx=5,pady=(0,4))
 
-        ttk.Separator(f, orient="horizontal").grid(row=5, column=0, columnspan=4, sticky="ew", pady=15)
+        self._s_bm=ttk.Separator(f, orient="horizontal");self._s_bm.grid(row=5, column=0, columnspan=3, sticky="ew", pady=15)
 
         # ─── Double Bass ───
         self._tit_auto(f,6,T("db"),"db",pady=(4,4))
-        self._cw["BMDB"].extend(self._sl(f,T("int_0_10"),self.var_db,0,5,7,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
+        self._cw["BMDB"].extend(self._sl(f,T("int_0_10"),self.var_db,0,6,7,cl=0,cs=1,cv=2,lw=22,sl=200,step=1))
         self._cw["BMDB"].extend(self._sl(f,T("corte_hz"),self.var_db_corte,20,200,8,d=90,cl=0,cs=1,cv=2,lw=22,sl=200,step=10))
         ttk.Label(f,text=T("db_info"),foreground=CA,font=("",8,"italic")).grid(row=9,column=0,columnspan=4,sticky="w",padx=5,pady=(0,4))
 
-        ttk.Separator(f, orient="horizontal").grid(row=10, column=0, columnspan=4, sticky="ew", pady=15)
+        self._s_db=ttk.Separator(f, orient="horizontal");self._s_db.grid(row=10, column=0, columnspan=3, sticky="ew", pady=15)   # (JMG, 22-11) solo a la izquierda
 
         # ─── Gama Dinámica ───
         ttk.Label(f,text=T("gama"),font=("",10,"bold")).grid(row=11,column=0,sticky="w",padx=5,pady=(4,4));self._techo_box(f,11,self.var_techo_gd,1);self._btn_auto(f,"gama").grid(row=11,column=2,padx=(1,5),pady=(4,4))
-        e1,en1=self._sl(f,T("gd_front"),self.var_gdin_front,0,10,12,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
-        e2,en2=self._sl(f,T("gd_tras"),self.var_gdin_tras,0,10,13,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
-        e3,en3=self._sl(f,T("gd_cent"),self.var_gdin_cent,0,10,14,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e1,en1=self._sl(f,T("gd_front"),self.var_gdin_front,0,15,12,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e2,en2=self._sl(f,T("gd_tras"),self.var_gdin_tras,0,15,13,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e3,en3=self._sl(f,T("gd_cent"),self.var_gdin_cent,0,15,14,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
         self._wg=[e1,en1,e2,en2,e3,en3];self._gx={'tras':[e2,en2],'cent':[e3,en3]}
         self.sl_gv=e1;self.en_gv=en1
         ttk.Label(f,text=T("gama_info"),foreground=CA,font=("",8,"italic")).grid(row=15,column=0,columnspan=4,sticky="w",padx=5,pady=(4,0))
@@ -6817,28 +7638,49 @@ class AudioProcessorGUI:
         e_gv, en_gv = self._sl(self._hid(f),"Atenuación:",self.var_gdin_vol,-20,0,17,d=0,cl=0,cs=1,cv=2,lw=22,sl=200)
         self.sl_gv_vol, self.en_gv_vol = e_gv, en_gv
 
-        ttk.Separator(f, orient="horizontal").grid(row=18, column=0, columnspan=4, sticky="ew", pady=15)
-
-        # ─── Procesado Dinámico ───
+        # ─── Procesado Dinámico ─── (JMG, 21-11) a la derecha del Bass Management, con raya; «Modo Azid» a la derecha de su «Auto»
+        ttk.Separator(f,orient="vertical").grid(row=1,column=3,rowspan=17,sticky="nsw",padx=(18,0))   # (JMG, 22-11) hasta abajo
+        f0_=f;f=ttk.Frame(f0_);f.grid(row=1,column=3,rowspan=9,sticky="nw",padx=(40,0))
         ttk.Label(f,text=T("pd"),font=("",10,"bold")).grid(row=19,column=0,sticky="w",padx=5,pady=(4,4));self._techo_box(f,19,self.var_techo_pd,1);self._btn_auto(f,"din").grid(row=19,column=2,padx=(1,5),pady=(4,4))
         ttk.Label(f,text=T("modo")).grid(row=20,column=0,sticky="w",padx=5,pady=3)
-        self.cmb_din_modo=ttk.Combobox(f,textvariable=self.var_din_modo,values=[0,1,2,3],width=6,state="readonly")
-        self.cmb_din_modo.grid(row=20,column=1,sticky="w",padx=5,pady=3)
+        if not hasattr(self,"var_din_ui"):self.var_din_ui=tk.IntVar(value=2)   # (JMG, 26-11) sin el 0: por defecto el 2 (a 0 lo dejan los deslizadores)
+        self.cmb_din_modo=ttk.Combobox(f,textvariable=self.var_din_ui,values=[1,2,3],width=6,state="readonly")
+        self.var_din_ui.trace_add("write",lambda *a:self._din_sync("ui"));self.var_din_modo.trace_add("write",lambda *a:self._din_sync("modo"))
+        for _v in (self.var_din_ft,self.var_din_fc,self.var_din_lfe):_v.trace_add("write",lambda *a:self._din_sync("sl"))
+        self.cmb_din_modo.grid(row=20,column=0,sticky="w",padx=(52,5),pady=3)   # (JMG, 22-11) junto a su texto
+        _faz=ttk.Frame(f);_faz.grid(row=19,column=3,sticky="nw",padx=(6,0),pady=(16,4))   # (JMG, 20-11) los modos de Azid (BeLight, DSPguru)
+        ttk.Label(_faz,text=self._vt("Modo Azid:","Azid mode:")).grid(row=0,column=0,sticky="w",padx=(0,4))
+        self._azid_noms=[self._vt("Original","Original"),self._vt("Inversa","Inverse")]   # (JMG, 21-11) una sola opción: Inversa (din_azid 4)
+        self.cmb_din_azid=ttk.Combobox(_faz,values=self._azid_noms,width=9,state="readonly");self.cmb_din_azid.grid(row=0,column=1,sticky="w")
+        self.cmb_din_azid.bind("<<ComboboxSelected>>",self._azid_elegido)
+        self.var_din_azid.trace_add("write",lambda *a:(self._azid_excl("azid"),self._azid_fmt()))   # (JMG, 20-11) no se mezcla con el Procesado dinámico
+        for _k,(_v,_n) in self._azid_ef().items():_v.trace_add("write",lambda *a:self._azid_excl("ef"))   # Azid va solo
+        self.var_din_modo.trace_add("write",lambda *a:self._azid_excl("ef"))   # (JMG, 21-11) con Azid, el Procesado dinámico solo en el modo 1
+        def _az_pintar(*a):
+            try:self.cmb_din_azid.set(self._azid_noms[1 if int(self.var_din_azid.get())==4 else 0])
+            except Exception:pass
+        self.var_din_azid.trace_add("write",_az_pintar);_az_pintar()
+        _avd=ttk.Label(_faz,text=self._vt("recomendado para las películas de DVD","recommended for DVD movies"),foreground=CA,font=("",8,"italic"));_avd.grid(row=1,column=0,columnspan=2,sticky="w");_avd._jmg_aviso=True   # aviso: se queda
+        self._ayuda_flotante(self.cmb_din_azid,self._vt("Como en BeLight (Azid de DSPguru): usa la compresión que el propio AC3/E-AC3 lleva dentro.\n"
+            "Inversa: esa compresión al revés: los sonidos fuertes suben y los débiles bajan (más dinámica). Original: sin tocar.\n"
+            "Recomendado para las películas de DVD; en DTS, TrueHD, FLAC... no cambia nada (el registro lo dice).",
+            "As in BeLight (DSPguru's Azid): it uses the compression that the AC3/E-AC3 itself carries.\n"
+            "Inverse: that compression turned around: loud sounds go up and quiet ones go down (more dynamics). Original: untouched.\n"
+            "Recommended for DVD movies; with DTS, TrueHD, FLAC... it changes nothing (the log says so)."))
         ttk.Label(f,text=T("pd_info"),foreground=CA,font=("",8,"italic")).grid(row=21,column=0,columnspan=4,sticky="w",padx=5,pady=(2,4))
-        e_dv,en_dv=self._sl(f,T("pd_ft"),self.var_din_ft,0,10,22,d=5,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e_dv,en_dv=self._sl(f,T("pd_ft"),self.var_din_ft,0,15,22,d=8,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
         self.sl_din_val=e_dv;self.en_din_val=en_dv
-        e_dv_vol,en_dv_vol=self._sl(f,T("pd_fc"),self.var_din_fc,0,10,23,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e_dv_vol,en_dv_vol=self._sl(f,T("pd_fc"),self.var_din_fc,0,15,23,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
         self._gx["dinfc"]=[e_dv_vol,en_dv_vol]
         self.sl_dv_vol, self.en_dv_vol = e_dv_vol, en_dv_vol
-        e_dl,en_dl=self._sl(f,T("pd_lfe"),self.var_din_lfe,0,10,24,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
+        e_dl,en_dl=self._sl(f,T("pd_lfe"),self.var_din_lfe,0,15,24,d=0,cl=0,cs=1,cv=2,lw=22,sl=200,step=1)
         self._gx["dinlfe"]=[e_dl,en_dl]
         self.sl_din_lfe,self.en_din_lfe=e_dl,en_dl
         ttk.Label(f,text=T("pd_grp_info"),foreground=CA,font=("",8,"italic")).grid(row=25,column=0,columnspan=4,sticky="w",padx=5,pady=(2,2))
         self.lbl_dd=ttk.Label(f,textvariable=self.var_din_desc,foreground=CID,font=("",9,"italic"),width=58,justify="left")
         self.lbl_dd.grid(row=26,column=0,columnspan=4,sticky="w",padx=5,pady=(2,4))
-        ttk.Separator(f, orient="horizontal").grid(row=27, column=0, columnspan=4, sticky="ew", pady=15)
         ttk.Label(f, text=T("desc_din"), foreground=CA, font=("", 9, "italic"), justify="left").grid(row=28, column=0, columnspan=4, sticky="w", padx=5, pady=(10, 20))
-        self._unif(f)
+        self._unif(f0_);self._s_bm.grid_configure(columnspan=3);self._s_db.grid_configure(columnspan=3)   # la raya entre BM y DB no cruza el Procesado dinámico
     def _tsal(self):
         outer=ttk.Frame(self.nb);self.nb.add(outer,text=T("sal"))
         f=self._scrollable(outer)
@@ -6849,6 +7691,7 @@ class AudioProcessorGUI:
         ttk.Radiobutton(L,text=T("personalizada"),variable=self.var_destino_modo,value="personalizada",style="G.TRadiobutton").grid(row=2,column=0,sticky="w",padx=5)
         _fd=ttk.Frame(L);_fd.grid(row=3,column=0,columnspan=3,sticky="w",padx=20,pady=(0,4))   # (JMG, 25-11) la casilla y «Elegir carpeta...» juntas, como en Jmg VideoEncoder
         self.en_d=tk.Entry(_fd,textvariable=self.var_destino_carpeta,width=40,bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB,highlightcolor=CID,borderwidth=0,readonlybackground=CDN,disabledbackground=CDN)
+        self._ayuda_flotante(self.en_d,self._vt("La carpeta donde se guardan los archivos procesados (con «Carpeta personalizada»).","The folder where the processed files are saved (with «Custom folder»)."))
         self.en_d.pack(side="left",ipady=3)
         self.btn_d=ttk.Button(_fd,text=T("elegir_carpeta"),command=self._elc)
         self.btn_d.pack(side="left",padx=(6,0))
@@ -6878,6 +7721,7 @@ class AudioProcessorGUI:
         self.rb_si=ttk.Radiobutton(L,text=T("si"),variable=self.var_upmix,value="S",style="G.TRadiobutton")
         self.rb_si.grid(row=7,column=2,sticky="w")
         self.lbl_up=ttk.Label(L,text="",foreground=CA,font=("",8,"italic"))
+        self.lbl_up._jmg_aviso=True   # (JMG, 21-11) aviso de estado: se queda
         self.lbl_up.grid(row=8,column=0,columnspan=3,sticky="w",padx=5,pady=(0,4))
         self.sl_uc,self.en_uc=self._sl(L,T("uc"),self.var_upmix_central,0,10,9,d=5,cl=0,cs=1,cv=2,lw=22,sl=200)
         ttk.Label(L,text=T("uc_info"),foreground=CA,font=("",8,"italic")).grid(row=10,column=0,columnspan=3,sticky="w",padx=5,pady=(0,6))
@@ -6951,6 +7795,7 @@ class AudioProcessorGUI:
         ttk.Label(fr_,text=self._vt("Nombre del archivo:","File name:")).pack(side="left")
         if not hasattr(self,"var_nombre_sal"):self.var_nombre_sal=tk.StringVar(value="")
         self.en_nom=tk.Entry(fr_,textvariable=self.var_nombre_sal,width=40,bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB,highlightcolor=CID,borderwidth=0)
+        self._ayuda_flotante(self.en_nom,self._vt("El nombre de lo que sale de cada archivo (sin la extensión).","The name of what comes out of each file (without the extension)."))
         self.en_nom.pack(side="left",padx=(6,4),ipady=3)
         _bn=ttk.Button(fr_,text="↺",width=3,command=self._nombre_auto);_bn.pack(side="left")
         self._ayuda_flotante(_bn,self._vt("Vuelve al nombre automático","Back to the automatic name"))
@@ -7176,6 +8021,7 @@ class AudioProcessorGUI:
         ok=LAY_FMT.get(lay)
         if ok:ks=[k for k in ks if k in ok]
         if self.var_remux.get() and lay=="4.1":ks=["FLAC","WAV Split"]
+        if self._azid_on():ks=[k for k in ks if k!="Passthrough"]   # (JMG, 20-11) Azid: copiar sin procesar no lo llevaría
         return ks
     def _fmt_refresh(self):
         try:
@@ -7312,6 +8158,12 @@ class AudioProcessorGUI:
         try:ch=int((self.pc.get(a) or [])[idx].get("channels",6))
         except Exception:ch=6
         c["ent_estereo"]=ch<=2;c["ent_mono"]=ch<=1
+        try:   # (JMG, 20-11) «Modo Azid»: la compresión que trae el AC3/E-AC3, a la medida del modo
+            az=4 if int(c.get("din_azid",0) or 0)==4 else 0;c["_azid_env"]=self._azid_env(a,idx,az) if az else None   # (JMG, 21-11) solo Inversa
+            if az:
+                for _g in self._AZID_SIN:c.update(self._AUTO_NEUTRO[_g])   # (JMG, 20-11) Azid va solo: sin ningún otro efecto
+                if int(c.get("din_modo",0) or 0) in (2,3):c["din_modo"]=0   # (JMG, 21-11) del Procesado dinámico, solo el modo 1
+        except Exception as e:c["_azid_env"]=None;self._ls(f"    [AZID] {e}")
         t_=self.ptramos.get((a,idx))
         if t_ and abs(float(c.get("delay_init",0) or 0)-t_["d"])<0.5 and str(c.get("fps_from"))==str(c.get("fps_to")):   # medidos con ese delay y sin cambiar la velocidad
             c["_tramos"]=t_["tl"];c["_dur"]=float(seg) if seg else self._dur(a);c["_ini_ms"]=self._ini_ms(a,idx)
@@ -7406,13 +8258,13 @@ class AudioProcessorGUI:
     def _ops_lay(self,lay,est=False):
         """formatos -> bitrates validos para una disposicion de salida"""
         if lay=="1.0":return self.formatos_mono
-        if lay=="2.0":return ({"Passthrough":[self._vt("Sin conversión","No conversion")],**self.formatos_down} if est else self.formatos_down)
+        if lay=="2.0":return ({"Passthrough":[self._vt("Sin conversión","No conversion")],**self.formatos_down} if (est and not self._azid_on()) else self.formatos_down)
         ok=LAY_FMT.get(lay)
-        return {k:v for k,v in self.formatos.items() if (not ok or k in ok)}
+        return {k:v for k,v in self.formatos.items() if (not ok or k in ok) and not (k=="Passthrough" and self._azid_on())}
     def _fd(self):
         """Formatos para salida 2.0 / 1.0 (origen estereo en 2.0: tambien Passthrough)"""
         if self.var_layout_sal.get()=="1.0":return self.formatos_mono
-        if self._ent_est():return {"Passthrough":[self._vt("Sin conversión","No conversion")],**self.formatos_down}
+        if self._ent_est() and not self._azid_on():return {"Passthrough":[self._vt("Sin conversión","No conversion")],**self.formatos_down}
         return self.formatos_down
     def _dmm(self):
         if not self.files:return
@@ -7507,7 +8359,8 @@ class AudioProcessorGUI:
         if not hasattr(self,"_vis_gen"):
             self.var_vis_estado=tk.StringVar(value="")
             self.var_vis_tiempo=tk.StringVar(value="")
-            self.var_vis_zoom=tk.StringVar(value="x1")  # zoom fijo en x1 (sin selector)
+            self.var_vis_zoom=tk.StringVar(value="x1")  # (JMG, 19-11 noche) zoom vertical (altura de las ondas), con su selector
+            self.var_vis_ztipo=tk.StringVar(value="h")   # el zoom que mueve la rueda: h = ↔ tiempo, v = ↕ altura
             self.var_vis_tramo_i=tk.IntVar(value=1)
             self.var_vis_modo_i=tk.IntVar(value=0)
             self._vis_data=None;self._vis_proc=None;self._vis_gen=0;self._vis_run=False;self._vis_redraw_id=None
@@ -7524,6 +8377,7 @@ class AudioProcessorGUI:
             self.var_ed_db=tk.StringVar(value="-40");self.var_ed_est=tk.StringVar(value="");self._ed_inf=None;self._ed_por={};self._ed_sel=None;self._ed_ar=None
             self._ed_cs=set();self._ed_det=None;self._ed_detrun=False;self._ed_detno=False;self._ed_det_id=None;self._ed_bo=0.0;self._ed_ev=None;self._ed_av=None
         top=ttk.Frame(outer);top.pack(fill="x",padx=8,pady=(8,2))
+        _bv=self.btn_vis_volver=ttk.Button(top,text="⬅ "+self._vt("Volver","Back"),command=self._vis_volver);_bv.pack(side="left",padx=(0,14));self._bp_extra=getattr(self,"_bp_extra",[])+[_bv]   # (JMG, 27-11) también procesando   # (JMG, 22-11) como en Jmg VideoEncoder
         self.btn_vis=ttk.Button(top,text=self._vt("Generar visualización","Generate visualization"),command=self._vis_generar)
         self.btn_vis.pack(side="left")
         self.btn_vis_c=ttk.Button(top,text=self._vt("Cancelar","Cancel"),command=self._vis_cancelar,state="disabled")
@@ -7534,16 +8388,23 @@ class AudioProcessorGUI:
         self.cmb_vis_tramo=ttk.Combobox(top,values=tramos,state="readonly",width=16)
         self.cmb_vis_tramo.current(max(0,min(3,self.var_vis_tramo_i.get())))
         self.cmb_vis_tramo.pack(side="left",padx=(0,16))
-        self.cmb_vis_tramo.bind("<<ComboboxSelected>>",lambda e:(self.var_vis_tramo_i.set(self.cmb_vis_tramo.current()),self.root.after(100,self._vis_auto)))
+        self.cmb_vis_tramo.bind("<<ComboboxSelected>>",lambda e:(self.var_vis_tramo_i.set(self.cmb_vis_tramo.current()),self.root.after(100,lambda:self._vis_auto() if self._vis_run else None)))   # (JMG, 25-11) solo si se está generando: empieza el tramo nuevo sin esperar
         ttk.Label(top,text=self._vt("Vista:","View:")).pack(side="left",padx=(0,4))
         self.cmb_vis_modo=ttk.Combobox(top,values=[self._vt("Antes / Después","Before / After"),self._vt("Canal por canal","Channel by channel")],state="readonly",width=22)
         self.cmb_vis_modo.current(max(0,min(1,self.var_vis_modo_i.get())))
         self.cmb_vis_modo.pack(side="left",padx=(0,16))
         self.cmb_vis_modo.bind("<<ComboboxSelected>>",lambda e:(self.var_vis_modo_i.set(self.cmb_vis_modo.current()),self._vis_dibujar()))
         ttk.Label(top,text=self._vt("Zoom:","Zoom:")).pack(side="left",padx=(0,4))
-        self.cmb_vis_zh=ttk.Combobox(top,textvariable=self.var_vis_zh,values=["x1","x2","x4","x8","x16","x32","x64"],state="readonly",width=5)
-        self.cmb_vis_zh.pack(side="left")
-        self.cmb_vis_zh.bind("<<ComboboxSelected>>",self._vis_zh_sel)
+        _rzh=ttk.Radiobutton(top,text="↔",variable=self.var_vis_ztipo,value="h");_rzh.pack(side="left")
+        self._ayuda_flotante(_rzh,self._vt("Zoom horizontal: estira el tiempo (un trozo más de cerca).","Horizontal zoom: stretches time (a closer look at a part)."))
+        self.cmb_vis_zh=ttk.Combobox(top,textvariable=self.var_vis_zh,values=["x1","x2","x4","x8","x16","x32","x64","x128","x256","x512","x1024","x2048","x4096"],state="readonly",width=5)
+        self.cmb_vis_zh.pack(side="left",padx=(2,10))
+        self.cmb_vis_zh.bind("<<ComboboxSelected>>",lambda e:(self.var_vis_ztipo.set("h"),self._vis_zh_sel(e)))
+        _rzv=ttk.Radiobutton(top,text="↕",variable=self.var_vis_ztipo,value="v");_rzv.pack(side="left")   # (JMG, 19-11 noche) como en Jmg VideoEncoder
+        self._ayuda_flotante(_rzv,self._vt("Zoom vertical: agranda la onda (se ve mejor lo flojo).","Vertical zoom: enlarges the wave (quiet parts are easier to see)."))
+        self.cmb_vis_zv=ttk.Combobox(top,textvariable=self.var_vis_zoom,values=list(self._VIS_ZV_TXT),state="readonly",width=5)
+        self.cmb_vis_zv.pack(side="left",padx=(2,0))
+        self.cmb_vis_zv.bind("<<ComboboxSelected>>",lambda e:(self.var_vis_ztipo.set("v"),self._vis_dibujar()))
         self.btn_vis_comb=ttk.Button(top,text="🔀 "+self._vt("Volver a Combinar","Back to Combine"),command=self._vis_a_comb)
         self.btn_vis_comb.pack(side="right");self._sin_arch.append(self.btn_vis_comb)
         for w_ in (self.la,self.lp):w_.bind("<<ListboxSelect>>",lambda e:self.root.after(60,self._vis_comb_estado),add="+")   # (JMG, 18-11)
@@ -7556,6 +8417,7 @@ class AudioProcessorGUI:
         self.btn_vis_pz=ttk.Button(ra,text="⏸ "+self._vt("Pausa","Pause"),command=self._vis_pausa_btn,state="disabled",width=13)
         self.btn_vis_pz.pack(side="left",padx=(6,0))
         self.btn_vis_st=ttk.Button(ra,text="■ "+self._vt("Parar","Stop"),command=self._vis_parar,state="disabled")
+        self._verde_reg(self.btn_vis,lambda:getattr(self,"_vis_run",False));self._verde_reg(self.btn_vis_pa,lambda:getattr(self,"_vis_play",None)=="antes");self._verde_reg(self.btn_vis_pd,lambda:getattr(self,"_vis_play",None)=="despues");self._verde_reg(self.btn_vis_pz,lambda:str(self.btn_vis_pz.cget("text")).startswith("▶"))   # (JMG, 25-11) lo que está en marcha, en verde; (26-11) en pausa, «Continuar»
         self.btn_vis_st.pack(side="left",padx=(6,12))
         # conmutador de salida: Estereo / Multicanal (5.1 / 7.1)
         ttk.Label(ra,text=self._vt("Salida:","Output:")).pack(side="left",padx=(0,4))
@@ -7564,7 +8426,8 @@ class AudioProcessorGUI:
         self.cmb_vis_sal.current(1 if self.var_vis_sal.get()=="mc" else 0)
         self.cmb_vis_sal.pack(side="left",padx=(0,12))
         self.cmb_vis_sal.bind("<<ComboboxSelected>>",self._vis_sal_cambio)
-        ttk.Label(ra,textvariable=self.var_vis_tiempo,font=("",9,"bold")).pack(side="left",padx=(0,12))
+        _lvt=ttk.Label(ra,textvariable=self.var_vis_tiempo,font=("",9,"bold"));_lvt.pack(side="left",padx=(0,12))
+        self._ayuda_flotante(_lvt,self._vt("Por dónde va la escucha (minuto y segundo).","Where the listening is (minute and second)."))   # (JMG, 21-11)
         ra2=ttk.Frame(outer);ra2.pack(fill="x",padx=8,pady=(0,2))
         ttk.Label(ra2,text=self._vt("Clic en un canal = escuchar SOLO ese canal (otro clic = todos) · rueda = zoom · arrastrar o ← → = desplazar · doble clic = x1 · espacio = empezar y parar · Multicanal: Windows en 5.1 / 7.1",
                                    "Click on a channel = play ONLY that channel (click again = all) · wheel = zoom · drag or ← → = pan · double-click = x1 · space = start and stop · Multichannel: Windows set to 5.1 / 7.1"),
@@ -7959,7 +8822,7 @@ class AudioProcessorGUI:
         if dest!=i["ruta"]:
             r_=self._comb_rec_de(i["ruta"])
             if r_:self._comb_rec_guardar(dest,r_)
-            self._addl([dest])
+            self._addl([dest],True)
         self._log("[EDITOR] "+V("Guardado: ","Saved: ")+os.path.basename(dest))
         self._toast(T("info_tit"),V("Guardado:\n","Saved:\n")+os.path.basename(dest),tipo="info",seg=4)
         self.root.after(250,self._ed_seguir,dest)
@@ -8039,11 +8902,45 @@ class AudioProcessorGUI:
             if not self._comb_rec_sel()[1]:return
         except Exception:return
         self._vis_callar();self._combinar()
+    def _verde_reg(self,b,activo):
+        """(JMG, 25-11) lo que está en marcha, en verde (generar, escuchar, reproducir, previsualizar): b, mientras activo() sea verdad"""
+        if not hasattr(self,"_verdes"):self._verdes=[];self.root.after(300,self._verde_tick)
+        self._verdes.append((b,activo))
+    def _verde_tick(self):
+        if getattr(self,"_verde_c",None)!=VERDE_JMG:   # (árbitro, 26-11) solo si cambia el color: configurar un estilo redibuja toda la ventana
+            try:ttk.Style().configure("Act.TButton",foreground=VERDE_JMG);ttk.Style().map("Act.TButton",foreground=[("disabled",VERDE_JMG),("active",VERDE_JMG),("!disabled",VERDE_JMG)]);self._verde_c=VERDE_JMG
+            except Exception:pass
+        vivos=[]
+        for b,f in getattr(self,"_verdes",[]):
+            try:
+                if not b.winfo_exists():continue
+                vivos.append((b,f))
+                try:on=bool(f())
+                except Exception:on=False
+                s=str(b.cget("style"))
+                if on and s!="Act.TButton":b._jmg_st0=s;b.configure(style="Act.TButton");getattr(b,"_ico_verde",lambda o:None)(True)
+                elif not on and s=="Act.TButton":b.configure(style=getattr(b,"_jmg_st0","") or "TButton");getattr(b,"_ico_verde",lambda o:None)(False)
+            except Exception:pass
+        self._verdes=vivos
+        try:self.root.after(300,self._verde_tick)
+        except Exception:pass
+    def _vis_volver(self):
+        """(JMG, 22-11) «⬅ Volver»: a la pestaña de antes (en Visualización no se ven las pestañas)"""
+        try:
+            t=getattr(self,"_vis_tab_ant",None)
+            self.nb.select(t if t in self.nb.tabs() and t!=str(self._vis_outer) else self.nb.tabs()[0])
+        except Exception:pass
     def _vis_tab(self,e=None):
+        try:   # (JMG, 22-11) en Visualización, sin las pestañas (se vuelve con «⬅ Volver»)
+            if not hasattr(self,"_nb_estilo"):self._nb_estilo=str(self.nb.cget("style")) or "TNotebook"
+            d_=self.nb.select()==str(self._vis_outer)
+            if not d_:self._vis_tab_ant=self.nb.select()
+            self.nb.configure(style="SinPest.TNotebook" if d_ else self._nb_estilo)
+        except Exception:pass
         try:
             if self.nb.select()!=str(self._vis_outer):
                 self._vis_callar()
-                if self._vis_genera():self._vis_cancelar()   # al volver se genera sola
+                pass   # (JMG, 25-11) si se estaba generando, termina igual (ya no se genera sola al volver)
         except Exception:pass
         # Al entrar en Visualizacion la ventana crece en alto; al salir vuelve a su tamano
         try:
@@ -8061,9 +8958,19 @@ class AudioProcessorGUI:
                 self._vis_restaurar()
             if dentro:
                 self.root.after(60,self.cv_vis.focus_set)   # para las flechas
-                self.root.after(250,self._vis_auto)   # al entrar: se genera sola si no existe o si han cambiado los ajustes
+                if not getattr(self,"_vis_vig",False):self._vis_vig=True;self.root.after(1500,self._vis_vigia)   # (JMG, 26-11)
+                self.root.after(350,self._vis_primera)   # (JMG, 27-11) la primera vez con cada pista, se genera sola
         except Exception:pass
 
+    def _vis_primera(self):
+        """(JMG, 27-11) la primera vez que se entra en Visualización con una pista, se genera sola; después, con «Generar visualización»"""
+        try:
+            if self.nb.select()!=str(self._vis_outer) or not self.files or not self.pactual or self._vis_run:return
+            if tuple(self.pactual) in self.__dict__.setdefault("_vis_hechas",set()):return
+            self._vis_generar()
+        except Exception as e:
+            try:self._log("[VIS] primera: %s"%e)
+            except Exception:pass
     def _vis_firma(self):
         """Huella de lo que se visualiza: archivo, pista, tramo y ajustes que cambian el sonido"""
         if not self.pactual:return None
@@ -8078,6 +8985,22 @@ class AudioProcessorGUI:
         try:fm=os.path.getmtime(ruta)
         except OSError:fm=0
         return repr((ruta,idx,tr,fm,sorted((k,str(v)) for k,v in cfg.items()),str(self.ptramos.get((ruta,idx)))))
+    def _vis_vigia(self):
+        """(JMG, 26-11) dentro de Visualización: si cambia un ajuste, el tramo o la pista, la vista se rehace sola (cuando el cambio se queda quieto)"""
+        try:
+            if self.nb.select()==str(self._vis_outer) and not self._vis_run and getattr(self,"_vis_data",None) and not getattr(self,"_ed_grab",None):
+                f=self._vis_firma()
+                if f!=getattr(self,"_vis_sig",None) and self._vis_play and self._vis_play!="oir":   # (JMG, 27-11) al tocar un efecto, lo que suena se para
+                    self._vis_callar()
+                    try:self._vis_est(self._vt("Parado: has cambiado un ajuste. Pulsa «Generar visualización» para verlo con el cambio y ▶ para oírlo.","Stopped: you changed a setting. Press «Generate visualization» to see it with the change and ▶ to hear it."))
+                    except Exception:pass
+                elif f!=getattr(self,"_vis_sig",None) and f!=getattr(self,"_vis_vig_ult",None):   # (JMG, 25-11) ya no se rehace sola: se avisa
+                    try:self._vis_est(self._vt("Has cambiado un ajuste: pulsa «Generar visualización» para verlo con el cambio.","You changed a setting: press «Generate visualization» to see it with the change."))
+                    except Exception:pass
+                if f!=getattr(self,"_vis_sig",None):self._vis_vig_ult=f
+        except Exception:pass
+        try:self.root.after(400,self._vis_vigia)
+        except Exception:pass
     def _vis_genera(self):
         """esta generando la vista (lo que guarda el editor no se interrumpe)"""
         return self._vis_run and getattr(self,"_ed_grab",None)!=self._vis_gen
@@ -8116,7 +9039,7 @@ class AudioProcessorGUI:
         if not g:return
         v0,v1,dur=self._vis_rango()
         t=v0+fx*(v1-v0)
-        z=max(1.0,min(1024.0,z));self._vz=z
+        z=max(1.0,min(4096.0,z));self._vz=z   # (JMG, 25-11) hasta x4096: con zoom, la onda de lo que se ve sale con todas sus muestras
         w=dur/z
         self._vv0=max(0.0,min(dur-w,t-fx*w))
         self.var_vis_zh.set("x%d"%round(z) if abs(z-round(z))<0.05 else "x%.1f"%z)
@@ -8130,7 +9053,18 @@ class AudioProcessorGUI:
             v0,v1,dur=self._vis_rango();p=self._vis_posicion_actual()
             if v0<=p<=v1:fx=(p-v0)/max(1e-9,(v1-v0))
         self._vis_zset(z,fx)
+    _VIS_ZV_TXT=("x1","x2","x4","x8","x16")
+    def _vis_zv_paso(self,d):
+        """(JMG, 19-11 noche) zoom vertical (altura de las ondas) un paso arriba o abajo"""
+        L=[float(x[1:]) for x in self._VIS_ZV_TXT]
+        try:z=float(str(self.var_vis_zoom.get()).lstrip("x"))
+        except ValueError:z=1.0
+        i=min(range(len(L)),key=lambda j:abs(L[j]-z));i=max(0,min(len(L)-1,i+(1 if d>0 else -1 if d<0 else 0)))
+        if self.var_vis_zoom.get()!=self._VIS_ZV_TXT[i]:self.var_vis_zoom.set(self._VIS_ZV_TXT[i]);self._vis_dibujar()
     def _vis_zreset(self,e=None):
+        if getattr(self,"var_vis_ztipo",None) is not None and self.var_vis_ztipo.get()=="v":   # doble clic: x1 el zoom marcado
+            if self.var_vis_zoom.get()!="x1":self.var_vis_zoom.set("x1");self._vis_dibujar()
+            return
         self._vpan=None
         self._vis_zset(1.0)
     def _rueda_on(self,w,fn):
@@ -8152,6 +9086,7 @@ class AudioProcessorGUI:
                 ML,ancho=g[0],g[1]
                 x=self.cv_vis.canvasx(e.x)
                 if ML<=x<=ML+ancho:
+                    if getattr(self,"var_vis_ztipo",None) is not None and self.var_vis_ztipo.get()=="v":self._vis_zv_paso(d);return
                     self._vis_zset(self._vz*(1.25**d),(x-ML)/float(ancho));return
             self.cv_vis.yview_scroll(int(-d),"units")
         except Exception:pass
@@ -8308,7 +9243,7 @@ class AudioProcessorGUI:
             v0,v1,_d=self._vis_rango()
             fr=(pos-v0)/max(1e-9,(v1-v0))
             if 0.0<=fr<=1.0:
-                x=ML+fr*ancho
+                x=min(ML+fr*ancho,ML+ancho-1)   # sin margen a la derecha: la raya, dentro
                 cv.create_line(x,0,x,alto,fill="#ff5252",width=2,tags="cursor")
             q=self._vt("ANTES","BEFORE") if self._vis_play=="antes" else (self._vt("DESPUÉS","AFTER") if self._vis_play=="despues" else ("SOLO "+getattr(self,"_vis_solo_nom","") if self._vis_play=="solo" else ""))
             self.var_vis_tiempo.set("%s / %s  %s"%(self._hms(pos),self._hms(self._vis_lim()),q))
@@ -8625,6 +9560,7 @@ class AudioProcessorGUI:
     # ---------- generacion ----------
     def _vis_generar(self):
         if self._vis_run:return
+        if self.pactual:self.__dict__.setdefault("_vis_hechas",set()).add(tuple(self.pactual))   # (JMG, 27-11) ya generada una vez
         if not self.pactual:
             self._toast(T("warn_tit"),self._vt("Selecciona primero un archivo y una pista.","Select a file and a track first."),tipo="warning")
             return
@@ -8635,6 +9571,7 @@ class AudioProcessorGUI:
         seg=(0,300,600,1800)[max(0,min(3,self.cmb_vis_tramo.current()))]
         try:self._vis_sig=self._vis_firma()
         except Exception:self._vis_sig=None
+        self._vis_sigue_oir=None   # (JMG, 27-11) al rehacerla, lo que suena se para (lo pide JMG)
         self._vis_audio_cerrar()
         import tempfile
         tmp=tempfile.mkdtemp(prefix="apm_vis_")
@@ -8648,7 +9585,7 @@ class AudioProcessorGUI:
         threading.Thread(target=self._vis_worker,args=(ruta,idx,cfg,seg,gid,tmp),daemon=True).start()
 
     def _vis_worker(self,ruta,idx,cfg,seg,gid,tmp):
-        N=60000   # puntos de la onda: con zoom x64 aun llega casi a un punto por pixel
+        N=200000   # (JMG, 25-11) más resolución: puntos de la onda (con zoom x128 aún llega casi a dos puntos por píxel)
         res=None;err=None;nota=""
         try:
             dur=self._dur(ruta)
@@ -8674,16 +9611,20 @@ class AudioProcessorGUI:
                              "-map","[pl6]","-t","%.3f"%lim,"-c:a","flac","-compression_level","0",w[:-4]+"6.flac"]
             base=[FFMPEG,"-hide_banner","-loglevel","error","-nostats","-y"]
             if seg:base+=["-t",str(seg)]
-            antes=self._vis_ff(base+["-i",ruta,"-filter_complex","[0:a:%d]%s;%s"%(idx,pre,vis(ne))]+salida(wa),gid,0,40,N)
+            wad=wa[:-4]+"_d.flac"   # (JMG, 25-11) el ANTES con todas sus muestras (exacto: en MKV, saltar con -ss tiene hasta 0,5 ms de error)
+            antes=self._vis_ff(base+["-i",ruta,"-filter_complex","[0:a:%d]%s;%s;[pd]aformat=sample_fmts=s16[pdd]"%(idx,pre.replace("asplit=3[pv][pp][pf]","asplit=4[pv][pp][pf][pd]"),vis(ne))]+salida(wa)
+                               +["-map","[pdd]","-t","%.3f"%lim,"-c:a","flac","-compression_level","0",wad],gid,0,40,N)
             if gid!=self._vis_gen:return
             self._ui(self._vis_est,self._vt("Aplicando tus ajustes y analizando el resultado...","Applying your settings and analysing the result..."))
             fc=self._cf(idx,self._cfe(ruta,idx,cfg,seg or 0),lm)
-            desp=self._vis_ff(base+["-i",ruta]+self._fc_arg("%s;[outfinal]%s;%s"%(fc,pre,vis(self._LAY_N.get(str(cfg.get("layout")),ne))))+salida(wd),gid,40,100,N)
+            wdd=wd[:-4]+"_d.flac"   # (JMG, 25-11) el DESPUÉS con todas sus muestras: el detalle al hacer zoom, como en Sound Forge
+            desp=self._vis_ff(base+["-i",ruta]+self._fc_arg("%s;[outfinal]%s;%s;[pd]aformat=sample_fmts=s16[pdd]"%(fc,pre.replace("asplit=3[pv][pp][pf]","asplit=4[pv][pp][pf][pd]"),vis(self._LAY_N.get(str(cfg.get("layout")),ne))))+salida(wd)
+                              +["-map","[pdd]","-t","%.3f"%lim,"-c:a","flac","-compression_level","0",wdd],gid,40,100,N)
             if gid!=self._vis_gen:return
             res={"antes":antes,"despues":desp,"dur":d,"lim":lim,"nota":nota,"antes_wav":wa,"despues_wav":wd,
                  "titulo":"%s · %s #%d"%(os.path.basename(ruta),self._vt("pista","track"),idx),"lay":cfg.get("layout","5.1"),
                  "lay_in":str(((self.pc.get(ruta) or [])[idx:idx+1] or [{}])[0].get("layout","")),
-                 "antes6":wa[:-4]+"6.flac","despues6":wd[:-4]+"6.flac","ruta":ruta,"idx":idx}
+                 "antes6":wa[:-4]+"6.flac","despues6":wd[:-4]+"6.flac","ruta":ruta,"idx":idx,"despues_d":wdd,"antes_d":wad}
         except Exception as e:
             err=str(e) or e.__class__.__name__
         try:self._ui(self._vis_fin,gid,res,err)
@@ -8739,6 +9680,12 @@ class AudioProcessorGUI:
     def _vis_fin(self,gid,res,err):
         if gid!=self._vis_gen:return
         self._vis_run=False
+        seguir=getattr(self,"_vis_sigue_oir",None);viejo=getattr(self,"_vis_tmp_viejo",None);self._vis_sigue_oir=None;self._vis_tmp_viejo=None;pos_s=0.0
+        if seguir or viejo:   # (JMG, 26-11) lo que sonaba (de la vista anterior) se cierra ahora
+            try:pos_s=self._vis_posicion_actual() if seguir and self._vis_play else 0.0
+            except Exception:pos_s=0.0
+            if not self._vis_play:seguir=None
+            nt=self._vis_tmp;self._vis_tmp=viejo;self._vis_audio_cerrar();self._vis_tmp=nt
         try:
             self.btn_vis.configure(state="normal");self.btn_vis_c.configure(state="disabled")
         except Exception:pass
@@ -8762,6 +9709,10 @@ class AudioProcessorGUI:
         self._vis_est("%s · %s %s%s%s"%(res["titulo"],self._vt("analizado:","analysed:"),self._vis_fmt(res["dur"]),res["nota"],extra))
         self._vis_botones()
         self._vis_dibujar()
+        if seguir and pos_s<res["lim"]-0.5:   # (JMG, 26-11) sigue sonando desde donde iba, ya con los ajustes nuevos
+            try:
+                if self._vis_puede(seguir):self._vis_iniciar(seguir,pos_s)
+            except Exception:pass
         try:
             if res["lim"]<=1800:self._vis_solo_pre(gid)   # con mas, cada canal se prepara al pedirlo (serian muchos GB)
         except Exception:pass
@@ -8786,7 +9737,7 @@ class AudioProcessorGUI:
                               "Press “Generate visualization” to compare the original audio (before) with the result of your settings (after), with the six channels shown separately, and listen to it."))
             cv.configure(scrollregion=(0,0,W,140))
             return
-        ML,MR,RH=92,2,22   # (JMG, 19-11) los carriles llegan al borde derecho (antes quedaban 12 px sin pintar; 2 px para el cursor y los marcos)
+        ML,MR,RH=92,0,22   # (JMG, 19-11 noche) sin margen: la onda llega al último píxel; (JMG, 19-11) los carriles llegan al borde derecho (antes quedaban 12 px sin pintar; 2 px para el cursor y los marcos)
         try:zoom=float(str(self.var_vis_zoom.get()).lstrip("x"))
         except ValueError:zoom=1.0
         ant=data["antes"] or [];des=data["despues"] or []
@@ -8850,7 +9801,7 @@ class AudioProcessorGUI:
                 for i in range(len(lista)):
                     self._vis_lanes.append((y,y+LH,tipo,i,nombres_b[i]))
                     _sel=(getattr(self,"_vis_solo_sel",None)==(tipo,i))
-                    self._vis_carril(cv,ML,y,ancho,LH,zoom,"#2ee86b" if _sel else self._vis_color(self._vis_ci(nombres_b[i]),8 if len(lista)>2 else 2),nombres_b[i],tipo,lista[i],sep,guia,suave,True)
+                    self._vis_carril(cv,ML,y,ancho,LH,zoom,"#2ee86b" if _sel else self._vis_color(self._vis_ci(nombres_b[i]),8 if len(lista)>2 else 2),nombres_b[i],tipo,self._vis_se(tipo,i,lista[i]),sep,guia,suave,True)
                     if _sel:self._vis_marco(cv,ML,y,ancho,LH)
                     y+=LH
         else:
@@ -8866,7 +9817,7 @@ class AudioProcessorGUI:
                 for tipo,lista,ii in (("antes",ant,ia),("despues",des,idd)):
                     if ii is not None and ii<len(lista):self._vis_lanes.append((y,y+LH,tipo,ii,nm))
                     _sel=(ii is not None and getattr(self,"_vis_solo_sel",None)==(tipo,ii))
-                    self._vis_carril(cv,ML,y,ancho,LH,zoom,"#2ee86b" if _sel else col,nm,tipo,lista[ii] if (ii is not None and ii<len(lista)) else None,sep,guia,suave)
+                    self._vis_carril(cv,ML,y,ancho,LH,zoom,"#2ee86b" if _sel else col,nm,tipo,self._vis_se(tipo,ii,lista[ii]) if (ii is not None and ii<len(lista)) else None,sep,guia,suave)
                     if _sel:self._vis_marco(cv,ML,y,ancho,LH)
                     y+=LH
         cv.configure(scrollregion=(0,0,W,y+4))
@@ -8879,7 +9830,66 @@ class AudioProcessorGUI:
         self._vis_cursor(self._vis_posicion_actual())
         if self._ed_activo():
             self._ed_marca();self._ed_pide_det()
+        else:self._vis_pide_det()   # (JMG, 25-11)
 
+    def _vis_se(self,tipo,i,serie):
+        """(JMG, 25-11) la onda de un carril: con zoom, la de lo que se ve leída con todas sus muestras (si ya está), como en Sound Forge"""
+        v0,v1,dur=self._vis_rango();dt=getattr(self,"_vis_det",None)
+        if dt and dt[3]==self._vis_gen and dt[0]<=v0+1e-6 and dt[1]>=v1-1e-6 and i is not None:
+            s=dt[2].get(tipo) or []
+            if i<len(s) and s[i] and len(s[i][1])>=2:
+                w=max(1e-9,dt[1]-dt[0]);self._vf0=(v0-dt[0])/w;self._vf1=(v1-dt[0])/w
+                return (s[i][0],s[i][1],serie[2] if serie and len(serie)>2 else s[i][2])   # el pico, el de toda la pista
+        self._vf0=v0/max(1e-9,dur);self._vf1=v1/max(1e-9,dur);return serie
+    def _vis_pide_det(self):
+        if getattr(self,"_vis_det_id",None) and self._vis_play:return   # la onda se mueve sola: que la espera no vuelva a empezar en cada paso
+        try:
+            if getattr(self,"_vis_det_id",None):self.root.after_cancel(self._vis_det_id)
+        except Exception:pass
+        self._vis_det_id=self.root.after(300,self._vis_carga_det)
+    def _vis_carga_det(self):
+        """(JMG, 25-11) con zoom, lo que se ve se lee con todas sus muestras: ANTES del archivo y DESPUÉS de su copia entera (como en Sound Forge)"""
+        self._vis_det_id=None
+        d=self._vis_data;g=self._vis_geom
+        if not d or not g or self._ed_activo() or self._vis_run or getattr(self,"_vis_detrun",False) or getattr(self,"_vis_detno",None)==self._vis_gen:return
+        v0,v1,dur=self._vis_rango();vw=max(1e-6,v1-v0);ancho=max(80,int(g[1]))
+        try:k=len(d["antes"][0][1])
+        except Exception:k=0
+        if k*vw/max(1e-9,dur)>=2*ancho:return   # lo general ya tiene de sobra para lo que se ve
+        dt=getattr(self,"_vis_det",None)
+        if dt and dt[3]==self._vis_gen and dt[0]<=v0+1e-6 and dt[1]>=v1-1e-6 and dt[1]-dt[0]<=5*vw:return
+        if self._vis_play:a=max(0.0,v0-0.1*vw);b=min(dur,v1+3*vw)   # sonando, la vista avanza: más por delante
+        else:a=max(0.0,v0-vw/2);b=min(dur,v1+vw/2)
+        N=max(2000,int(3*ancho*(b-a)/vw));n=max(1,int(48000*(b-a)/N));gid=self._vis_gen
+        est=",asetnsamples=n=%d:p=0,astats=metadata=1:reset=1:measure_perchannel=Min_level+Max_level:measure_overall=none,ametadata=mode=print:file=-[vis]"%n
+        base=[FFMPEG,"-hide_banner","-loglevel","error","-nostats","-y","-ss","%.4f"%a,"-t","%.4f"%(b-a)]
+        cmds={}
+        for tipo in ("antes","despues"):   # (25-11) de las copias FLAC enteras: el salto es exacto
+            f_=d.get(tipo+"_d")
+            try:r_=len(d[tipo][0][1])*max(256,int(48000*dur/200000))/48000.0/dur   # lo general reparte sus bloques en «dur»: la misma escala
+            except Exception:r_=1.0
+            if not 0.9<r_<1.1:r_=1.0
+            if f_ and os.path.exists(f_) and a*r_<d.get("lim",dur):cmds[tipo]=base[:6]+["-ss","%.6f"%(a*r_),"-t","%.6f"%((b-a)*r_),"-i",f_,"-filter_complex","[0:a:0]aformat=sample_fmts=fltp"+est,"-map","[vis]","-f","null","-"]
+        if not cmds:return   # nada que leer aquí (p. ej. pasado el límite de la escucha): no se apaga el detalle
+        self._vis_detrun=True
+        try:pv=float(self.prog_vis["value"])
+        except Exception:pv=0.0
+        def tarea():
+            res={}
+            for tipo,cmd in cmds.items():
+                if gid!=self._vis_gen:break
+                try:res[tipo]=self._vis_ff(cmd,gid,pv,pv,N)
+                except Exception as e:
+                    res[tipo]=None
+                    try:self._ls(f"[VIS] detalle: {e}")
+                    except Exception:pass
+            self._ui(self._vis_det_ok,gid,a,b,res)
+        threading.Thread(target=tarea,daemon=True).start()
+    def _vis_det_ok(self,gid,a,b,res):
+        self._vis_detrun=False
+        if gid!=self._vis_gen:return
+        if not any(res.values()):self._vis_detno=gid;return
+        self._vis_det=(a,b,res,gid);self._vis_dibujar()
     def _vis_carril(self,cv,ML,y,ancho,LH,zoom,col,nombre,tipo,serie,sep,guia,suave,solo_nombre=False):
         f0=getattr(self,'_vf0',0.0);f1=getattr(self,'_vf1',1.0)
         yc=y+LH/2.0;mitad=LH/2.0-3
@@ -8931,7 +9941,8 @@ class AudioProcessorGUI:
 
     def _tlog(self):
         outer=ttk.Frame(self.nb)
-        self.nb.add(outer,text=T("log"))
+        self.nb.add(outer,text=T("log"));self._tab_log_ap=outer   # (JMG, 22-11) al entrar, el editor con los filtros de FFmpeg
+        self.nb.bind("<<NotebookTabChanged>>",lambda e:self.root.after(30,self._update_editlog) if str(self.nb.select())==str(outer) else None,add="+")
         # Panel superior: Editor de parametros
         ed_frame=ttk.LabelFrame(outer,text=self._vt(" Editar parámetros (clic derecho para opciones) "," Edit parameters (right-click for options) "),padding=5)
         ed_frame.pack(fill="x",padx=5,pady=(5,0))
@@ -8983,6 +9994,7 @@ class AudioProcessorGUI:
         self.txt_log.bind("<Button-3>",_log_menu)
         self._log("[GUI v"+VERSION_PROG+"]")
         self.nb.bind("<<NotebookTabChanged>>", self._on_tab_change,add="+")
+        self.nb.bind("<<NotebookTabChanged>>",self._ajustar_pestana_luego,add="+")
 
         # Traces seguros para actualizacion en vivo (aqui el widget ya existe)
         def _upd(*args):
@@ -9026,6 +10038,20 @@ class AudioProcessorGUI:
             lines.append(self._vt("[Error calculando efectos: ","[Error computing effects: ")+f"{ex}]")
             self._log(f"[ERROR EditLog] {ex}")
 
+        try:   # (JMG, 22-11) para expertos: todos los parámetros de la pista activa, «clave = valor» (se cambian y «Guardar cambios» los aplica)
+            s_=self._snap();lines.append("")
+            lines.append("# "+self._vt("PARA EXPERTOS · todos los parámetros de la pista: cambia el valor y pulsa «Guardar cambios» (clic derecho) antes de procesar.",
+                                       "FOR EXPERTS · all the track's parameters: change the value and press «Save changes» (right-click) before processing."))
+            for k in sorted(s_):
+                v=s_[k]
+                if k.startswith("_") or isinstance(v,(dict,list,tuple,set)) or not isinstance(getattr(self,"var_"+k,None),tk.Variable):continue
+                lines.append(f"{k} = {v}")
+            if self.pactual and str(self.nb.select())==str(getattr(self,"_tab_log_ap","")):
+                ruta,idx=self.pactual;fc=self._fc_previa(ruta,idx,s_);m_=getattr(self,"_fc_mano",None)   # (JMG, 25-11) editables
+                lines.append("");lines.append("# "+self._vt("Filtros de FFmpeg de la pista (-filter_complex): cámbialos y pulsa «Guardar cambios»; se usan al procesar mientras no cambies otros ajustes de la pista.",
+                                                            "The track's FFmpeg filters (-filter_complex): change them and press «Save changes»; they are used when processing as long as you do not change other settings of the track."))
+                lines.append("ffmpeg_filtros = "+(m_[1] if isinstance(m_,(list,tuple)) and len(m_)==2 and m_[0]==fc else fc))
+        except Exception as ex:lines.append(f"# [!] {ex}")
         self.txt_edit.delete("1.0","end")
         self.txt_edit.insert("1.0","\n".join(lines))
 
@@ -9035,6 +10061,28 @@ class AudioProcessorGUI:
         cambios = 0
         for line in txt.splitlines():
             line = line.strip()
+            if line.startswith("#"):continue
+            if "=" in line and ":" not in line.split("=",1)[0]:   # (JMG, 22-11) «clave = valor» (para expertos)
+                k_,v_=[x.strip() for x in line.split("=",1)]
+                if k_=="ffmpeg_filtros":   # (JMG, 25-11) los filtros a mano
+                    try:
+                        if self.pactual:
+                            g_=self._fc_previa(self.pactual[0],self.pactual[1],self._snap());nm_=None if v_==g_ or not v_ else [g_,v_]
+                            if nm_!=getattr(self,"_fc_mano",None):self._fc_mano=nm_;cambios+=1
+                    except Exception as ex:self._log(f"[EditLog] ffmpeg_filtros: {ex}")
+                    continue
+                var=getattr(self,"var_"+k_,None)
+                if isinstance(var,tk.Variable):
+                    try:
+                        if isinstance(var,tk.BooleanVar):nv=v_.lower() in ("1","true","sí","si","yes","on","verdadero")
+                        elif isinstance(var,tk.IntVar):nv=int(round(float(v_.replace(",","."))))
+                        elif isinstance(var,tk.DoubleVar):nv=float(v_.replace(",","."))
+                        else:nv=v_
+                        if str(nv)!=str(var.get()):
+                            var.set(nv);cambios+=1
+                            if k_=="formato":self._fc()
+                    except Exception as ex:self._log(f"[EditLog] {k_}: {ex}")
+                continue
             if ":" not in line: continue
             key, val = line.split(":", 1)
             key = key.strip().lower()
@@ -9146,7 +10194,7 @@ class AudioProcessorGUI:
         return (cfg or {})["layout"] if "layout" in (cfg or {}) else self.var_layout_sal.get()
     def _snap(self):
         # con todo lo de _cfgd: sin ello, las bandas del EQ avanzado y el delay por canal no llegaban a cada pista ni al procesar
-        return {"aften":dict(getattr(self,"_aften",AFTEN_DEF)),"opc_aud":{k:dict(v) for k,v in (getattr(self,"_opc_aud",{}) or {}).items()},**self._cfgd(),"master":self.var_master.get(),"master_auto":self.var_master_auto.get(),"loudnorm_target":self.var_loudnorm_target.get(),"loudnorm_passes":self.var_loudnorm_passes.get(),"dyn_norm":self.var_dyn_norm.get(),"speech_norm":self.var_speech_norm.get(),"norm_vol":self.var_norm_vol.get(),"fl":self.var_fl.get(),"fr":self.var_fr.get(),"fc":self.var_fc.get(),"lfe":self.var_lfe.get(),"bl":self.var_bl.get(),"br":self.var_br.get(),"voz":self.var_voz.get(),"amb":self.var_amb.get(),"efc":self.var_efc.get(),"sub":self.var_sub.get(),"eq_bass":self.var_eq_bass.get(),"eq_mids":self.var_eq_mids.get(),"eq_treble":self.var_eq_treble.get(),"bm":self.var_bm.get(),"bm_corte":self.var_bm_corte.get(),"db":self.var_db.get(),"db_corte":self.var_db_corte.get(),"gdin_front":self.var_gdin_front.get(),"gdin_tras":self.var_gdin_tras.get(),"gdin_cent":self.var_gdin_cent.get(),"din_modo":self.var_din_modo.get(),"din_val":self.var_din_val.get(),"din_fc":self.var_din_fc.get(),"din_ft":self.var_din_ft.get(),"din_lfe":self.var_din_lfe.get(),"limp":self.var_limp.get(),"declick":self.var_declick.get(),"declip":self.var_declip.get(),"suav":self.var_suav.get(),"gdin_vol":self.var_gdin_vol.get(),"din_vol":self.var_din_vol.get(),"upmix":self.var_upmix.get(),"upmix_central":self.var_upmix_central.get(),"upmix_voz":self.var_upmix_voz.get(),"formato":self.var_formato.get(),"bitrate":self.var_bitrate.get(),"dup_modo":self.var_dup_modo.get(),"downmix":self.var_downmix.get(),"layout":self.var_layout_sal.get(),"downmix_modo":self.var_downmix_modo.get(),"downmix_lfe":self.var_downmix_lfe.get(),"fps_from":self.var_fps_from.get(),"fps_to":self.var_fps_to.get(),"fps_metodo":self.var_fps_metodo.get(),"delay_init":self.var_delay_init.get(),"techo_pres":self.var_techo_pres.get(),"techo_gd":self.var_techo_gd.get(),"techo_pd":self.var_techo_pd.get()}
+        return {"aften":dict(getattr(self,"_aften",AFTEN_DEF)),"opc_aud":{k:dict(v) for k,v in (getattr(self,"_opc_aud",{}) or {}).items()},"adv":{k:dict(v) for k,v in (getattr(self,"_adv",{}) or {}).items() if v},"fc_mano":getattr(self,"_fc_mano",None),**self._cfgd(),"master":self.var_master.get(),"master_auto":self.var_master_auto.get(),"loudnorm_target":self.var_loudnorm_target.get(),"loudnorm_passes":self.var_loudnorm_passes.get(),"dyn_norm":self.var_dyn_norm.get(),"speech_norm":self.var_speech_norm.get(),"norm_vol":self.var_norm_vol.get(),"fl":self.var_fl.get(),"fr":self.var_fr.get(),"fc":self.var_fc.get(),"lfe":self.var_lfe.get(),"bl":self.var_bl.get(),"br":self.var_br.get(),"voz":self.var_voz.get(),"amb":self.var_amb.get(),"efc":self.var_efc.get(),"sub":self.var_sub.get(),"eq_bass":self.var_eq_bass.get(),"eq_mids":self.var_eq_mids.get(),"eq_treble":self.var_eq_treble.get(),"bm":self.var_bm.get(),"bm_corte":self.var_bm_corte.get(),"db":self.var_db.get(),"db_corte":self.var_db_corte.get(),"gdin_front":self.var_gdin_front.get(),"gdin_tras":self.var_gdin_tras.get(),"gdin_cent":self.var_gdin_cent.get(),"din_modo":self.var_din_modo.get(),"din_azid":self.var_din_azid.get(),"din_val":self.var_din_val.get(),"din_fc":self.var_din_fc.get(),"din_ft":self.var_din_ft.get(),"din_lfe":self.var_din_lfe.get(),"limp":self.var_limp.get(),"declick":self.var_declick.get(),"declip":self.var_declip.get(),"suav":self.var_suav.get(),"gdin_vol":self.var_gdin_vol.get(),"din_vol":self.var_din_vol.get(),"upmix":self.var_upmix.get(),"upmix_central":self.var_upmix_central.get(),"upmix_voz":self.var_upmix_voz.get(),"formato":self.var_formato.get(),"bitrate":self.var_bitrate.get(),"dup_modo":self.var_dup_modo.get(),"downmix":self.var_downmix.get(),"layout":self.var_layout_sal.get(),"downmix_modo":self.var_downmix_modo.get(),"downmix_lfe":self.var_downmix_lfe.get(),"fps_from":self.var_fps_from.get(),"fps_to":self.var_fps_to.get(),"fps_metodo":self.var_fps_metodo.get(),"delay_init":self.var_delay_init.get(),"techo_pres":self.var_techo_pres.get(),"techo_gd":self.var_techo_gd.get(),"techo_pd":self.var_techo_pd.get()}
     def _ln_fc(self,arch,pista,cfg,seg=None):
         """cadena de filtros SIN loudnorm: la senal tal como llega al loudnorm (con EQ, volumenes, disposicion...)"""
         c=dict(self._cfe(arch,pista,cfg or self._snap(),seg))
@@ -9227,15 +10275,16 @@ class AudioProcessorGUI:
         except Exception:return 0.0
         if abs(v)<0.05:return 0.0
         top=top_pos if v>0 else (top_neg if top_neg is not None else top_pos)
-        return round((1 if v>0 else -1)*top*(min(abs(v),10.0)/10.0)**expo,2)
+        return round((1 if v>0 else -1)*top*(min(abs(v),15.0)/15.0)**expo,2)   # (JMG, 20-11) de -15 a +15: el 15 da el tope (lo que antes el 10)
 
     @staticmethod
-    def _suav_filtro(n):
+    def _suav_filtro(n,adv=None):
         """Suavizado digital (1-5): un filtro que corta los agudos (no un ecualizador), en todos los canales menos el subwoofer. Sin retraso apreciable"""
         try:n=max(0,min(5,int(n or 0)))
         except (TypeError,ValueError):n=0
         if not n:return ""
-        return f"lowpass=f={AudioProcessorGUI._SUAV_FC[n-1]}:poles=2:c=FL+FR+FC+BL+BR+SL+SR"
+        a=adv or {}   # (JMG, 22-11) «⚙»: corte y pendiente
+        return f"lowpass=f={_n_(a.get('corte') if a.get('corte') is not None else AudioProcessorGUI._SUAV_FC[n-1])}:poles={int(a.get('polos',2) or 2)}:c=FL+FR+FC+BL+BR+SL+SR"
     _SUAV_FC=(7500,6000,5000,4300,3600)   # corte del Suavizado 1-5: en las eses (5,6-11 kHz) quita lo mismo que el de antes, sin tocar la voz
     @staticmethod
     def _resp_db(f,filtros):
@@ -9288,7 +10337,7 @@ class AudioProcessorGUI:
     @staticmethod
     def _gd_curva(v):
         """pivote y curva (dB de entrada -> dB de salida) de la gama dinamica en el nivel v (0-10)"""
-        vn=max(0.0,min(10.0,float(v)))
+        vn=max(0.0,min(15.0,float(v)))*2/3.0   # (JMG, 20-11) de 0 a 15: por dentro, la escala de antes (el 15 = el 10)
         v=vn/2.0  # nivel 1-10 -> escala interna 0-5
         P=-28+3.2*v;sd=1.0+0.45*v
         # refuerzo (v.74): los flojos bajan un poco mas, proporcional al nivel: 0,3 dB en el 1 ... 3 dB en el 10
@@ -9296,6 +10345,118 @@ class AudioProcessorGUI:
         xg=3.0*vn/10.0
         def o(x):return P+sd*(x-P)-xg*min(1.0,(P-x)/6.0) if x<P else x
         return P,o
+    def _adv_titulos(self):
+        """(JMG, 22-11) título de cada efecto -> su clave de ADV_EF (Bass Management y Double Bass no llevan)"""
+        V=self._vt
+        return {T("gama"):"gama",T("pd"):"pd",   # (JMG, 24-11) solo estas dos (y las dos de Combinar)
+                V("Quitar el eco del idioma original (gama dinámica)","Remove the original-language echo (dynamic range)"):"comb_gama",
+                V("Silenciar voces del original","Silence voices of the original"):"comb_silv"}
+    def _adv_ruedas(self,raiz):
+        """(JMG, 22-11) «⚙» a la izquierda del título de cada efecto: abre sus ajustes avanzados"""
+        mp=self._adv_titulos()
+        def hijos(w):
+            for c in w.winfo_children():
+                yield c;yield from hijos(c)
+        for w in list(hijos(raiz)):
+            try:
+                if w.winfo_class()!="TLabel" or getattr(w,"_jmg_rueda",False):continue
+                ef=mp.get(str(w.cget("text")))
+                if not ef:continue
+                w._jmg_rueda=True;tit=str(w.cget("text"))
+                cmd=(lambda e=ef,t=tit:self._adv_ventana(e,titulo=t))
+                b=ttk.Button(w.master,text="⚙",width=2,style="Rueda.TButton",command=cmd)
+                self._ayuda_flotante(b,self._vt("Ajustes avanzados de este efecto (para afinar más)","This effect's advanced settings (for finer tuning)"))
+                mg=w.winfo_manager()
+                if mg=="grid":
+                    gi=w.grid_info();px=gi.get("padx",0)
+                    px=(int(px),int(px)) if isinstance(px,(int,str)) else tuple(int(x) for x in px)
+                    b.grid(row=gi["row"],column=gi["column"],sticky="w",padx=(px[0],0),pady=gi.get("pady",0))
+                    w.grid_configure(padx=(px[0]+30,px[1]))
+                elif mg=="pack" and w.pack_info().get("side")=="left":b.pack(side="left",before=w,padx=(0,6))
+                else:b.place(in_=w,relx=1.0,x=6,rely=0.5,anchor="w")
+            except Exception:pass
+    def _adv_ventana(self,ef,titulo=None):
+        """(JMG, 22-11) los ajustes finos de un efecto (como en Ocenaudio): deslizador, casilla y lo que hace a cada lado; «Por defecto»"""
+        V=self._vt;spec=ADV_EF.get(ef) or []
+        if ef.startswith("comb_"):
+            if not isinstance(getattr(self,"_adv_comb",None),dict):self._adv_comb={}
+            dest=self._adv_comb.setdefault(ef[5:],{})
+        else:
+            if not isinstance(getattr(self,"_adv",None),dict):self._adv={}
+            dest=self._adv.setdefault(ef,{})
+        try:
+            if getattr(self,"_adv_top",None) and self._adv_top.winfo_exists():self._adv_top.destroy()
+        except Exception:pass
+        top=tk.Toplevel(self.root);self._adv_top=top;top.title("⚙ "+V("Ajustes avanzados","Advanced settings")+" · "+(titulo or ef))
+        top.configure(bg=CF);top.transient(self.root);top.resizable(False,False)
+        f=ttk.Frame(top);f.pack(fill="both",expand=True,padx=16,pady=12)
+        ttk.Label(f,text="⚙ "+(titulo or ef),font=("",11,"bold")).grid(row=0,column=0,columnspan=5,sticky="w")
+        if self.pactual and not ef.startswith("comb_"):
+            ruta,idx=self.pactual
+            ttk.Label(f,text=V("Pista: ","Track: ")+f"{os.path.basename(ruta)} #{idx}",foreground=CID).grid(row=1,column=0,columnspan=5,sticky="w",pady=(0,8))
+        vs={}
+        def cambio():
+            try:self._update_editlog()
+            except Exception:pass
+            try:self._tit_pintar()
+            except Exception:pass
+        for r,(k,es,en,a,b_,st,d0,u,lo,hi) in enumerate(spec,start=2):
+            auto=isinstance(d0,tuple);dv=d0[1] if auto else d0
+            ttk.Label(f,text=V(es,en)+(f" ({u})" if u else "")+":").grid(row=r,column=0,sticky="w",padx=(0,10),pady=4)
+            ttk.Label(f,text=V(*lo),foreground=CA,font=("",8)).grid(row=r,column=1,sticky="e")
+            var=tk.DoubleVar(value=float(dest.get(k,dv)));vs[k]=(var,dv,auto)
+            sc=ttk.Scale(f,from_=a,to=b_,variable=var,orient="horizontal",length=260);sc.grid(row=r,column=2,padx=6)
+            ttk.Label(f,text=V(*hi),foreground=CA,font=("",8)).grid(row=r,column=3,sticky="w")
+            ve=tk.StringVar();en_=tk.Entry(f,textvariable=ve,width=8,justify="center",bg=CDN,fg=CT,insertbackground=CT,relief="flat",highlightthickness=1,highlightbackground=CSB,highlightcolor=CID)
+            en_.grid(row=r,column=4,padx=(8,0))
+            def pinta(*_a,k=k,var=var,ve=ve,st=st,auto=auto):
+                x=round(round(var.get()/st)*st,4);ve.set((V("auto ","auto ") if auto and k not in dest else "")+f"{_n_(x)}")
+            def mueve(_e=None,k=k,var=var,st=st,a=a,b_=b_,sc=sc):
+                if getattr(sc,"_dbl",False):sc._dbl=False;return   # (JMG, 25-11) tras el doble clic, se queda el valor inicial
+                x=max(a,min(b_,round(round(var.get()/st)*st,4)));dest[k]=_n_(x);var.set(x);cambio()
+            def flecha(s_,k=k,var=var,st=st,a=a,b_=b_):   # (JMG, 25-11) las flechas, paso a paso
+                x=max(a,min(b_,round(round(var.get()/st)*st+s_*st,4)));var.set(x);dest[k]=_n_(x);cambio();return "break"
+            def doble(_e=None,k=k,var=var,dv=dv,sc=sc):   # (JMG, 25-11) doble clic: el valor inicial
+                sc._dbl=True;dest.pop(k,None);var.set(dv);cambio();return "break"
+            sc.configure(takefocus=1);sc.bind("<Button-1>",lambda e,sc=sc:sc.focus_set(),add="+")
+            for ky,s_ in (("<Left>",-1),("<Down>",-1),("<Right>",1),("<Up>",1)):sc.bind(ky,lambda e,s_=s_,f_=flecha:f_(s_))
+            sc.bind("<Double-1>",doble);en_.bind("<Double-1>",doble)
+            def escribe(_e=None,k=k,var=var,ve=ve,st=st,a=a,b_=b_):
+                try:x=float(ve.get().replace(",",".").replace("auto","").strip())
+                except ValueError:return
+                x=max(a,min(b_,round(round(x/st)*st,4)));dest[k]=_n_(x);var.set(x);cambio()
+            var.trace_add("write",pinta);pinta()
+            sc.bind("<ButtonRelease-1>",mueve);sc.bind("<KeyRelease>",mueve)
+            en_.bind("<Return>",escribe);en_.bind("<FocusOut>",escribe)
+        fb=ttk.Frame(f);fb.grid(row=len(spec)+3,column=0,columnspan=5,sticky="ew",pady=(12,0))
+        def defecto():
+            dest.clear()
+            for k,(var,dv,auto) in vs.items():var.set(dv)
+            cambio()
+        ttk.Button(fb,text="↺ "+V("Por defecto","Default"),command=defecto).pack(side="left")
+        ttk.Button(fb,text=V("Cerrar","Close"),command=top.destroy).pack(side="right")
+        ttk.Label(f,text=V("«auto»: lo calcula el programa según la pista; al moverlo, manda lo tuyo. Se guarda con la pista.","«auto»: the program works it out from the track; once you move it, yours rules. Saved with the track."),
+                  foreground=CA,font=("",8,"italic")).grid(row=len(spec)+2,column=0,columnspan=5,sticky="w",pady=(8,0))
+        try:top.update_idletasks();top.geometry(f"+{self.root.winfo_rootx()+160}+{self.root.winfo_rooty()+120}")
+        except Exception:pass
+        return top
+    def _fc_previa(self,ruta,idx,cfg):
+        """(JMG, 25-11) los filtros de la pista tal como se calculan al procesar (sin los puestos a mano)"""
+        c=self._cfe(ruta,idx,cfg);c["_ini_ms"]=self._ini_ms(ruta,idx);c.pop("fc_mano",None)
+        return self._cf(idx,c,None)
+    def _gd_cmp(self,v,adv=None):
+        """(JMG, 22-11) la compand de la Gama dinámica con sus ajustes avanzados (umbral, ataque, liberación, rodilla, ganancia)"""
+        a=adv or {}
+        g=lambda k,d:(float(a[k]) if a.get(k) is not None else d)
+        pts=self._gd_points(v);u=g("umbral",0.0)
+        if u:
+            q=[];ux=-999.0
+            for s_ in pts.split("|"):
+                x,y=map(float,s_.split("/"))
+                if -89<x<-0.5:x=max(-89.0,min(-0.6,x+u));y=y+u
+                if x>ux:q.append(f"{_n_(x)}/{round(y,1)}");ux=x
+            pts="|".join(q)
+        return f"compand=attacks={_n_(g('ataque',50)/1000)}:decays={_n_(g('liberacion',400)/1000)}:points={pts}:soft-knee={_n_(g('rodilla',6))}:gain={_n_(g('ganancia',0))}:volume=0"
     def _gd_points(self,v):
         """Curva de EXPANSION para compand (de menos a mas segun el nivel 1-10).
         Por debajo del pivote los sonidos flojos BAJAN mucho (pendiente 1.45 ... 3.25 dB por dB);
@@ -9310,7 +10471,7 @@ class AudioProcessorGUI:
             pts.append(f"{x}/{round(y,1)}")
         return "|".join(pts)
 
-    def _dp(self,m=None,v=None,k=1.0,med=None):
+    def _dp(self,m=None,v=None,k=1.0,med=None,adv=None):
         """Procesado dinamico (curva compand por canal):
           1 Elevacion: sube los sonidos bajos (compresion ascendente); los fuertes no se tocan.
           2 Impacto:   AUMENTA mucho la dinamica: los fuertes suben (picos +2 a +8 dB) y los debiles bajan.
@@ -9319,7 +10480,7 @@ class AudioProcessorGUI:
         if m is None:m=int(self.var_din_modo.get())
         if v is None:v=self.var_din_ft.get()
         m=int(m)
-        try:vn=max(0,min(10,int(round(float(v)))))
+        try:vn=max(0,min(15,int(round(float(v)))))*2/3.0   # (JMG, 20-11) de 0 a 15, de 1 en 1: por dentro, la escala de antes (el 15 = el 10)
         except (TypeError,ValueError):vn=0
         if m==0 or vn==0:return {"f":None,"d":"Off","nom":"Off"}
         u=(vn-1)/9.0
@@ -9330,6 +10491,8 @@ class AudioProcessorGUI:
         try:TP=min(0.0,float(med.get("TP",0.0)))
         except (TypeError,ValueError):TP=0.0
         P=max(-32.0,min(-14.0,I-2.0))          # nivel medio del programa (por canal)
+        a_=adv or {}
+        if a_.get("umbral") is not None:P=float(a_["umbral"])   # (JMG, 22-11) «⚙»: el umbral a mano
         # refuerzo (v.74): efecto mas notable, proporcional al nivel: +0,6 dB en el 1 ... +6 dB en el 10
         xtra=6.0*vn/10.0
         up55=L(2.5,13)+xtra;up40=L(2,9)+xtra;up30=L(1,4.5)+xtra
@@ -9368,7 +10531,8 @@ class AudioProcessorGUI:
         if m in (2,3):d.append(self._vt(f"fuertes +{upk:.1f} dB",f"loud +{upk:.1f} dB"))
         if m==2:d.append(self._vt(f"débiles -{(rl-1)*20:.1f} dB",f"weak -{(rl-1)*20:.1f} dB"))
         _att="0.002" if m in (2,3) else "0.008"   # Impacto: ataque rapido para que los picos suban de verdad
-        return {"f":f"compand=attacks={_att}:decays=0.25:points={ps}:soft-knee=4:gain=0:volume=-30","nom":nom,"d":" · ".join(d)}
+        _att=str(_n_(float(a_["ataque"])/1000)) if a_.get("ataque") is not None else _att   # (JMG, 22-11) «⚙»: ataque, liberación y rodilla
+        return {"f":f"compand=attacks={_att}:decays={_n_(float(a_.get('liberacion',250))/1000)}:points={ps}:soft-knee={_n_(a_.get('rodilla',4))}:gain=0:volume=-30","nom":nom,"d":" · ".join(d)}
 
     def _run_c(self,cmd):
         """subprocess cancelable: se corta al pulsar Cancelar (o si la Visualizacion se cancela/regenera)"""
@@ -9466,6 +10630,168 @@ class AudioProcessorGUI:
 
     def _din_nom(self,m):
         return {1:self._vt("Elevación","Lift"),2:self._vt("Impacto","Impact"),3:self._vt("Elevación + Impacto","Lift + Impact")}.get(int(m),self._vt("Elevación","Lift"))
+    def _azid_on(self):
+        try:return int(self.var_din_azid.get())==4   # (JMG, 21-11) una sola opción: Inversa
+        except Exception:return False
+    _AZID_SIN=("pres","gama","limp","norm","separ")
+    def _azid_ef(self):
+        """(JMG, 20-11) los efectos que no se mezclan con «Modo Azid» -> {clave: (variable, valor neutro)} (JMG: los volúmenes, los ecualizadores,
+        el suavizado, la sincronía, el Procesado dinámico (solo el modo 1), el Bass Management y el Double Bass sí se pueden usar)"""
+        out={}
+        for g in self._AZID_SIN:
+            for k,v in self._AUTO_NEUTRO[g].items():
+                var=getattr(self,"var_"+k,None)
+                if var is not None:out[k]=(var,v)
+        return out
+    @staticmethod
+    def _neutro(x,v):
+        try:return float(x)==float(v)
+        except (TypeError,ValueError):return str(x)==str(v)
+    def _azid_excl(self,q):
+        """(JMG, 20-11) «Modo Azid» va solo: al ponerlo, los demás efectos se apagan; al tocar uno, Azid vuelve a «Original»"""
+        if getattr(self,"_az_ex",False):return
+        self._az_ex=True
+        try:
+            if q=="azid" and self._azid_on():
+                ap=[]
+                if int(self.var_din_modo.get() or 0) in (2,3):self.var_din_modo.set(0);ap.append("din_modo")   # (JMG, 21-11) del Procesado dinámico, solo el modo 1
+                for k,(var,v) in self._azid_ef().items():
+                    if not self._neutro(var.get(),v):var.set(v);ap.append(k)
+                self._az_apagados=ap
+            elif q=="ef" and self._azid_on() and (any(not self._neutro(var.get(),v) for var,v in self._azid_ef().values()) or int(self.var_din_modo.get() or 0) in (2,3)):
+                self.var_din_azid.set(0)
+        except Exception:pass
+        finally:self._az_ex=False
+    def _azid_fmt(self):
+        """con «Modo Azid», la salida sin «Passthrough» (copia la pista sin procesarla: el efecto no llegaría)"""
+        try:
+            ops=list(self._fd().keys()) if self.var_downmix.get() else self._fmt_keys()
+            self._cfgw(self.cmb_f,values=ops)
+            if self.var_formato.get() not in ops:
+                self.var_formato.set(DEF_FMT if DEF_FMT in ops else ("AC3" if "AC3" in ops else ops[0]));self._fc()
+        except Exception:pass
+    def _azid_elegido(self,e=None):
+        """(JMG, 20-11) al elegir un modo de «Modo Azid»: se guarda (el Procesado dinámico se apaga, la salida no ofrece «Passthrough»)
+        y una ventana avisa de con qué funciona"""
+        v=self.cmb_din_azid.get();n=4 if (v in self._azid_noms and self._azid_noms.index(v)==1) else 0   # una sola opción: Inversa
+        f0=self.var_formato.get();self._az_apagados=[]
+        self.var_din_azid.set(n)
+        if not n:return
+        V=self._vt;cod=""
+        try:ruta,idx=self.pactual;cod=str((self.pc.get(ruta) or [])[idx].get("codec","")).upper()
+        except Exception:pass
+        m=V(f"«Modo Azid» {v}: solo actúa sobre pistas de ENTRADA AC3 o E-AC3 (las de DVD son las que mejor van; DTS, TrueHD, FLAC... no traen esos datos).\n\n"
+            "La salida puede ser cualquier formato (Aften, AC3, E-AC3, FLAC, WAV...) menos «Passthrough», que copia la pista sin procesarla: mientras uses Azid no sale en la lista.\n\n"
+            "No se mezcla con Presencia, Separación de canales, Gama dinámica, normalizaciones ni limpieza: al ponerlo se apagan, y si tocas uno, vuelve a «Original». Los volúmenes, los ecualizadores, el suavizado, la sincronía, el Procesado dinámico (solo el modo 1), el Bass Management y el Double Bass sí se pueden usar con él.",
+            f"«Azid mode» {v}: it only acts on AC3 or E-AC3 INPUT tracks (DVD ones work best; DTS, TrueHD, FLAC... carry no such data).\n\n"
+            "The output can be any format (Aften, AC3, E-AC3, FLAC, WAV...) except «Passthrough», which copies the track without processing it: while you use Azid it is not in the list.\n\n"
+            "It does not mix with Presence, Channel separation, Dynamic range, normalizations or cleanup: turning it on switches them off, and touching one sets it back to «Original». Volumes, equalizers, smoothing, sync, Dynamic processing (mode 1 only), Bass Management and Double Bass can be used with it.")
+        if cod and cod not in ("AC3","EAC3"):m+=V(f"\n\n⚠ Esta pista es {cod}: con ella no cambiará nada.",f"\n\n⚠ This track is {cod}: nothing will change with it.")
+        ap=getattr(self,"_az_apagados",[])
+        if ap:   # con los nombres de la pantalla
+            P_=V("Presencia","Presence");N_=V("normalización","normalization");Li=V("limpieza","cleanup")
+            g_={"voz":P_,"amb":P_,"efc":P_,"sub":P_,"separ":V("Separación de canales","Channel separation"),"din_modo":V("Procesado dinámico","Dynamic processing"),
+                "din_vol":V("Procesado dinámico","Dynamic processing"),"master_auto":N_,"dyn_norm":"DynAudNorm","speech_norm":"SpeechNorm","limp":Li,"declick":Li,"declip":Li}
+            nm=[]
+            for k_ in ap:
+                x_=g_.get(k_,V("Gama dinámica","Dynamic range") if k_.startswith("gdin") else k_)
+                if x_ not in nm:nm.append(x_)
+            m+=V("\n\nSe han apagado: ","\n\nSwitched off: ")+", ".join(nm)+"."
+        f1=self.var_formato.get()
+        if f0!=f1:m+=V(f"\n\nLa salida estaba en «{f0}» y ha pasado a «{f1}».",f"\n\nThe output was «{f0}» and is now «{f1}».")
+        self._toast(T("warn_tit"),m,seg=30)
+    def _ud_ed(self,sen):
+        """(JMG, 20-11) en Visualización, ¿lo deshace (sen<0) o rehace (sen>0) el editor? Si no tiene nada, los demás cambios"""
+        try:
+            if not self._ud_vis() or not self._ed_activo():return False
+            h=self._ed_hist();return bool(h["hechos"] if sen<0 else h["rehacer"])
+        except Exception:return False
+    def _cols_min(self):
+        """(JMG, 20-11) la barra entre «Archivos» y «Pistas» se para cuando los botones o el texto de una columna ya no caben (antes se
+        cortaban «Aplicar a todas» y los demás); y la ventana, como poco, las dos columnas enteras"""
+        try:
+            c=self._cols;mi=max(200,self._cols_ci.winfo_reqwidth()+8);md=max(400,self._pinf.winfo_reqwidth()+24)
+            if getattr(self,"_cols_mins",None)==(mi,md):return
+            self._cols_mins=(mi,md);c.paneconfigure(self._cols_ci,minsize=mi);c.paneconfigure(self._cols_cd,minsize=md)
+            ax,ay,aw,ah=_area_trabajo(self.root);need=min(mi+md+12+40,aw-20);mw,mh=self.root.minsize()
+            if need>mw:self.root.minsize(need,mh)
+        except Exception:pass
+    def _azid_env(self,a,idx,az):
+        """(JMG, 20-11) «Modo Azid»: la curva de compresión que lleva el AC3/E-AC3 (la que aplica un decodificador «normal»), medida
+        decodificando dos veces (sin y con ella) en bloques de 512 muestras. Ligera = la mitad, Normal = entera, Fuerte = la «heavy» (RF),
+        Inversa = la Ligera al revés (expansión, como Azid). -> (ruta de la envolvente: WAV de 400 Hz en caché, disposición, canales,
+        frecuencia) o None si la pista no es AC3/E-AC3 o no trae datos de compresión"""
+        import array,struct,hashlib,tempfile
+        try:pi=(self.pc.get(a) or [])[idx]
+        except Exception:pi={}
+        if str(pi.get("codec","")).upper() not in ("AC3","EAC3") or not os.path.isfile(a):return None
+        az=max(1,min(4,int(az)));NOM=[None,self._vt("Ligera","Light"),"Normal",self._vt("Fuerte","Heavy"),self._vt("Inversa","Inverse")]
+        try:n_=int(pi.get("channels") or 0)
+        except (TypeError,ValueError):n_=0
+        lay=str(pi.get("layout") or "")
+        if lay in ("","?","unknown"):lay={1:"mono",2:"stereo",3:"2.1",4:"quad",5:"5.0",6:"5.1",7:"6.1",8:"7.1"}.get(n_,"")
+        if not lay or n_<1:return None
+        st=os.stat(a);h=hashlib.md5(f"{os.path.normcase(os.path.abspath(a))}|{st.st_size}|{int(st.st_mtime)}|{idx}|{az}|1".encode()).hexdigest()[:16]
+        d_=os.path.join(tempfile.gettempdir(),"jmg_azid");os.makedirs(d_,exist_ok=True)
+        p=os.path.join(d_,f"env_{h}.wav");pn=p[:-4]+".sin"
+        try:sr=int(float((rh([FFPROBE,"-v","error","-select_streams",f"a:{idx}","-show_entries","stream=sample_rate","-of","csv=p=0",a],timeout=60).stdout or "48000").split()[0]))
+        except Exception:sr=48000
+        if os.path.isfile(pn):return None
+        if os.path.isfile(p):
+            try:self._ls(open(p[:-4]+".txt",encoding="utf-8").read())   # lo medido la otra vez (la curva está en caché)
+            except Exception:pass
+            return (p,lay,n_,sr)
+        self._ls("    [AZID] "+self._vt(f"Modo Azid {NOM[az]}: midiendo la compresión que trae la pista...",f"Azid mode {NOM[az]}: measuring the compression the track carries..."))
+        if hasattr(self,"_fase"):self._fase[a]=self._vt("midiendo la compresión del AC3","measuring the AC3 compression")
+        def rms(op):
+            cmd=[FFMPEG,"-hide_banner","-nostats","-v","error"]+op+["-i",a,"-map",f"0:a:{idx}","-af",
+                 "aresample=async=1:min_hard_comp=0.05,aformat=sample_fmts=fltp:channel_layouts=mono,asetnsamples=n=512:p=1,"
+                 "astats=metadata=1:reset=1:measure_perchannel=RMS_level:measure_overall=none,ametadata=mode=print:key=lavfi.astats.1.RMS_level:file=-",
+                 "-f","null","-"]
+            kw={"stdout":subprocess.PIPE,"stderr":subprocess.DEVNULL,"text":True,"encoding":"utf-8","errors":"ignore"}
+            if sys.platform=="win32":kw["creationflags"]=CNW
+            pr=subprocess.Popen(cmd,**kw)
+            with self._lock:self._procesos.append(pr)
+            try:out=pr.communicate()[0] or ""
+            finally:
+                with self._lock:
+                    if pr in self._procesos:self._procesos.remove(pr)
+            if self._cancelar.is_set() or pr.returncode!=0:return None
+            return re.findall(r"RMS_level=(\S+)",out)
+        r0=rms(["-drc_scale","0"])
+        r1=rms(["-drc_scale","1"]+(["-heavy_compr","1"] if az==3 else [])) if r0 else None
+        if not r0 or not r1 or abs(len(r0)-len(r1))>2:
+            self._ls("    [AZID] "+self._vt("No se ha podido medir: la pista sale sin cambios.","Could not measure: the track is left unchanged."));return None
+        g=[];prev=0.0
+        for x,y in zip(r0,r1):
+            try:x=float(x);y=float(y)
+            except ValueError:x=y=float("nan")
+            if x==x and y==y and -80.0<x<1e9 and -80.0<y<1e9:prev=max(-30.0,min(30.0,y-x))
+            g.append(prev)
+        lo,hi=min(g),max(g)
+        if max(abs(lo),abs(hi))<0.05:
+            open(pn,"w").close()
+            self._ls("    [AZID] "+self._vt("La pista no trae datos de compresión (como casi todas las que no son de DVD): no cambia nada.",
+                                         "The track carries no compression data (like almost all non-DVD ones): nothing changes."));return None
+        k={1:0.5,2:1.0,3:1.0,4:-0.5}[az]
+        _msg=("    [AZID] "+self._vt(f"La compresión que trae va de {lo:+.1f} a {hi:+.1f} dB → {NOM[az]}: de {min(k*lo,k*hi):+.1f} a {max(k*lo,k*hi):+.1f} dB",
+                                     f"The compression it carries goes from {lo:+.1f} to {hi:+.1f} dB → {NOM[az]}: from {min(k*lo,k*hi):+.1f} to {max(k*lo,k*hi):+.1f} dB"))
+        self._ls(_msg)
+        R=400;bs=512.0/sr;N=len(g);M=int((N*bs+10.0)*R)+1;env=array.array("f",bytes(4*M))
+        for i in range(M):   # cada bloque, en su centro; entre bloques, en línea recta; después del último, el último
+            q=i/(R*bs)-0.5;j=int(q) if q>0 else 0
+            if j>=N-1:v=g[-1]
+            else:f_=q-j if q>0 else 0.0;v=g[j]+(g[j+1]-g[j])*f_
+            env[i]=10.0**(k*v/20.0)
+        if sys.byteorder!="little":env.byteswap()
+        da=env.tobytes()
+        hd=b"RIFF"+struct.pack("<I",36+len(da))+b"WAVEfmt "+struct.pack("<IHHIIHH",16,3,1,R,R*4,4,32)+b"data"+struct.pack("<I",len(da))
+        t_=p+".tmp"
+        with open(t_,"wb") as fh:fh.write(hd+da)
+        os.replace(t_,p)
+        try:open(p[:-4]+".txt","w",encoding="utf-8").write(_msg)
+        except Exception:pass
+        return (p,lay,n_,sr)
     def _din_lbl(self):
         try:
             m=int(self.var_din_modo.get())
@@ -9474,13 +10800,19 @@ class AudioProcessorGUI:
             par=[]
             for et,var in ((self._vt("Frontales/traseros","Front/rear"),self.var_din_ft),(self._vt("Central","Center"),self.var_din_fc),("Subwoofer",self.var_din_lfe)):
                 p=self._dp(m,var.get())
-                par.append(f"   {et} {int(round(float(var.get())))}: "+(p['d'] if p["f"] else self._vt("sin efecto","no effect")))
+                par.append(f"   {et} {self._fv(var.get())}: "+(p['d'] if p["f"] else self._vt("sin efecto","no effect")))
             self.var_din_desc.set(nom+"\n"+"\n".join(par))
         except Exception:pass
 
     def _cf(self,pista,cfg=None,ln_med=None):
         if cfg is None:cfg=self._snap()
         cfg=dict(cfg)
+        _A=cfg.get("adv") if isinstance(cfg.get("adv"),dict) else {}   # (JMG, 22-11) los ajustes avanzados («⚙») de cada efecto
+        def av(e_,k_,d_):
+            try:
+                x=(_A.get(e_) or {}).get(k_)
+                return d_ if x is None else float(x)
+            except (TypeError,ValueError,AttributeError):return d_
         for _k in ("loudnorm_vol","norm_vol","gdin_vol","din_vol"):cfg[_k]=0   # atenuadores retirados
         def db2lin(db):return 0.0 if db<=-30.5 else round(10**(db/20.0),6)   # (JMG, 19-11) -31 = Mute: en silencio
 
@@ -9517,15 +10849,16 @@ class AudioProcessorGUI:
         ps=0.0 if ("LFE" not in act or up) else self._eff(cfg["sub"],9,20)
         lm=round(gLFE*db2lin(ps),6)
 
-        bmv=0 if ("LFE" not in act or up) else 2*max(0,min(5,int(cfg["bm"])));bmc=int(cfg["bm_corte"])   # con Upmix no
-        dbv=0 if ("LFE" not in act or up) else 2*max(0,min(5,int(cfg["db"])));dbc=int(cfg["db_corte"])
+        bmv=0 if ("LFE" not in act or up) else 2*max(0,min(6,int(round(float(cfg["bm"])))));bmc=int(cfg["bm_corte"])   # con Upmix no
+        dbv=0 if ("LFE" not in act or up) else 2*max(0,min(6,int(round(float(cfg["db"])))));dbc=int(cfg["db_corte"])   # (JMG, 19-11 noche) de 0 a 6, de 1 en 1
         # Nivel 1..5 (bmv/dbv = 2..10). Medido en pelicula 5.1: BM sube el LFE ~+1,5 dB en el 1 y ~+8 dB en el 5;
         # DB lo sube ~+1 / ~+6 dB y ademas refuerza los graves de los altavoces.
         _bl=bmv/2.0;_dl=dbv/2.0
-        bm_a=round(self._ip(_bl,[1,5],[0.35,1.0]),3)      # parte de los graves que se QUITA a los altavoces
-        bm_k=round(self._ip(_bl,[1,5],[0.5,2.0]),3)       # cuanto de esos graves entra en el LFE
-        db_g=round(self._ip(_dl,[1,5],[0.12,0.6]),3)      # graves del LFE que se copian a los altavoces
-        db_k=round(self._ip(_dl,[1,5],[0.4,1.6]),3)       # graves de los altavoces que se copian al LFE (sin quitarlos)
+        bm_a=round(self._ip(_bl,[1,5,6],[0.35,1.0,1.0]),3)      # parte de los graves que se QUITA a los altavoces
+        bm_k=round(self._ip(_bl,[1,5,6],[0.5,2.0,2.375]),3)       # cuanto de esos graves entra en el LFE
+        db_g=round(self._ip(_dl,[1,5,6],[0.12,0.6,0.72]),3)      # graves del LFE que se copian a los altavoces
+        db_k=round(self._ip(_dl,[1,5,6],[0.4,1.6,1.9]),3)       # graves de los altavoces que se copian al LFE (sin quitarlos)
+        if 0<_dl<1:db_g=round(db_g*_dl,3);db_k=round(db_k*_dl,3)   # (JMG, 19-11) el 0,5: la mitad del 1
         _LFE_LIM="alimiter=limit=0.944:attack=10:release=150:level=0:latency=1"  # el LFE reforzado nunca satura
         dm=int(cfg["din_modo"]) if not up else 0
         eb=self._eff(cfg["eq_bass"],10,14);em=self._eff(cfg["eq_mids"],10,14);et=self._eff(cfg["eq_treble"],10,14)
@@ -9544,7 +10877,7 @@ class AudioProcessorGUI:
         elif _ini<=-1:pre.append(f"atrim=start={abs(_ini)/1000.0:.3f},asetpts=PTS-STARTPTS")
         # Limpieza de audio (lo primero): saturacion -> clics -> ruido de fondo
         if cfg.get("declip") and not up:pre.append("adeclip")   # con Upmix no hay Limpieza
-        if cfg.get("declick") and not up:pre.append("adeclick=w=10:o=50")
+        if cfg.get("declick") and not up:pre.append(f"adeclick=w={_n_(av('limp','click_v',10))}:o={_n_(av('limp','click_o',50))}")
         try:_lp=max(0,min(10,int(round(float(cfg.get("limp",0) or 0)))))
         except (TypeError,ValueError):_lp=0
         if _lp>0 and not up:
@@ -9555,6 +10888,7 @@ class AudioProcessorGUI:
             # solo se toca lo que de verdad es ruido de fondo.
             _nr=2.5+33.5*((_lp-1)/9.0)**1.4
             _nf=max(-80.0,min(-20.0,_nf+5.0*(_lp-1)/9.0))
+            _nr=av("limp","reduccion",_nr);_nf=av("limp","suelo",_nf)   # (JMG, 22-11) «⚙»
             # afftdn retrasa 25 ms: se recorta para no perder la sincronia con el video
             pre.append(f"afftdn=nr={_nr:.1f}:nf={_nf:.1f},atrim=start=0.025,asetpts=PTS-STARTPTS")
         if fps_f!=fps_t:
@@ -9575,7 +10909,14 @@ class AudioProcessorGUI:
         elif dl_init<0:
             pre.append(f"atrim=start={abs(dl_init)/1000.0:.3f},asetpts=PTS-STARTPTS")
         pre_str=(",".join(pre)+",") if pre else ""
-        fuente=f"[0:a:{pista}]aresample=async=1:min_hard_comp=0.05,{pre_str}"   # (JMG, 17-11) los huecos de las marcas de tiempo (discos de varios trozos), con silencio
+        _azp=cfg.get("_azid_env")
+        if _azp:   # (JMG, 20-11) «Modo Azid»: la envolvente (misma disposición que la pista) multiplica cada canal
+            _ae,_al,_an,_asr=_azp;_ae=_ae.replace("\\","/").replace(":","\\:")
+            P.append(f"amovie='{_ae}',aresample={_asr},aformat=sample_fmts=fltp:channel_layouts=mono"+(f",pan={_al}|"+"|".join(f"c{i}=c0" for i in range(_an)) if _an>1 else "")+"[azenv]")
+            P.append(f"[0:a:{pista}]aresample=async=1:min_hard_comp=0.05,aformat=sample_fmts=fltp:channel_layouts={_al}[azsrc]")
+            P.append("[azsrc][azenv]amultiply[azout]")
+            fuente=f"[azout]{pre_str}"
+        else:fuente=f"[0:a:{pista}]aresample=async=1:min_hard_comp=0.05,{pre_str}"   # (JMG, 17-11) los huecos de las marcas de tiempo (discos de varios trozos), con silencio
         if cfg.get("_tramos"):   # corregir por tramos (Volumen → Sincronizacion): con el delay ya puesto, como al medir
             tot=float(cfg.get("_dur") or 0) or cfg["_tramos"][-1][1]
             q_,c_=self._tramos_cad("v",fuente+"aresample=48000",[q for q in cfg["_tramos"] if q[0]<tot],tot)
@@ -9612,13 +10953,14 @@ class AudioProcessorGUI:
 
         _CE={"-2 dBFS":0.794,"-1 dBFS":0.891,"-0,5 dBFS":0.944}
         def _lim(k,dd):
-            v=_CE.get(str(cfg.get(k,dd)))
-            return f"alimiter=limit={v}:attack=5:release=80:level=0:latency=1" if v else None
+            v=_CE.get(str(cfg.get(k,dd)));e_={"techo_pres":"pres","techo_gd":"gama","techo_pd":"pd"}.get(k,"")
+            return f"alimiter=limit={v}:attack={_n_(av(e_,'lim_at',5))}:release={_n_(av(e_,'lim_rel',80))}:level=0:latency=1" if v else None
         def peq(fr,g,q):return f"equalizer=f={fr}:width_type=q:width={q}:g={g}"
-        def band_amb():return [peq(1000,pa,0.5),peq(4000,pa,0.5)] if pa else []
-        def band_efc():return [peq(2000,pe,0.6),peq(6000,pe,0.6)] if pe else []
+        _sf=av("pres","voz_f",1000)/1000.0;_vq=av("pres","voz_q",0.8)/0.8;_aq=av("pres","ae_q",0.5)/0.5   # (JMG, 22-11) «⚙» de la Presencia
+        def band_amb():return [peq(1000,pa,_n_(0.5*_aq)),peq(4000,pa,_n_(0.5*_aq))] if pa else []
+        def band_efc():return [peq(2000,pe,_n_(0.6*_aq)),peq(6000,pe,_n_(0.6*_aq))] if pe else []
         # Voz: SOLO canal central (tres bandas que cubren 250 Hz-4 kHz)
-        band_voz=[peq(300,round(pv*0.7,2),0.9),peq(1000,round(pv*0.8,2),0.8),peq(2800,round(pv*0.7,2),0.9)] if pv else []
+        band_voz=[peq(_n_(300*_sf),round(pv*0.7,2),_n_(0.9*_vq)),peq(_n_(1000*_sf),round(pv*0.8,2),_n_(0.8*_vq)),peq(_n_(2800*_sf),round(pv*0.7,2),_n_(0.9*_vq))] if pv else []
 
         def cadena(ent,vol,bandas,sal):
             return f"[{ent}]volume={vol}"+("," + ",".join(bandas) if bandas else "")+f"[{sal}]"
@@ -9682,7 +11024,7 @@ class AudioProcessorGUI:
         if gdf==0 and gdt==0 and gdc==0:P.append("[db1]anull[g1_pre]")
         else:
             def cpx(v):
-                return f"compand=attacks=0.05:decays=0.4:points={self._gd_points(v)}:soft-knee=6:gain=0:volume=0" if v>0 else None
+                return self._gd_cmp(v,_A.get("gama")) if v>0 else None   # (JMG, 22-11) con su «⚙»
             cpf=cpx(gdf);cpt=cpx(gdt);cpc=cpx(gdc)
             P.append("[db1]channelsplit=channel_layout=5.1[gFL][gFR][gFC][gLFE][gBL][gBR]")
             for ch_,cp_ in (("FL",cpf),("FR",cpf),("FC",cpc),("BL",cpt),("BR",cpt)):
@@ -9700,10 +11042,11 @@ class AudioProcessorGUI:
         else:P.append("[g1x]anull[g1]")
 
         eq=[]
-        if eb!=0:eq.append(peq(100,eb,1))
-        if em!=0:eq.append(peq(1000,em,1))
-        if et!=0:eq.append(peq(5000,et,1))
-        if not up and self._suav_filtro(cfg.get("suav",0)):eq.append(self._suav_filtro(cfg.get("suav",0)))   # con Upmix no
+        _q3=_n_(av("eq3","q",1))   # (JMG, 22-11) «⚙» del ecualizador y del Suavizado
+        if eb!=0:eq.append(peq(_n_(av("eq3","f_bass",100)),eb,_q3))
+        if em!=0:eq.append(peq(_n_(av("eq3","f_mids",1000)),em,_q3))
+        if et!=0:eq.append(peq(_n_(av("eq3","f_treble",5000)),et,_q3))
+        if not up and self._suav_filtro(cfg.get("suav",0)):eq.append(self._suav_filtro(cfg.get("suav",0),_A.get("suav")))   # con Upmix no
         if eq:P.append(f"[g1]{','.join(eq)}[e1]")
         else:P.append("[g1]anull[e1]")
 
@@ -9715,7 +11058,7 @@ class AudioProcessorGUI:
                 fr=cfg.get(f"eq{gk}_b{i}_f",1000)
                 gv=self._eff(cfg.get(f"eq{gk}_b{i}_g",0),10,14)
                 if gv!=0:
-                    bands.append(peq(fr,gv,1))
+                    bands.append(peq(fr,gv,_n_(av("eqadv","q",1))))
                     if gv>0:adv_pos.append(gv)
             return bands
 
@@ -9744,12 +11087,12 @@ class AudioProcessorGUI:
         else:
             # intensidad propia por grupo: frontales+traseros, central y subwoofer (0 = sin efecto)
             def _lv(k,dd):
-                try:return max(0.0,min(10.0,float(cfg.get(k,dd))))
+                try:return max(0.0,min(15.0,float(cfg.get(k,dd))))
                 except (TypeError,ValueError):return float(dd)
             _md=cfg.get("_din_med")
-            fft=self._dp(dm,_lv("din_ft",5),med=_md)["f"] or "anull"
-            ffc=self._dp(dm,_lv("din_fc",0),med=_md)["f"] or "anull"
-            fsw=self._dp(dm,_lv("din_lfe",0),med=_md)["f"] or "anull"
+            fft=self._dp(dm,_lv("din_ft",8),med=_md,adv=_A.get("pd"))["f"] or "anull"
+            ffc=self._dp(dm,_lv("din_fc",0),med=_md,adv=_A.get("pd"))["f"] or "anull"
+            fsw=self._dp(dm,_lv("din_lfe",0),med=_md,adv=_A.get("pd"))["f"] or "anull"
             P.append("[e2]channelsplit=channel_layout=5.1[pFL][pFR][pFC][pLFE][pBL][pBR]")
             for _c in ("FL","FR","BL","BR"):P.append(f"[p{_c}]{fft}[q{_c}]")
             P.append(f"[pFC]{ffc}[qFC]");P.append(f"[pLFE]{fsw}[qLFE]")
@@ -9787,7 +11130,7 @@ class AudioProcessorGUI:
             _v=max(1,min(10,dyn_v))
             g=int(round(self._ip(_v,[1,10],[31,9])));g+=1-g%2
             mx=round(self._ip(_v,[1,10],[2.0,8.0]),2)
-            P.append(f"[d1]dynaudnorm=f=500:g={g}:p=0.71:m={mx}[d_final]")
+            P.append(f"[d1]dynaudnorm=f={_n_(av('norm','marco',500))}:g={g}:p={_n_(av('norm','pico',0.71))}:m={mx}[d_final]")
         elif sp_v>0 and not up:
             # SpeechNorm (voces): iguala los dialogos. Con canal central se aplica SOLO al central (donde esta la voz);
             # el pico objetivo se centra en el nivel medido del dialogo (+16 dB) para igualar sin desequilibrar la mezcla.
@@ -9815,7 +11158,7 @@ class AudioProcessorGUI:
             P.append(f"[zLFE]lowpass=f={_fg}:poles=2,lowpass=f={_fg}:poles=2,lowpass=f={_fg}:poles=2[zLFEc]")
             P.append("[zFL][zFR][zFC][zLFEc][zBL][zBR]join=inputs=6:channel_layout=5.1[d_lfe]");_src="d_lfe"
         # ---- (JMG, 27-11) Separación de canales: más (o menos) diferencia entre izquierda y derecha, y delante / detrás ----
-        _spn=_separ_filtro(cfg.get("separ",0),["FL","FR","FC","LFE","BL","BR"],"5.1",not (_est and not up))
+        _spn=_separ_filtro(cfg.get("separ",0),["FL","FR","FC","LFE","BL","BR"],"5.1",not (_est and not up),_A.get("separ"))
         if _spn:P.append(f"[{_src}]{_spn}[d_sep]");_src="d_sep"
         if any(abs(g_-1.0)>1e-9 for g_ in _vch):   # (JMG, 19-11) el volumen por canal, el último: lo que se pone es lo que baja (o sube)
             P.append(f"[{_src}]pan=5.1|"+"|".join(f"c{i}={g_:.6f}*c{i}" for i,g_ in enumerate(_vch))+"[d_vch]");_src="d_vch"
@@ -9874,7 +11217,9 @@ class AudioProcessorGUI:
             final_m = db2lin(cfg["master"])
             P.append(f"[{_src}]volume={final_m},{LIM}[outfinal]")
 
-        return ";".join(P)
+        _g=";".join(P);_m=cfg.get("fc_mano")
+        if isinstance(_m,(list,tuple)) and len(_m)==2 and _m[0]==_g and _m[1]:return _m[1]   # (JMG, 25-11) a mano (Edit/Log), mientras no cambien los ajustes
+        return _g
 
     def _re_cfg(self,cfg,ch=0):
         """resumen legible de los ajustes de una pista (confirmacion y Edit/Log). ch = canales de la entrada (0 = no se sabe)"""
@@ -9906,21 +11251,22 @@ class AudioProcessorGUI:
         _tp=str(cfg.get("techo_pres",""))
         if _tp.endswith("dBFS") and cfg.get("upmix")!="S" and any(cfg.get(k,0)!=0 for k in ("voz","amb","efc","sub")):e.append(V("Techo Presencia","Presence ceiling")+f": {_tp}")
 
-        if cfg.get("bm",0)!=0:e.append(f"BM: {cfg['bm']} @ {cfg.get('bm_corte',120)} Hz")
-        if cfg.get("db",0)!=0:e.append(f"DB: {cfg['db']} @ {cfg.get('db_corte',90)} Hz")
-        if int(cfg.get("separ",0) or 0):e.append(self._vt("Separación de canales: ","Channel separation: ")+f"{int(cfg['separ']):+d}")
+        if cfg.get("bm",0)!=0:e.append(f"BM: {cfg['bm']} @ {cfg.get('bm_corte',90)} Hz")
+        if cfg.get("db",0)!=0:e.append(f"DB: {self._fv(cfg['db'])} @ {cfg.get('db_corte',90)} Hz")
+        if float(cfg.get("separ",0) or 0):e.append(self._vt("Separación de canales: ","Channel separation: ")+("%+g"%float(cfg['separ'])))
 
         if cfg.get("gdin_front",0)>0 or cfg.get("gdin_tras",0)>0 or cfg.get("gdin_cent",0)>0:
             gd=[]
-            if cfg.get("gdin_front",0)>0:gd.append(f"F:{cfg['gdin_front']}")
-            if cfg.get("gdin_tras",0)>0:gd.append(f"T:{cfg['gdin_tras']}")
-            if cfg.get("gdin_cent",0)>0:gd.append(f"C:{cfg['gdin_cent']}")
+            if cfg.get("gdin_front",0)>0:gd.append(f"F:{self._fv(cfg['gdin_front'])}")
+            if cfg.get("gdin_tras",0)>0:gd.append(f"T:{self._fv(cfg['gdin_tras'])}")
+            if cfg.get("gdin_cent",0)>0:gd.append(f"C:{self._fv(cfg['gdin_cent'])}")
             _tg=str(cfg.get("techo_gd",""))
             e.append(V("Gama","Range")+": "+" ".join(gd)+(f" · {_tg}" if _tg.endswith("dBFS") else ""))
 
+        if int(cfg.get("din_azid",0) or 0)==4:e.append(V("Modo Azid: Inversa","Azid mode: Inverse"))
         if cfg.get("din_modo",0)!=0:
             _td=str(cfg.get("techo_pd",""))
-            e.append(f"Dyn: {self._din_nom(cfg['din_modo'])} · F/T {cfg.get('din_ft',5)} · C {cfg.get('din_fc',0)} · Sub {cfg.get('din_lfe',0)}"+(f" · {_td}" if _td.endswith("dBFS") else ""))
+            e.append(f"Dyn: {self._din_nom(cfg['din_modo'])} · F/T {self._fv(cfg.get('din_ft',8))} · C {self._fv(cfg.get('din_fc',0))} · Sub {self._fv(cfg.get('din_lfe',0))}"+(f" · {_td}" if _td.endswith("dBFS") else ""))
 
         for k,n_ in [("eq_bass",V("EQ G","EQ B")),("eq_mids","EQ M"),("eq_treble",V("EQ A","EQ T"))]:
             v=cfg.get(k,0)
@@ -10202,7 +11548,9 @@ class AudioProcessorGUI:
         else:ds=list(dict.fromkeys(os.path.dirname(a) for a in archivos))[:3]
         for d_ in ds:
             try:
-                if os.path.isdir(d_):_abrir_externo(d_)
+                if os.path.isdir(d_):   # (JMG, 22-11) con el archivo ya elegido
+                    f_=next((x for x in reversed(_ULTIMOS) if os.path.normcase(os.path.dirname(os.path.abspath(x)))==os.path.normcase(os.path.abspath(d_)) and os.path.isfile(x)),None)
+                    _abrir_marcado(f_) if f_ else _abrir_externo(d_)
             except Exception as e:self._log(f"[!] {e}")
     def _cfg_x(self,k,v=None):
         """ajuste suelto de config.json (carpeta de FFmpeg, donde esta el otro programa); v=None = leer"""
@@ -10289,6 +11637,9 @@ class AudioProcessorGUI:
         g=max(num("gdin_front"),num("gdin_tras"))
         if g:c["ef"]["gama"]=-g   # la Gama dinámica = la parte izquierda del deslizador del VE
         if num("gdin_cent"):c["ef"]["gama_c"]=-num("gdin_cent")
+        if int(num("din_modo")):   # (JMG, 22-11) el Procesado dinámico, igual en los dos programas (Azid no: el VE no lo tiene)
+            for k in ("din_modo","din_ft","din_fc","din_lfe"):c["ef"][k]=num(k)
+            c["ef"]["techo_pd"]=str(cfg.get("techo_pd") or "Sin límite")
         if num("delay_init"):c["delay"]=int(round(num("delay_init")))
         fd,fa=str(cfg.get("fps_from") or ""),str(cfg.get("fps_to") or "")
         if fd and fa and fd!=fa:c.update(fps_de=fd,fps_a=fa,fps_met=cfg.get("fps_metodo") or "tono")
@@ -10312,6 +11663,8 @@ class AudioProcessorGUI:
             for i_,p_ in enumerate(self.pc.get(r_) or []):
                 cf=self.pconf.get((r_,i_))
                 if cf:datos.setdefault(r_,{})[str(p_.get("index_global"))]=self._traspaso_comun(cf)
+        for r_ in sel:   # (árbitro, 26-11) los agregados llegan agregados aunque aún no tengan ajustes
+            if r_ in getattr(self,"agregados",()):datos.setdefault(r_,{})
         _traspaso_guardar("ap",datos)
     def _traspaso_a_cfg(self,cfg,c,p=None):
         """(JMG, 18-11) los ajustes que vienen de Jmg VideoEncoder, en la configuración de una pista (p = la pista, para su formato)"""
@@ -10319,12 +11672,19 @@ class AudioProcessorGUI:
         cfg["delay_init"]=0
         for k,v in (c.get("ef") or {}).items():
             if k not in _TR_EF:continue
-            a,b={"suav":(0,5),"db":(0,5)}.get(k,(-31,20) if k in ("fl","fr","fc","lfe","bl","br") else (-10,10))   # (JMG, 19-11) -31 = Mute
+            a,b={"suav":(0,5),"db":(0,6)}.get(k,(-31,20) if k in ("fl","fr","fc","lfe","bl","br") else (-15,15))   # (JMG, 19-11) -31 = Mute; (20-11) el resto, de -15 a +15; Double Bass 0-6
             try:cfg[k]=max(a,min(b,float(v))) if k in ("fl","fr","fc","lfe","bl","br") else max(a,min(b,int(round(float(v)))))
             except (TypeError,ValueError):pass
         g=(c.get("ef") or {}).get("gama",0) or 0;gc=(c.get("ef") or {}).get("gama_c",0) or 0
-        if g<0:cfg["gdin_front"]=cfg["gdin_tras"]=min(10,int(round(-g)))   # la compresión del VE (a la derecha) no tiene igual aquí
-        if gc<0:cfg["gdin_cent"]=min(10,int(round(-gc)))
+        if g<0:cfg["gdin_front"]=cfg["gdin_tras"]=min(15,int(round(-g)))   # la compresión del VE (a la derecha) no tiene igual aquí
+        if gc<0:cfg["gdin_cent"]=min(15,int(round(-gc)))
+        e_=c.get("ef") or {};cfg["din_modo"]=0   # (JMG, 22-11) el Procesado dinámico de Jmg VideoEncoder
+        try:
+            if int(float(e_.get("din_modo") or 0)):
+                cfg["din_modo"]=max(0,min(3,int(float(e_["din_modo"]))))
+                for k,d_ in (("din_ft",8),("din_fc",0),("din_lfe",0)):cfg[k]=max(0,min(15,int(round(float(e_.get(k,d_) or 0)))))
+                cfg["techo_pd"]=str(e_.get("techo_pd") or "Sin límite")
+        except (TypeError,ValueError):pass
         if "delay" in c:cfg["delay_init"]=int(c["delay"])
         if c.get("fps_de") and c.get("fps_a"):cfg["fps_from"],cfg["fps_to"],cfg["fps_metodo"]=str(c["fps_de"]),str(c["fps_a"]),c.get("fps_met") or "tono"
         cod=c.get("cod")
@@ -10368,7 +11728,7 @@ class AudioProcessorGUI:
             self.root.focus_force()
         except Exception:pass
         if archivos:
-            try:self._addl(archivos);self._vis_chk_files();self._traspaso_leer(archivos)   # (JMG, 18-11) con sus ajustes de audio
+            try:self._addl(archivos,True);self._vis_chk_files();self._traspaso_leer(archivos)   # (JMG, 18-11) con sus ajustes de audio
             except Exception as e:self._log(f"[!] Abrir con: {e}")
     def _normalizar_ya(self):
         """«Normalizar»: mide AHORA el volumen (Loudnorm) de las pistas marcadas, con barra de progreso.
@@ -10538,7 +11898,7 @@ class AudioProcessorGUI:
     _COMB_LAY={"2.0":(["FL","FR"],"stereo"),"2.1":(["FL","FR","LFE"],"2.1"),"3.1":(["FL","FR","FC","LFE"],"3.1"),
                "4.0":(["FL","FR","BL","BR"],"quad"),"4.1":(["FL","FR","LFE","BL","BR"],"FL+FR+LFE+BL+BR"),
                "5.1":(["FL","FR","FC","LFE","BL","BR"],"5.1"),"7.1":(["FL","FR","FC","LFE","BL","BR","SL","SR"],"7.1")}
-    _COMB_FMT=("AC3","EAC3","DTS","AAC","FLAC","WAV","W64","RF64")
+    _COMB_FMT=("FLAC","WAV")   # (JMG, 24-11) Combinar: solo FLAC y WAV
     def _comb_fuentes(self):
         """todos los canales de todas las pistas de la lista: [(etiqueta, (archivo, pista, canal, nombre o "" si es mono))]"""
         out=[]
@@ -11353,9 +12713,9 @@ class AudioProcessorGUI:
         """nivel de gama dinamica (hasta 8: mas arriba se van tambien los ambientes) que baja el eco al menos 12 dB; 0 si ya no se oye"""
         if eco<-65:return 0
         x=eco+3.0   # el compand mira mas los picos que la media
-        for v in range(1,9):
+        for v in range(1,13):   # (JMG, 20-11) de 0 a 15: hasta 12 (el 8 de antes)
             if x-self._gd_curva(v)[1](x)>=12.0:return v
-        return 8
+        return 12
     def _comb_gama_auto(self,trabajos,fin,para=None):
         """hilo: trabajos=[(grupo 0 delanteros / 1 traseros, canal, (archivo, pista, canal), canal del central de esa pista)].
         fin({grupo: nivel}, lineas de informe)"""
@@ -11392,7 +12752,7 @@ class AudioProcessorGUI:
         except Exception as e:self._ls(f"[COMBINAR] [ERR] {e}")
     def _comb_rec_escribir(self,d_):
         p=self._comb_rec_ruta();q=p+".tmp"
-        with open(q,"w",encoding="utf-8") as fh:json.dump(d_,fh,ensure_ascii=False)
+        _json_seguro(q,d_,ensure_ascii=False)
         os.replace(q,p)
     def _comb_rec_borrar(self,ruta):
         """borra los ajustes guardados de esa combinada (tambien si la moviste de carpeta: por nombre y tamaño)"""
@@ -11437,7 +12797,7 @@ class AudioProcessorGUI:
             perdidos=[x for x in fs if x not in self.files and not os.path.isfile(x)]
             nuevos=[x for x in fs if x not in self.files and os.path.isfile(x)]
             if nuevos:
-                self._addl(nuevos)
+                self._addl(nuevos,True)
                 self.la.selection_clear(0,"end");self.la.selection_set(self.files.index(rec_de));self._multi_cp()
         fuentes=self._comb_fuentes()
         if not fuentes:
@@ -11538,7 +12898,7 @@ class AudioProcessorGUI:
         var_gd_f=tk.IntVar(value=0);var_gd_t=tk.IntVar(value=0)
         fg=ttk.Frame(fo);fg.pack(anchor="w",pady=(4,0))
         ttk.Label(fg,text=V("Quitar el eco del idioma original (gama dinámica)","Remove the original-language echo (dynamic range)"),font=("",9,"bold")).pack(side="left")
-        b_gama=ttk.Button(fg,text="🎛 "+V("Ajustar gama","Auto range"),command=lambda:auto_gama());b_gama.pack(side="left",padx=(12,0))
+        b_gama=ttk.Button(fg,text="🎛 "+V("Ajustar gama","Auto range"),command=lambda:auto_gama());b_gama.pack(side="left",padx=(12,0));self.root.after(60,lambda:self._adv_ruedas(fo))   # (JMG, 22-11) la «⚙» de la gama dinámica de Combinar
         fp=ttk.Frame(fo);fp.pack(anchor="w")
         self._sl(fp,T("gd_front"),var_gd_f,0,10,0,cl=0,cs=1,cv=2,lw=22,sl=130,step=1)
         self._sl(fp,T("gd_tras"),var_gd_t,0,10,0,cl=3,cs=4,cv=5,lw=22,sl=130,step=1)
@@ -11598,7 +12958,7 @@ class AudioProcessorGUI:
             lab={(s[0],s[1],s[2]):e for e,s in fuentes}
             for (c,vs,vd),(sr,dl) in zip(rows,r.get("filas",[])):
                 vs.set(lab.get(tuple(sr),etq[0]) if sr else etq[0]);vd.set(dl)
-            if r.get("fmt"):var_fmt.set(r["fmt"])
+            if r.get("fmt") in self._COMB_FMT:var_fmt.set(r["fmt"])
             fmt_refresh()
             if r.get("br") in cmb_br.cget("values"):var_br.set(r["br"])
             var_add.set(bool(r.get("add",True)));var_solovoz.set(bool(r.get("solovoz")));var_silv_n.set(int(r.get("silv_n",6)) if r.get("silv") else 0);var_silv_t.set(int(r.get("silv_t",r.get("silv_n",6))) if r.get("silv") else 0)
@@ -12001,33 +13361,36 @@ class AudioProcessorGUI:
             if c[i]>-60 and hab[i] and pr[b]-pr[a]>=0.25*(pc[b]-pc[a]):m[i]=1
         return m
     @staticmethod
-    def _vz_env(m,seg,c,db=60.0):
+    def _vz_env(m,seg,c,db=60.0,adv=None):
         """marcas de 50 ms -> ganancia cada 10 ms: baja db en lo marcado sin que se note la entrada ni la salida. Sigue en 1 hasta seg.
         Los huecos de menos de 1,5 s se unen (el sube y baja es lo que mas se oye), empieza 0,4 s antes para que la voz ya llegue baja y
         sale con 0,6 s de cola por el eco. La bajada dura 0,4 s y la subida 0,8 s, en curva suave y en dB.
         Lo que suene 10 dB por encima del eco se respeta: un golpe tapa el salto y por eso ahi la ganancia sube de golpe"""
         import math
         from array import array
-        n=len(m);h=-99;o=list(m)
-        e=sorted(c[i] for i in range(n) if m[i]);e=e[len(e)//2]+10.0 if e else 0.0
+        n=len(m);h=-99;o=list(m);a_=adv or {}   # (JMG, 24-11) «⚙» de la puerta: huecos, antes, cola, bajada, subida y golpes
+        g_=lambda k,d:float(a_[k]) if a_.get(k) is not None else d
+        NU=int(round(g_("union",1.5)/0.05));NC=int(round(g_("cola",0.6)/0.05));NA=int(round(g_("antes",0.4)/0.05))
+        PB=max(1.0,g_("bajada",400)/10.0);PS=max(1.0,g_("subida",800)/10.0)
+        e=sorted(c[i] for i in range(n) if m[i]);e=e[len(e)//2]+g_("golpes",10.0) if e else 0.0
         for i in range(n):
             if m[i]:
-                if 1<i-h<=30:o[h+1:i]=[1]*(i-h-1)
+                if 1<i-h<=NU:o[h+1:i]=[1]*(i-h-1)
                 h=i
         s=[0]*n;h=-99
         for i in range(n):
             if o[i]:h=i
-            if i-h<=12:s[i]=1
+            if i-h<=NC:s[i]=1
         h=n+99
         for i in range(n-1,-1,-1):
             if o[i]:h=i
-            if h-i<=8:s[i]=1
+            if h-i<=NA:s[i]=1
         g=array("f");p=0.0;fondo=10.0**(-db/20.0);pi_=math.pi
         for i in range(n):
             if c[i]>e and not m[i]:p=0.0
             q=s[i] and not (c[i]>e and not m[i])
             for k in range(5):
-                p=min(1.0,p+1.0/40.0) if q else max(0.0,p-1.0/80.0)
+                p=min(1.0,p+1.0/PB) if q else max(0.0,p-1.0/PS)
                 g.append(1.0 if p==0.0 else (fondo if p==1.0 else 10.0**(-db*(0.5-0.5*math.cos(pi_*p))/20.0)))
         while len(g)<seg*100:g.append(1.0)
         return g
@@ -12067,7 +13430,7 @@ class AudioProcessorGUI:
                 inf.append(f"{c}: "+V("voces en ","voices in ")+self._hms(t))
                 if t>0:
                     h_,p_=tempfile.mkstemp(prefix="jmg_voz_",suffix=".f32")
-                    with os.fdopen(h_,"wb") as fh:self._vz_env(m,d0+30.0,q[j],db[0] if c in ("FL","FR") else db[1]).tofile(fh)
+                    with os.fdopen(h_,"wb") as fh:self._vz_env(m,d0+30.0,q[j],db[0] if c in ("FL","FR") else db[1],(getattr(self,"_adv_comb",{}) or {}).get("silv")).tofile(fh)
                     env[n]=p_
             hecho[0]+=1
         return env,inf
@@ -12113,7 +13476,7 @@ class AudioProcessorGUI:
             if self._multi_tracks:
                 self.lp.selection_clear(0,"end");self.lp.selection_set(0);self.lp.activate(0);self._sp_real()
             self.nb.select(self._vis_outer)
-            self.root.after(300,self._vis_auto)
+            self.root.after(300,lambda:self._vis_est(self._vt("Pulsa «Generar visualización» para ver la combinada.","Press «Generate visualization» to see the combined track.")))   # (JMG, 25-11) ya no se genera sola
         except Exception as e:self._ls(f"[COMBINAR] [ERR] {e}")
     def _comb_trabajo(self,sel,lay,fmt,br,add,var_est,pb,fin,dest=None,dup="rename",gama=None,tono=None,tramos=None,solovoz=False,silv=None,silv_db=(60.0,60.0)):
         """hilo: arma el filtro (un canal mono por fila, con su inicio + delay, todos igual de largos) y codifica"""
@@ -12160,7 +13523,7 @@ class AudioProcessorGUI:
                         # y los bloques justos de 480 evitan que FFmpeg se cuelgue al terminar (pasaba en 1 de cada 6 pasadas)
                         cad+=f",apad=pad_dur=1,asetnsamples=n=480:p=1,arnndn=m={_ff_ruta(RNN_VOZ)}:mix=1,atrim=start_sample=480,asetpts=PTS-STARTPTS"
                     gv=self._comb_gama(gama,c)
-                    if gv>0:cad+=f",compand=attacks=0.05:decays=0.4:points={self._gd_points(gv)}:soft-knee=6:gain=0:volume=0"
+                    if gv>0:cad+=","+self._gd_cmp(gv,(getattr(self,"_adv_comb",{}) or {}).get("gama"))   # (JMG, 22-11) con su «⚙»
                     tl=(tramos or {}).get((s[0],s[1]))
                     con_tl=bool(tl and (len(tl)>1 or abs(tl[0][2])>=0.5 or abs(tl[0][3])>=0.5))
                     # el tono va DESPUES de unir los tramos (es igual en todo momento): delante del reparto en tramos, este FFmpeg
@@ -12335,6 +13698,9 @@ class AudioProcessorGUI:
                 except OSError as e:self._ls(f"    [WARN] {e}")
         _ce=self._cfe(a,p,cfg);_ce["_ini_ms"]=self._ini_ms(a,p)
         fc=self._cf(p,_ce,lm)
+        if isinstance(_ce.get("fc_mano"),(list,tuple)) and len(_ce["fc_mano"])==2:   # (JMG, 25-11)
+            self._ls("    [EDIT] "+(self._vt("con los filtros de FFmpeg puestos a mano (Edit/Log)","with the FFmpeg filters set by hand (Edit/Log)") if fc==_ce["fc_mano"][1] else
+                     self._vt("los filtros puestos a mano no se usan: han cambiado los ajustes o la medida","the hand-set filters are not used: the settings or the measurement changed")))
         _pi=next((x for x in (self.pc.get(a) or []) if x.get("orden")==p),{})
         _nuc="DTS-HD" in str(_pi.get("perfil","")) and fmt_actual in (AF_FMT,"AC3","EAC3","DTS","AAC","MP3","OPUS","Opus")   # (JMG, 16-11) a un formato con pérdida
         cmd=[FFMPEG,"-hide_banner","-y"]+(["-core_only","1"] if _nuc else [])+["-i",a]+self._fc_arg(fc)+["-map","[outfinal]"]
@@ -12344,6 +13710,16 @@ class AudioProcessorGUI:
             _a=dict(AFTEN_DEF,**((cfg or {}).get("aften") or {}))
             self._ls("    [AFTEN] "+("" if _a.get("modo")=="vbr" else str((cfg or {}).get("bitrate") or "")+" · ")+self._aften_resumen(_a))
         self._ls(f"    → {os.path.basename(s)}")
+        _D=self._dur(a) or 0.0;_n=self._trozos_n(fc,_D)
+        if _n:   # (JMG, 27-11) toda la potencia del procesador: la pista en trozos a la vez y luego se unen
+            self._ls("    [CPU] "+self._vt(f"Se procesa en {_n} trozos a la vez (más rápido; se unen sin costura).",f"Processed in {_n} pieces at once (faster; joined seamlessly)."))
+            _lst=self._ffm_trozos(a,fc,_n,_D,["-core_only","1"] if _nuc else [],cb_used)
+            if _lst:
+                cmd=[FFMPEG,"-hide_banner","-y","-f","concat","-safe","0","-i",_lst,"-map","0:a"]
+                if cb_used:
+                    _cb0=cb_used;cb_used=lambda t,_cb0=_cb0,_D=_D:_cb0(_D*0.85+min(_D,t)*0.15)
+            elif self._cancelar.is_set():return (False,None)
+            else:self._ls("    [CPU] "+self._vt("No se ha podido por trozos: se hace de una vez.","Could not do it in pieces: done in one go."))
         if af:
             ok=self._ffm_aften(cmd+af[0]+["-progress","pipe:2","-nostats","-v","error","-f","wav","-"],af[1],s,cb_used)
         else:
@@ -12545,6 +13921,11 @@ class AudioProcessorGUI:
         ac=[AFTEN,"-v","0","-readtoeof","1"]+(["-q",str(int(a["q"]))] if a["modo"]=="vbr" else ["-b",b])+self._aften_opciones(a)+["-","-"]
         return ["-c:a","pcm_f32le"]+resto+(["-ar",str(int(a["frec"]))] if a.get("frec") else []),ac   # (JMG, 15-11) su frecuencia
     def _ffm_aften(self,cmd,ac,sal,cb=None):
+        """(JMG, 20-11) el AC3 de Aften, también a «.part» hasta que acaba bien"""
+        pares=[(sal,_part_de(sal))] if _es_final(sal) else []
+        for a_,p_ in pares:_a_medias(p_,True)
+        return _part_fin(pares,self._ffm_aften0(cmd,ac,pares[0][1] if pares else sal,cb))
+    def _ffm_aften0(self,cmd,ac,sal,cb=None):
         """FFmpeg (WAV en coma flotante por su salida) -> Aften -> el AC3, que guarda Python. El progreso, de FFmpeg (por stderr)"""
         try:self._ls("    CMD: "+" ".join(str(c) for c in cmd)+"  |  "+" ".join(str(c) for c in ac))
         except Exception:pass
@@ -12997,6 +14378,57 @@ class AudioProcessorGUI:
                     try:os.remove(tmp)
                     except Exception:pass
 
+    _TROZO_MIN=180.0;_TROZO_PRE=64.0;_TROZO_POST=30.0   # (JMG, 27-11) trozos de 3 min como mínimo; 64 s de antes y 30 s de después para que los filtros suenen igual
+    _TROZO_NO=("atempo","asetrate","atrim","trim=","adelay","apad","aselect","concat","afade","asetpts","areverse","aloop","aecho")
+    def _trozos_n(self,fc,dur):
+        """(JMG, 27-11) en cuántos trozos a la vez se puede procesar la pista (0 = de una vez): solo con filtros que no cambian el tiempo"""
+        try:
+            nc=os.cpu_count() or 2
+            if nc<4 or dur<2*self._TROZO_MIN or any(x in fc for x in self._TROZO_NO):return 0
+            n=min(max(2,nc//2),int(dur//self._TROZO_MIN))
+            return n if n>=2 else 0
+        except Exception:return 0
+    def _ffm_trozos(self,a,fc,n,dur,pre_in,cb=None):
+        """(JMG, 27-11) toda la potencia del procesador: la pista en n trozos a la vez (WAV de 32 bits); devuelve la lista para unirlos
+        (concat, sin costura) o None si algo falla (entonces se hace de una vez). La pista se saca una vez tal cual; cada trozo la
+        decodifica desde el principio y se corta por número de muestra antes de los filtros (exacto: el «-ss» no cae en la muestra justa)"""
+        import tempfile,math
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        refs=re.findall(r"\[0:a:(\d+)\]",fc)
+        if len(set(refs))!=1 or re.search(r"\[[1-9]\d*:",fc):return None
+        tmp=tempfile.mkdtemp(prefix="apm_trozos_")
+        if not hasattr(self,"_tmp_mios"):self._tmp_mios=set()
+        self._tmp_mios.add(tmp)
+        ext=os.path.join(tmp,"pista.mka")
+        if not self._ffm([FFMPEG,"-hide_banner","-y","-i",a,"-map","0:a:"+refs[0],"-c","copy","-progress","pipe:1","-nostats",ext]) or not os.path.isfile(ext):return None
+        try:sr=int(subprocess.run([FFPROBE,"-v","error","-select_streams","a:0","-show_entries","stream=sample_rate","-of","csv=p=0",ext],capture_output=True,text=True,timeout=60,creationflags=CNW if sys.platform=="win32" else 0).stdout.strip().split()[0])
+        except Exception:return None
+        Q=64.0;L=Q*math.ceil(dur/n/Q);n=int(math.ceil(dur/L));prog={};res={}   # (múltiplos de 64 s: la rejilla de bloques de los filtros cae igual)
+        if n<2:return None
+        nref=len(refs)
+        def uno(k):
+            s0=k*L;pre=min(self._TROZO_PRE,s0);ss=s0-pre;ult=(k==n-1)
+            o=os.path.join(tmp,"t%02d.wav"%k)
+            ent="[0:a:0]atrim=start_sample=%d"%int(round(ss*sr))+("" if ult else ":end_sample=%d"%int(round((s0+L+self._TROZO_POST)*sr)))+",asetpts=PTS-STARTPTS"
+            ent+=("[tin0]" if nref==1 else ",asplit=%d"%nref+"".join("[tin%d]"%i for i in range(nref)))+";"
+            cnt=[0]
+            def rep(_m):
+                i=cnt[0];cnt[0]+=1;return "[tin%d]"%i
+            g=ent+re.sub(r"\[0:a:\d+\]",rep,fc)+";[outfinal]atrim=start=%d"%int(pre)+("" if ult else ":end=%d"%int(pre+L))+",asetpts=PTS-STARTPTS[outtrozo]"
+            c=[FFMPEG,"-hide_banner","-y"]+list(pre_in)+["-i",ext]+self._fc_arg(g)+["-map","[outtrozo]","-c:a","pcm_f32le","-rf64","auto","-progress","pipe:1","-nostats",o]
+            def cb_k(t,k=k):
+                prog[k]=max(0.0,float(t))
+                if cb:cb(min(dur,sum(prog.values()))*0.85)
+            res[k]=bool(self._ffm(c,cb_k)) and os.path.isfile(o) and os.path.getsize(o)>1000
+            return o
+        with _TPE(max_workers=n) as ex:outs=list(ex.map(uno,range(n)))
+        try:os.remove(ext)
+        except OSError:pass
+        if self._cancelar.is_set() or not all(res.get(k) for k in range(n)):return None
+        lst=os.path.join(tmp,"lista.txt")
+        with open(lst,"w",encoding="utf-8") as fh:
+            for o in outs:fh.write("file '"+o.replace("\\","/").replace("'","'\\''")+"'\n")
+        return lst
     def _fc_arg(self,fc):
         """con muchos tramos el filtro no cabe en la linea de ordenes (ni en un .bat): va en un archivo"""
         if len(fc)<=6000:return ["-filter_complex",fc]
@@ -13006,6 +14438,9 @@ class AudioProcessorGUI:
         if not hasattr(self,"_tmp_arch"):self._tmp_arch=[]
         self._tmp_arch.append(p);return ["-/filter_complex",p]
     def _ffm(self,cmd,cb=None):
+        """(JMG, 20-11) las salidas se escriben como «nombre.part.ext» y pasan a su nombre solo si FFmpeg acaba bien (_part_cmd)"""
+        cmd,pares=_part_cmd(_sin_drc(cmd));return _part_fin(pares,self._ffm0(cmd,cb))   # también en el .bat: AC3/E-AC3 sin compresión
+    def _ffm0(self,cmd,cb=None):
         # Si hay caracteres no-ASCII en Windows, usar .bat UTF-8
         if sys.platform=="win32":
             hay_nonascii=False
@@ -13353,6 +14788,32 @@ class AudioProcessorGUI:
     def _cfg_path(self):
         return os.path.join(_data_dir(),"config.json")
 
+    _AJ_MIN_ARRIBA=200
+    def _ajustar_pestana(self,e=None):
+        """(JMG, 21-11) el panel de las pestañas, a la altura justa de lo que lleva la pestaña elegida: ni sobra hueco debajo ni falta nada.
+        La parte de arriba (archivos) se queda con el resto y no baja de _AJ_MIN_ARRIBA (si no cabe, sale la barra de la pestaña)"""
+        if getattr(self,"_aj_p",False):return
+        self._aj_p=True
+        try:
+            if hasattr(self,"_vpan_ctx") and self._vpan_ctx()=="vis":return
+            tab=self.nb.nametowidget(self.nb.select())
+            if "log" in str(self.nb.tab(tab,"text")).lower():return
+            inner=getattr(self,"_tab_in",{}).get(str(tab))
+            if inner is None or not inner.winfo_exists():return
+            cv=inner.master;self.root.update_idletasks()
+            if cv.winfo_height()<20 or self.vpan.winfo_height()<200:return
+            sobra=cv.winfo_height()-inner.winfo_reqheight()
+            if abs(sobra)<=2:return
+            y=self.vpan.sash_coord(0)[1];h=self.vpan.winfo_height()
+            nuevo=int(max(self._AJ_MIN_ARRIBA,min(h-80,y+sobra)))
+            if abs(nuevo-y)>1:self.vpan.sash_place(0,0,nuevo)
+        except Exception:pass
+        finally:self._aj_p=False
+    def _ajustar_pestana_luego(self,e=None):
+        try:
+            if getattr(self,"_aj_id",None):self.root.after_cancel(self._aj_id)
+            self._aj_id=self.root.after(60,self._ajustar_pestana)
+        except Exception:pass
     def _vpan_ratio(self):
         try:
             h=self.vpan.winfo_height()
@@ -13440,8 +14901,7 @@ class AudioProcessorGUI:
                 prefs.update({"formato":self.var_formato.get(),"bitrate":self.var_bitrate.get(),"remux":self.var_remux.get(),"remux_subs":self.var_remux_subs.get(),"remux_caps":self.var_remux_caps.get(),"remux_adj":self.var_remux_adj.get(),"remux_meta":self.var_remux_meta.get(),"remux_nucleo":self.var_remux_nucleo.get(),"destino_modo":self.var_destino_modo.get(),"destino_carpeta":self.var_destino_carpeta.get(),"dup_modo":self.var_dup_modo.get(),"upmix":self.var_upmix.get(),"upmix_central":self.var_upmix_central.get(),"upmix_voz":self.var_upmix_voz.get(),"downmix":self.var_downmix.get(),"layout":self.var_layout_sal.get(),"downmix_modo":self.var_downmix_modo.get(),"downmix_lfe":self.var_downmix_lfe.get()})
             prefs.update(getattr(self,"_prefs_x",{}))   # carpeta de FFmpeg y donde esta Jmg VideoEncoder
             prefs["aften"]=dict(getattr(self,"_aften",AFTEN_DEF))   # (JMG, 8-11) codificador AC3 y ajustes de Aften: siempre
-            with open(self._cfg_path(),"w",encoding="utf-8") as f:
-                json.dump(prefs,f,indent=2,ensure_ascii=False)
+            _json_seguro(self._cfg_path(),prefs,indent=2,ensure_ascii=False)
             self._ls(f"[CFG] Guardado ({'completo' if 'formato' in prefs else 'prefs'})")
             return True
         except Exception as e:
@@ -13589,11 +15049,11 @@ class AudioProcessorGUI:
                 getattr(self,f"var_eq{gk}_b{i}_g").set(0)
         for v in (self.var_delay_fl,self.var_delay_fr,self.var_delay_fc,self.var_delay_bl,self.var_delay_br):v.set(0)
         self.var_eq_group.set("front")
-        self.var_bm.set(0);self.var_bm_corte.set(120)
+        self.var_bm.set(0);self.var_bm_corte.set(90)
         self.var_db.set(0);self.var_db_corte.set(90);self.var_separ.set(0)
         self.var_gdin_front.set(0);self.var_gdin_tras.set(0);self.var_gdin_cent.set(0)
         self.var_gdin_vol.set(0)
-        self.var_din_modo.set(0);self.var_din_val.set(1);self.var_din_fc.set(0);self.var_din_ft.set(5);self.var_din_lfe.set(0);self.var_limp.set(0);self.var_declick.set(False);self.var_declip.set(False)
+        self.var_din_modo.set(0);self.var_din_azid.set(0);self.var_din_val.set(1);self.var_din_fc.set(0);self.var_din_ft.set(0);self.var_din_lfe.set(0);self.var_limp.set(0);self.var_declick.set(False);self.var_declip.set(False)
         _sl=self._vt("Sin límite","No limit");self.var_techo_pres.set(_sl);self.var_techo_gd.set(_sl);self.var_techo_pd.set(_sl)
         self.var_din_vol.set(0)
         _f=self._fps_archivo();self.var_fps_from.set(_f);self.var_fps_to.set(_f);self.var_fps_metodo.set("tono");self.var_delay_init.set(0)
@@ -13714,11 +15174,11 @@ class AudioProcessorGUI:
             self.var_techo_pres.set(self._vt("Sin límite","No limit"));self.var_separ.set(0)
 
         elif tab == 2: # Dinámica / Bass (con los Techos de Gama y Procesado)
-            self.var_bm.set(0); self.var_bm_corte.set(120)
+            self.var_bm.set(0); self.var_bm_corte.set(90)
             self.var_db.set(0); self.var_db_corte.set(90)
             self.var_gdin_front.set(0); self.var_gdin_tras.set(0); self.var_gdin_cent.set(0)
             self.var_gdin_vol.set(0)
-            self.var_din_modo.set(0); self.var_din_val.set(1); self.var_din_vol.set(0); self.var_din_fc.set(0); self.var_din_ft.set(5); self.var_din_lfe.set(0)
+            self.var_din_modo.set(0); self.var_din_azid.set(0); self.var_din_val.set(1); self.var_din_vol.set(0); self.var_din_fc.set(0); self.var_din_ft.set(0); self.var_din_lfe.set(0)
             _sl=self._vt("Sin límite","No limit");self.var_techo_gd.set(_sl);self.var_techo_pd.set(_sl)
 
         elif tab == 3: # Visualizacion: borrar la visualizacion y su audio
@@ -13798,7 +15258,7 @@ if __name__=="__main__":
         if srv:threading.Thread(target=_escuchar_instancias,args=(srv,app),daemon=True).start()
         def _ver_ya():
             app._mostrar()
-            if archivos:root.after(100, lambda: (app._addl(archivos),app._traspaso_leer(archivos)))   # (JMG, 18-11) con sus ajustes de audio
+            if archivos:root.after(100, lambda: (app._addl(archivos,True),app._traspaso_leer(archivos)))   # (JMG, 18-11) con sus ajustes de audio
         cerrar_inicio(_ver_ya)
         root.after(4000, app._ver_nueva)   # solo al arrancar el programa de verdad (las pruebas no lo llaman)
         root.after(7000, app._apoyo_aviso)   # (JMG, 13-11) el recordatorio de contribuir, cada 45 días
